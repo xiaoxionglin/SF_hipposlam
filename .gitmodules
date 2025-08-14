@@ -1,0 +1,3 @@
+[submodule "hipposlam_sf"]
+	path = hipposlam_sf
+	url = https://github.com/xiaoxionglin/hipposlam_sf.git
