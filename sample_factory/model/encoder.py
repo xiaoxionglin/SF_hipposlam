@@ -177,11 +177,11 @@ class ResnetEncoder(Encoder):
         input_ch = obs_space.shape[0]
         log.debug("Num input channels: %d", input_ch)
 
-        if cfg.encoder_conv_architecture == "resnet_impala":
+        if cfg.encoder_conv_architecture == "resnet_impala" or cfg.encoder_conv_architecture == "pretrained_resnet":
             # configuration from the IMPALA paper
             resnet_conf = [[16, 2], [32, 2], [32, 2]]
         else:
-            raise NotImplementedError(f"Unknown resnet architecture {cfg.encode_conv_architecture}")
+            raise NotImplementedError(f"Unknown resnet architecture {cfg.encoder_conv_architecture}")
 
         curr_input_channels = input_ch
         layers = []
