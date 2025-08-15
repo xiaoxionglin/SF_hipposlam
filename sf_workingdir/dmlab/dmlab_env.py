@@ -10,7 +10,7 @@ from sample_factory.algo.utils.misc import EPISODIC
 from sample_factory.envs.env_wrappers import PixelFormatChwWrapper, RecordingWrapper
 from sample_factory.utils.typing import PolicyID
 from sample_factory.utils.utils import log, static_vars
-from sf_examples.dmlab.dmlab30 import (
+from sf_workingdir.dmlab.dmlab30 import (
     DMLAB30_LEVELS,
     DMLAB30_LEVELS_THAT_USE_LEVEL_CACHE,
     HUMAN_SCORES,
@@ -18,9 +18,9 @@ from sf_examples.dmlab.dmlab30 import (
     RANDOM_SCORES,
     dmlab30_level_name_to_level,
 )
-from sf_examples.dmlab.dmlab_gym import DmlabGymEnv, dmlab_level_to_level_name
-from sf_examples.dmlab.dmlab_level_cache import DmlabLevelCache, DmlabLevelCaches
-from sf_examples.dmlab.wrappers.reward_shaping import RAW_SCORE_SUMMARY_KEY_SUFFIX, DmlabRewardShapingWrapper
+from sf_workingdir.dmlab.dmlab_gym import DmlabGymEnv, DmlabGymEnv_custom, dmlab_level_to_level_name
+from sf_workingdir.dmlab.dmlab_level_cache import DmlabLevelCache, DmlabLevelCaches
+from sf_workingdir.dmlab.wrappers.reward_shaping import RAW_SCORE_SUMMARY_KEY_SUFFIX, DmlabRewardShapingWrapper
 
 
 def get_dataset_path(cfg):
@@ -36,6 +36,7 @@ class DmLabSpec:
 
 
 DMLAB_ENVS = [
+    DmLabSpec("openfield_map2_fixed_loc3", "hippodunk/openfield_map2_fixed_loc3"),
     DmLabSpec("dmlab_benchmark", "contributed/dmlab30/rooms_collect_good_objects_train"),
     # train a single agent for all 30 DMLab tasks
     DmLabSpec("dmlab_30", [dmlab30_level_name_to_level(lvl) for lvl in DMLAB30_LEVELS]),
@@ -125,7 +126,7 @@ def make_dmlab_env_impl(
     level = task_id_to_level(task_id, spec)
     log.debug("%r level %s task id %d", env_config, level, task_id)
 
-    env = DmlabGymEnv(
+    env = DmlabGymEnv_custom(
         task_id,
         level,
         skip_frames,
