@@ -12,9 +12,9 @@ import numpy as np
 
 from sample_factory.utils.typing import PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, log
-from sf_examples.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_MAX_INSTRUCTION_LEN, DMLAB_VOCABULARY_SIZE
-from sf_examples.dmlab.dmlab_level_cache import DmlabLevelCache
-from sf_examples.dmlab.dmlab_utils import string_to_hash_bucket
+from sf_workingdir.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_MAX_INSTRUCTION_LEN, DMLAB_VOCABULARY_SIZE
+from sf_workingdir.dmlab.dmlab_level_cache import DmlabLevelCache
+from sf_workingdir.dmlab.dmlab_utils import string_to_hash_bucket
 
 ACTION_SET = (
     (0, 0, 0, 1, 0, 0, 0),  # Forward
@@ -295,7 +295,8 @@ class DmlabGymEnv_custom(gym.Env):
         render_mode: Optional[str] = None,
         depth_sensor=True,
         reduced_action_set=False,
-        with_number_instruction=True
+        with_number_instruction=True,
+        with_pos_obs=False
     ):
         
         # self.depth_sensor = depth_sensor
@@ -335,6 +336,9 @@ class DmlabGymEnv_custom(gym.Env):
         observation_format = [self.main_observation]
         if self.with_instructions:
             observation_format += [self.instructions_observation]
+        self.with_pos_obs = with_pos_obs
+        if self.with_pos_obs:
+            observation_format += ["DEBUG.POS.TRANS","DEBUG.POS.ROT"]
 
         config = {
             "width": self.width,
@@ -397,6 +401,19 @@ class DmlabGymEnv_custom(gym.Env):
                 shape=[1],
                 dtype=np.int32,
             )
+        if self.with_pos_obs:
+            self.observation_space.spaces['pos'] = gym.spaces.Box(
+                low=-100,
+                high=2500,
+                shape=[3],
+                dtype=np.float64,
+            )
+            self.observation_space.spaces['rot'] = gym.spaces.Box(
+                low=-1000,
+                high=1000,
+                shape=[3],
+                dtype=np.float64,
+            )
         # if self.depth_sensor:
         #     self.observation_space.spaces['depth'] = gym.spaces.Box(
         #         low=0,
@@ -439,6 +456,8 @@ class DmlabGymEnv_custom(gym.Env):
                     self.instructions[i] = string_to_hash_bucket(word, DMLAB_VOCABULARY_SIZE)
 
             env_obs_dict[self.instructions_observation] = self.instructions
+        # if self.with_pos_obs:
+        #     env_obs_dict
 
         return env_obs_dict
 
