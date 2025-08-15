@@ -741,7 +741,7 @@ def make_img_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
             encoder_load_path = "/home/xiaoxiong/try0120/train_dir/Random3_resnet_DG_relu_SS_RNN/checkpoint_p2/best_000020923_170811392_reward_87.534.pth"
         devicename = cfg.device
         if devicename=='gpu': devicename='cuda'
-        checkpoint = torch.load(encoder_load_path, map_location=devicename)
+        checkpoint = torch.load(encoder_load_path, map_location=devicename, weights_only=False)
 
         full_state_dict = checkpoint["model"]
 
