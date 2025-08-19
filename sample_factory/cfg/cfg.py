@@ -636,6 +636,12 @@ def add_default_env_args(p: ArgumentParser):
         type=str2bool,
         help="Whether to use gym RecordEpisodeStatistics wrapper to keep track of reward",
     )
+    p.add_argument(
+        "--episode_counter",
+        default=False,
+        type=str2bool,
+        help="Add wrapper to each env which will count the number of episodes for each env.",
+    )
 
 
 def add_eval_args(parser):
@@ -700,6 +706,18 @@ def add_eval_args(parser):
         type=str,
         help="Module name used to run training script. Used to generate HF model card",
     )
+    parser.add_argument(
+        "--sample_env_episodes",
+        default=256,
+        type=int,
+        help="Determines how many episodes will be sampled in eval.",
+    )
+    parser.add_argument(
+        "--csv_folder_name",
+        default=None,
+        type=str,
+        help="Path where the evaluation csv will be stored.",
+    )
 
 
 def add_wandb_args(p: ArgumentParser):
@@ -725,6 +743,12 @@ def add_wandb_args(p: ArgumentParser):
         type=str,
         nargs="*",
         help="Tags can help with finding experiments in WandB web console",
+    )
+    p.add_argument(
+        "--wandb_dir",
+        default=join(os.getcwd(), "wandb"),
+        type=str,
+        help="Logging Directory for WandB",
     )
 
 

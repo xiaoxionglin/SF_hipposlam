@@ -9,7 +9,7 @@ from typing import Union
 
 import gymnasium
 
-from sample_factory_online.utils.utils import log
+from sample_factory.utils.utils import log
 
 try:
     import gym  # pytype: disable=import-error
