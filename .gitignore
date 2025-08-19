@@ -149,6 +149,7 @@ sf_examples/vizdoom/doom/multiplayer/tests/_vizdoom/
 
 # extra folders
 sample_factory_online
+sample_factory_local
 inference_worker_online.py
 view.ipynb
 git_diff_output.txt
