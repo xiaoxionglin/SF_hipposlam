@@ -4,6 +4,7 @@ This isn't production code, but feel free to use as an example for your SLURM se
 
 """
 
+
 import os
 import time
 from os.path import join
@@ -83,6 +84,9 @@ def run_slurm(run_description, args):
         partition = f"-p {args.slurm_partition} "
 
     num_cpus = args.slurm_cpus_per_gpu * args.slurm_gpus_per_job
+
+    if num_cpus == 0:
+        num_cpus = args.slurm_cpus_per_gpu
 
     experiments = run_description.generate_experiments(args.train_dir)
     sbatch_files = []

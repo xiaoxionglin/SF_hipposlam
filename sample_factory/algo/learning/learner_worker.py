@@ -44,7 +44,11 @@ def init_learner_process(sf_context: SampleFactoryContext, learner_worker: Learn
     if cfg.device == "gpu":
         cuda_envvars_for_policy(learner_worker.learner.policy_id, "learning")
 
-    init_torch_runtime(cfg)
+    
+    if cfg.device == "gpu":
+        init_torch_runtime(cfg)
+    else:
+        init_torch_runtime(cfg,4)
 
 
 class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
@@ -76,25 +80,32 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self.cache_cleanup_timer.timeout.connect(self._cleanup_cache)
 
     @signal
-    def initialized(self): ...
+    def initialized(self):
+        ...
 
     @signal
-    def model_initialized(self): ...
+    def model_initialized(self):
+        ...
 
     @signal
-    def report_msg(self): ...
+    def report_msg(self):
+        ...
 
     @signal
-    def training_batch_released(self): ...
+    def training_batch_released(self):
+        ...
 
     @signal
-    def finished_training_iteration(self): ...
+    def finished_training_iteration(self):
+        ...
 
     @signal
-    def saved_model(self): ...
+    def saved_model(self):
+        ...
 
     @signal
-    def stop(self): ...
+    def stop(self):
+        ...
 
     def save(self) -> bool:
         if self.learner.save():
