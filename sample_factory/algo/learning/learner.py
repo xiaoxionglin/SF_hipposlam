@@ -567,7 +567,8 @@ class Learner(Configurable):
                 )
             else:
                 rnn_states = mb.rnn_states[::recurrence]
-
+        torch.save(rnn_states, "./train_dir/rnn_states.pt")
+        log.info(f'RNN states: {rnn_states}')
         # calculate RNN outputs for each timestep in a loop
         with self.timing.add_time("bptt"):
             if self.cfg.use_rnn:

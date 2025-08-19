@@ -145,3 +145,10 @@ wandb/
 
 cmake-build*
 sf_examples/vizdoom/doom/multiplayer/tests/_vizdoom/
+
+
+# extra folders
+sample_factory_online
+inference_worker_online.py
+view.ipynb
+git_diff_output.txt
