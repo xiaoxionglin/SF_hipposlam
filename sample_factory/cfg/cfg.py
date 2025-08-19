@@ -512,7 +512,7 @@ def add_model_args(p: ArgumentParser):
     p.add_argument(
         "--encoder_conv_architecture",
         default="convnet_simple",
-        # choices=["convnet_simple", "convnet_impala", "convnet_atari", "resnet_impala"],
+        # choices=["convnet_simple", "convnet_impala", "convnet_atari", "resnet_impala","mobilenet"],
         type=str,
         help="Architecture of the convolutional encoder. See models.py for details. "
         "VizDoom and DMLab examples demonstrate how to define custom architectures.",

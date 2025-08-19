@@ -29,7 +29,7 @@ from sample_factory.utils.utils import log
 
 def preprocess_actions(
     env_info: EnvInfo, actions: Tensor | np.ndarray, to_numpy: bool = True
-) -> Tensor | np.ndarray | List:
+) -> Tensor | np.ndarray | List:    
     """
     We expect actions to have shape [num_envs, num_actions].
     For environments that require only one action per step we just squeeze the second dimension,

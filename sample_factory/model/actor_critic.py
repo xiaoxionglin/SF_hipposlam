@@ -258,7 +258,6 @@ class ActorCriticSeparateWeights(ActorCritic):
             outputs = pack_padded_sequence(unpacked_outputs, lengths, enforce_sorted=False)
         else:
             head_outputs_split = head_output.chunk(num_cores, dim=1)
-            rnn_states_split = rnn_states.chunk(num_cores, dim=1)
 
             outputs, new_rnn_states = [], []
             for i, c in enumerate(self.cores):

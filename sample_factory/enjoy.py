@@ -127,7 +127,7 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     if hasattr(env.unwrapped, "reset_on_init"):
         # reset call ruins the demo recording for VizDoom
         env.unwrapped.reset_on_init = False
-
+    log.info(env.action_space)
     actor_critic = create_actor_critic(cfg, env.observation_space, env.action_space)
     actor_critic.eval()
 

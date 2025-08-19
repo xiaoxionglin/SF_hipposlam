@@ -73,8 +73,8 @@ class AlgoObserver:
         pass
 
 
-MsgHandler = Callable[[Any, dict], None]
-PolicyMsgHandler = Callable[[Any, dict, PolicyID], None]
+MsgHandler = Callable[["Runner", dict], None]
+PolicyMsgHandler = Callable[["Runner", dict, PolicyID], None]
 
 
 class Runner(EventLoopObject, Configurable):
@@ -185,16 +185,20 @@ class Runner(EventLoopObject, Configurable):
 
     # signals emitted by the runner
     @signal
-    def save_periodic(self): ...
+    def save_periodic(self):
+        ...
 
     @signal
-    def save_best(self): ...
+    def save_best(self):
+        ...
 
     @signal
-    def update_training_info(self): ...
+    def update_training_info(self):
+        ...
 
     @signal
-    def save_milestone(self): ...
+    def save_milestone(self):
+        ...
 
     @signal
     def stop(self):
@@ -202,7 +206,8 @@ class Runner(EventLoopObject, Configurable):
         ...
 
     @signal
-    def all_components_stopped(self): ...
+    def all_components_stopped(self):
+        ...
 
     def _handle_restart(self):
         exp_dir = experiment_dir(self.cfg, mkdir=False)

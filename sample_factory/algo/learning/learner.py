@@ -567,8 +567,7 @@ class Learner(Configurable):
                 )
             else:
                 rnn_states = mb.rnn_states[::recurrence]
-        torch.save(rnn_states, "./train_dir/rnn_states.pt")
-        log.info(f'RNN states: {rnn_states}')
+
         # calculate RNN outputs for each timestep in a loop
         with self.timing.add_time("bptt"):
             if self.cfg.use_rnn:
@@ -578,7 +577,11 @@ class Learner(Configurable):
                 del core_output_seq
             else:
                 core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
-
+            if self.cfg.head_l1_coef:
+                # only the first 64 features, assuming bypass
+                l1_loss = self.cfg.head_l1_coef * torch.norm(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], p=1)
+            else:
+                l1_loss = 0
             del head_outputs
 
         num_trajectories = minibatch_size // recurrence
@@ -647,9 +650,15 @@ class Learner(Configurable):
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
 
+
+
+
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
+            
+            policy_loss += l1_loss
+            
             exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
@@ -871,12 +880,10 @@ class Learner(Configurable):
         stats.act_min = var.mb.actions.min()
         stats.act_max = var.mb.actions.max()
 
-        if "adv_mean" in stats:
-            stats.adv_min = var.mb.advantages.min()
-            stats.adv_max = var.mb.advantages.max()
-            stats.adv_std = var.adv_std
-            stats.adv_mean = var.adv_mean
-
+        stats.adv_min = var.mb.advantages.min()
+        stats.adv_max = var.mb.advantages.max()
+        stats.adv_std = var.adv_std
+        stats.adv_mean = var.adv_mean
         stats.max_abs_logprob = torch.abs(var.mb.action_logits).max()
 
         if hasattr(var.action_distribution, "summaries"):
