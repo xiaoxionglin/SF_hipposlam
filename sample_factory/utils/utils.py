@@ -433,8 +433,12 @@ def git_root():
     curr_dir = cwd
     max_depth = 20
     for _ in range(max_depth):
-        if ".git" in os.listdir(curr_dir):
-            return curr_dir
+        try:
+            if ".git" in os.listdir(curr_dir):
+                return curr_dir
+        except PermissionError:
+            log.warn("PermissionError while looking for a git repo: Are you running the experiment from the right folder?")
+            break
 
         parent_dir = os.path.dirname(curr_dir)
         if curr_dir == parent_dir:  # climbed all the way to the root
