@@ -587,6 +587,43 @@ class Learner(Configurable):
         num_trajectories = minibatch_size // recurrence
         assert core_outputs.shape[0] == minibatch_size
 
+
+        locale_verbose = False
+        if getattr(self.cfg, 'rec_distances', None):
+            R = getattr(self.cfg, 'Hippo_R', 8)
+            L = getattr(self.cfg, 'Hippo_L', 48)
+            hippo_n_feature = getattr(self.cfg, 'Hippo_n_feature', 64)
+            # Total length of the shift register.
+            expanded_length = R + L - 1
+            # Core (shift register) output dimension.
+            core_output_size = hippo_n_feature * expanded_length
+            sequence_core = core_outputs[:, :core_output_size].view(minibatch_size, hippo_n_feature, expanded_length)
+            
+
+            progression = torch.argmax(torch.cat(((sequence_core != 0).to(dtype=torch.int), torch.ones(sequence_core.shape[:2] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
+
+            distance_matrix = torch.abs(progression.unsqueeze(-1) - progression.unsqueeze(-2)).to(dtype=torch.float)
+
+            # sum = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+            # value = sum/(distance_matrix.shape[1]**2)
+            # meaned_value = value.mean().detach()
+            
+
+            if locale_verbose:
+                log.info(f'RNN States shape: {core_outputs.shape}')
+                log.info(f'SeququenceCore shape: {sequence_core.shape}')
+                log.info(f'Progression: {progression}')
+                log.info(f'Progression shape: {progression.shape}')
+                log.info(f'Distance Matrix: {distance_matrix}')
+                log.info(f'Distance Matrix shape: {distance_matrix.shape}')
+                # log.info(f'Summed values: {value}')
+                # log.info(f'Summed values shape: {value.shape}')
+        else:
+            distance_matrix = None
+
+
+
+
         with self.timing.add_time("tail"):
             # calculate policy tail outside of recurrent loop
             result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
@@ -674,6 +711,7 @@ class Learner(Configurable):
             adv=adv,
             adv_std=adv_std,
             adv_mean=adv_mean,
+            distance_metric=distance_matrix,
         )
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
@@ -927,6 +965,13 @@ class Learner(Configurable):
 
         for key, value in stats.items():
             stats[key] = to_scalar(value)
+        
+        if var.distance_matrix != None:
+            sum = torch.sum(torch.sum(var.distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+            value = sum/(var.distance_matrix.shape[1]**2)
+            meaned_value, stded_value = torch.std_mean(value)
+            stats.distance_metric = meaned_value.detach()
+            stats.distance_metric_std = stded_value.detach()
 
         return stats
 
