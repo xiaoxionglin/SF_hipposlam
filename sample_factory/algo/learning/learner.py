@@ -966,9 +966,9 @@ class Learner(Configurable):
         for key, value in stats.items():
             stats[key] = to_scalar(value)
         
-        if var.distance_matrix != None:
-            sum = torch.sum(torch.sum(var.distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
-            value = sum/(var.distance_matrix.shape[1]**2)
+        if var.distance_metric != None:
+            summed = torch.sum(torch.sum(var.distance_metric.to(dtype=torch.float),dim=-1),dim=-1)
+            value = summed/(var.distance_metric.shape[1]**2)
             meaned_value, stded_value = torch.std_mean(value)
             stats.distance_metric = meaned_value.detach()
             stats.distance_metric_std = stded_value.detach()
