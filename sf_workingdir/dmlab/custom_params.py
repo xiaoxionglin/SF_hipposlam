@@ -56,5 +56,8 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--refractory", default=0, type=int, help="when using bypassSS_binary, determine whether to block reentry and how much the refractory. 0: no refractory, -1: entire sequence")
 
 
+    p.add_argument("--rec_distances", default=None, type=bool, help="Record the distance between the propagation of each individual sequence")
+
+
     
 

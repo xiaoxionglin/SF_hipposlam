@@ -200,7 +200,7 @@ def dmlab_extra_episodic_stats_processing(runner: Runner, msg: Dict, policy_id: 
 
 
 @static_vars(all_levels=None)
-def dmlab_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: int, summary_writer: SummaryWriter) -> None:
+def dmlab_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: SummaryWriter, env_steps: int) -> None:
     """
     We precisely follow IMPALA repo (scalable_agent) here for the reward calculation.
 
