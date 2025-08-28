@@ -451,6 +451,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                               The first Hippo_n_feature dimensions are processed through the core,
                               and the remaining (if any) are treated as bypass features.
         """
+        log.warn('USING SIMPLESEQUENCEWITHBYPASSCORE')
         super().__init__(cfg)
         self.R = getattr(cfg, 'Hippo_R', 8)
         self.L = getattr(cfg, 'Hippo_L', 48)
@@ -511,11 +512,17 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 # Inject the current core features into the first R positions.
                 injection = curr_core.unsqueeze(0).unsqueeze(-1).expand(1, -1, -1, self.R)
                 tmp_state[:, :, :, :self.R] += injection
+
+                # progression = torch.argmax(torch.cat(((tmp_state != 0).to(dtype=torch.int), torch.ones(tmp_state.shape[:2] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
+                # value = torch.sum(torch.abs(progression.unsqueeze(0) - progression.unsqueeze(1)).to(dtype=torch.float))
+                # log.info(f'Summed values: {value}')
+
                 # Update the new core state for valid indices.
                 new_core_state[:, valid_idx, :, :] = tmp_state
                 # Save the flattened core state (for all batches) at time t.
                 out_core[t] = new_core_state[0].view(B, self.core_output_size)
-
+            # torch.save(out_core, "./train_dir/rnn_states.pt")
+            # log.info(f'RNN states: {out_core}')  
             # Compute the final core part of the new rnn state.
             final_core = new_core_state[0].view(B, self.core_output_size)
             # For bypass, we do not update it recurrently.
@@ -556,7 +563,14 @@ class SimpleSequenceWithBypassCore(ModelCore):
             # Reshape the core part of the rnn state.
             core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # Roll the shift register and zero the new slot.
-            new_core_state = core_state.roll(shifts=1, dims=-1)
+            if torch.nonzero(core_state).shape[0]!=0:
+                # log.info(f'Core State: {core_state}')
+                # torch.save(core_state, "./train_dir/core_state.pt")
+                new_core_state = core_state.roll(shifts=1, dims=-1)
+                # log.info(f'New Core State: {new_core_state}')
+                # torch.save(new_core_state, "./train_dir/new_core_state.pt")
+            else:
+                new_core_state = core_state.roll(shifts=1, dims=-1)
             new_core_state[:, :, 0] = 0
             # Inject the current core input into the first R positions.
             injection = core_input.unsqueeze(-1).expand(-1, -1, self.R)
@@ -663,7 +677,8 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
                 new_core_state[:, valid_idx, :, :] = tmp_state
                 # Save the flattened core state (for all batches) at time t.
                 out_core[t] = new_core_state[0].view(B, self.core_output_size)
-
+            # torch.save(out_core, "./train_dir/rnn_states.pt")
+            # log.info(f'RNN states: {out_core}')  
             # Compute the final core part of the new rnn state.
             final_core = new_core_state[0].view(B, self.core_output_size)
             # For bypass, we do not update it recurrently.
