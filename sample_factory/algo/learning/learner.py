@@ -1120,15 +1120,15 @@ class Learner(Configurable):
             return stats
 
 def default_make_learner_func(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> Learner:
-
-    if cfg.encoder_decoder_share_losses:
-        return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
-    else:
-        return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+    return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+    # if cfg.encoder_decoder_share_losses:
+    #     return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+    # else:
+    #     return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
     
 def create_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> Learner:
     # check if user specified custom actor/critic creation function
-    from sample_factory.algo.utils.context import global_model_factory
+    from sample_factory.algo.utils.model_context import global_learner_factory
 
-    make_learner_func = global_model_factory().make_learner_func
+    make_learner_func = global_learner_factory().make_learner_func
     return make_learner_func(cfg, env_info, policy_versions_tensor, policy_id, param_server)

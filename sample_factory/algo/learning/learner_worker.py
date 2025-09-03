@@ -11,7 +11,8 @@ from torch import Tensor
 
 from sample_factory.algo.learning.batcher import Batcher
 from sample_factory.algo.learning.learner import Learner, create_learner
-from sample_factory.algo.utils.context import SampleFactoryContext, set_global_context
+from sample_factory.algo.utils.env_context import SampleFactoryEnvContext, set_global_env_context
+from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY
@@ -24,8 +25,9 @@ from sample_factory.utils.typing import Config, PolicyID
 from sample_factory.utils.utils import init_file_logger, log
 
 
-def init_learner_process(sf_context: SampleFactoryContext, learner_worker: LearnerWorker):
-    set_global_context(sf_context)
+def init_learner_process(sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, learner_worker: LearnerWorker):
+    set_global_env_context(sf_context_env)
+    set_global_model_context(sf_context_model)
     log.info(f"{learner_worker.object_id}\tpid {os.getpid()}\tparent {os.getppid()}")
 
     # workers should ignore Ctrl+C because the termination is handled in the event loop by a special msg

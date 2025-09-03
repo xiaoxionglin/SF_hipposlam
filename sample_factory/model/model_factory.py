@@ -1,22 +1,13 @@
 from typing import Callable
 
 from sample_factory.model.actor_critic import ActorCritic, default_make_actor_critic_func
-from sample_factory.algo.learning.learner import Learner, default_make_learner_func
 from sample_factory.model.core import ModelCore, default_make_core_func
 from sample_factory.model.decoder import Decoder, default_make_decoder_func
 from sample_factory.model.encoder import Encoder, default_make_encoder_func
-
-from sample_factory.utils.typing import ActionSpace, Config, ObsSpace, PolicyID
-from sample_factory.algo.utils.model_sharing import ParameterServer
-from sample_factory.algo.utils.env_info import EnvInfo
-from torch import Tensor
-
-
+from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sample_factory.utils.utils import log
 
-
 MakeActorCriticFunc = Callable[[Config, ObsSpace, ActionSpace], ActorCritic]
-MakeLearnerFunc = Callable[[Config, EnvInfo, Tensor, PolicyID, ParameterServer], Learner]
 MakeEncoderFunc = Callable[[Config, ObsSpace], Encoder]
 MakeCoreFunc = Callable[[Config, int], ModelCore]
 MakeDecoderFunc = Callable[[Config, int], Decoder]
@@ -30,7 +21,6 @@ class ModelFactory:
         """
 
         self.make_actor_critic_func: MakeActorCriticFunc = default_make_actor_critic_func
-        self.make_learner_func: MakeLearnerFunc = default_make_learner_func
 
         # callables user can specify to generate parts of the policy
         # the computational graph structure is:
@@ -45,13 +35,6 @@ class ModelFactory:
         """
         log.debug(f"register_actor_critic_factory: {make_actor_critic_func}")
         self.make_actor_critic_func = make_actor_critic_func
-
-    def register_learner_factory(self, make_learner_func: MakeLearnerFunc):
-        """
-        Override the default learner with a custom model.
-        """
-        log.debug(f"register_actor_critic_factory: {make_learner_func}")
-        self.make_learner_func = make_learner_func
 
     def register_encoder_factory(self, make_model_encoder_func: MakeEncoderFunc):
         """

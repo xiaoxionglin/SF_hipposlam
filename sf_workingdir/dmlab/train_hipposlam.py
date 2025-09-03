@@ -5,7 +5,7 @@ from typing import Optional
 from tensorboardX import SummaryWriter
 
 from sample_factory.algo.runners.runner import AlgoObserver, Runner
-from sample_factory.algo.utils.context import global_model_factory
+from sample_factory.algo.utils.model_context import global_model_factory
 from sample_factory.algo.utils.misc import ExperimentStatus
 from sample_factory.algo.utils.multiprocessing_utils import get_mp_ctx
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
