@@ -533,6 +533,72 @@ class Learner(Configurable):
 
         mb = buffer[indices]
         return mb
+    
+    def _forward_pass(self, mb: AttrDict, num_invalids: int, return_outputs: tuple[bool, bool, bool] = (False, False, True)):
+        with torch.no_grad(), self.timing.add_time("forward_init"):
+            recurrence: int = self.cfg.recurrence
+            valids = mb.valids
+
+            outputs = AttrDict()
+
+        # calculate policy head outside of recurrent loop
+        with self.timing.add_time("forward_head"):
+            head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
+            minibatch_size: int = head_outputs.size(0)
+            if return_outputs[0]:
+                outputs['head_outputs'] = head_outputs
+
+        # initial rnn states
+        with self.timing.add_time("bptt_initial"):
+            if self.cfg.use_rnn:
+                # this is the only way to stop RNNs from backpropagating through invalid timesteps
+                # (i.e. experience collected by another policy)
+                done_or_invalid = torch.logical_or(mb.dones_cpu, ~valids.cpu()).float()
+                head_output_seq, rnn_states, inverted_select_inds = build_rnn_inputs(
+                    head_outputs,
+                    done_or_invalid,
+                    mb.rnn_states,
+                    recurrence,
+                )
+            else:
+                rnn_states = mb.rnn_states[::recurrence]
+
+        # calculate RNN outputs for each timestep in a loop
+        with self.timing.add_time("bptt"):
+            if self.cfg.use_rnn:
+                with self.timing.add_time("bptt_forward_core"):
+                    core_output_seq, _ = self.actor_critic.forward_core(head_output_seq, rnn_states)
+                core_outputs = build_core_out_from_seq(core_output_seq, inverted_select_inds)
+                del core_output_seq
+            else:
+                core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
+            if self.cfg.head_l1_coef:
+                # only the first 64 features, assuming bypass
+                l1_loss = self.cfg.head_l1_coef * torch.norm(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], p=1)
+            else:
+                l1_loss = 0
+            del head_outputs
+            if return_outputs[1]:
+                outputs['core_outputs'] = core_outputs
+
+        num_trajectories = minibatch_size // recurrence
+        assert core_outputs.shape[0] == minibatch_size
+
+        with self.timing.add_time("tail"):
+            # calculate policy tail outside of recurrent loop
+            result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
+            action_distribution = self.actor_critic.action_distribution()
+            log_prob_actions = action_distribution.log_prob(mb.actions)
+            ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
+
+            # super large/small values can cause numerical problems and are probably noise anyway
+            ratio = torch.clamp(ratio, 0.05, 20.0)
+
+            values = result["values"].squeeze()
+
+            del core_outputs
+            if return_outputs[2]:
+                outputs['values'] = values
 
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
