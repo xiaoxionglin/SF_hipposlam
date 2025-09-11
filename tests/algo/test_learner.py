@@ -4,7 +4,7 @@ import random
 import pytest
 import torch
 
-from sample_factory.algo.learning.learner import Learner
+from sample_factory.algo.learning.learner import BaseLearner
 from sample_factory.algo.sampling.sync_sampling_api import SyncSamplingAPI
 from sample_factory.algo.utils.env_info import extract_env_info
 from sample_factory.algo.utils.make_env import make_env_func_batched
@@ -18,7 +18,7 @@ from sf_examples.mujoco.mujoco_utils import mujoco_available
 from sf_examples.mujoco.train_mujoco import parse_mujoco_cfg, register_mujoco_components
 
 
-def _learner_losses_res(learner: Learner, dataset: AttrDict, num_invalids: int) -> AttrDict:
+def _learner_losses_res(learner: BaseLearner, dataset: AttrDict, num_invalids: int) -> AttrDict:
     # noinspection PyProtectedMember
     (
         action_distribution,
@@ -74,7 +74,7 @@ class TestValidMasks:
         param_server = ParameterServer(policy_id, policy_versions, cfg.serial_mode)
         sampler = SyncSamplingAPI(cfg, env_info, param_servers={policy_id: param_server})
 
-        learner: Learner = Learner(cfg, env_info, policy_versions, policy_id, param_server)
+        learner: BaseLearner = BaseLearner(cfg, env_info, policy_versions, policy_id, param_server)
         init_model_data = learner.init()
         assert learner.actor_critic is not None
         assert init_model_data is not None

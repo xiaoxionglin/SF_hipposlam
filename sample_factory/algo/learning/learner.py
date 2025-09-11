@@ -122,7 +122,7 @@ def model_initialization_data(
     return model_state
 
 
-class Learner(Configurable):
+class BaseLearner(Configurable):
     def __init__(
         self,
         cfg: Config,
@@ -611,39 +611,6 @@ class Learner(Configurable):
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
     ) -> Optional[AttrDict]:
         raise NotImplementedError()
-    
-    def _record_distance_matrix(self, core_outputs, minibatch_size: int):
-        locale_verbose = False
-        if getattr(self.cfg, 'rec_distances', None):
-            R = getattr(self.cfg, 'Hippo_R', 8)
-            L = getattr(self.cfg, 'Hippo_L', 48)
-            hippo_n_feature = getattr(self.cfg, 'Hippo_n_feature', 64)
-            # Total length of the shift register.
-            expanded_length = R + L - 1
-            # Core (shift register) output dimension.
-            core_output_size = hippo_n_feature * expanded_length
-
-            sequence_core = core_outputs[:, :core_output_size].view(minibatch_size, hippo_n_feature, expanded_length)
-
-            progression = torch.argmax(torch.cat(((sequence_core != 0).to(dtype=torch.int), torch.ones(sequence_core.shape[:2] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
-
-            distance_matrix = torch.abs(progression.unsqueeze(-1) - progression.unsqueeze(-2)).to(dtype=torch.float)
-
-            # sum = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
-            # value = sum/(distance_matrix.shape[1]**2)
-            # meaned_value = value.mean().detach()
-            if locale_verbose:
-                log.info(f'RNN States shape: {core_outputs.shape}')
-                log.info(f'SeququenceCore shape: {sequence_core.shape}')
-                log.info(f'Progression: {progression}')
-                log.info(f'Progression shape: {progression.shape}')
-                log.info(f'Distance Matrix: {distance_matrix}')
-                log.info(f'Distance Matrix shape: {distance_matrix.shape}')
-                # log.info(f'Summed values: {value}')
-                # log.info(f'Summed values shape: {value.shape}')
-        else:
-            distance_matrix = None
-        return distance_matrix
 
     def _record_summaries(self, train_loop_vars) -> AttrDict:
         var = train_loop_vars
@@ -869,7 +836,7 @@ class Learner(Configurable):
 
             return stats
 
-class DefaultLearner(Learner):
+class DefaultLearner(BaseLearner):
     def __init__(
         self,
         cfg: Config,
@@ -878,7 +845,9 @@ class DefaultLearner(Learner):
         policy_id: PolicyID,
         param_server: ParameterServer,
     ):
-        Learner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        # We could put these functions in the BaseLearner and always overwrite them.. might change this later
+        # For now this seems a bit cleaner
     
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
@@ -970,10 +939,6 @@ class DefaultLearner(Learner):
             )
             old_values = mb["values"]
             value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
-        
-        
-        with self.timing.add_time("Distance Matrix"):
-            distance_matrix = self._record_distance_matrix(outputs.core_outputs, minibatch_size = outputs.minibatch_size)
 
         loss_summaries = dict(
             ratio=ratio,
@@ -983,7 +948,6 @@ class DefaultLearner(Learner):
             adv=adv,
             adv_std=adv_std,
             adv_mean=adv_mean,
-            distance_metric=distance_matrix,
         )
         del outputs
 
@@ -1161,27 +1125,16 @@ class DefaultLearner(Learner):
 
         return stats_and_summaries
     
-    def _record_summaries(self, train_loop_vars):
-        var = train_loop_vars # TODO: Think of a better way, why is this necessary? Just redirecting pointer?
-        stats = super()._record_summaries(train_loop_vars)
-        if var.distance_metric != None:
-            summed = torch.sum(torch.sum(var.distance_metric.to(dtype=torch.float),dim=-1),dim=-1)
-            value = summed/(var.distance_metric.shape[1]**2)
-            meaned_value, stded_value = torch.std_mean(value)
-            stats.distance_metric = meaned_value.detach()
-            stats.distance_metric_std = stded_value.detach()
-        return stats
-    
 
 
-def default_make_learner_func(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> Learner:
+def default_make_learner_func(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
     return DefaultLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
     # if cfg.encoder_decoder_share_losses:
     #     return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
     # else:
     #     return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
     
-def create_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> Learner:
+def create_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
     # check if user specified custom actor/critic creation function
     from sample_factory.algo.utils.model_context import global_learner_factory
 

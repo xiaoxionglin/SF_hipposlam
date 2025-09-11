@@ -1,6 +1,6 @@
 from typing import Callable
 
-from sample_factory.algo.learning.learner import Learner, default_make_learner_func
+from sample_factory.algo.learning.learner import BaseLearner, default_make_learner_func
 
 from sample_factory.utils.typing import Config, PolicyID
 from sample_factory.algo.utils.model_sharing import ParameterServer
@@ -11,7 +11,7 @@ from torch import Tensor
 from sample_factory.utils.utils import log
 
 
-MakeLearnerFunc = Callable[[Config, EnvInfo, Tensor, PolicyID, ParameterServer], Learner]
+MakeLearnerFunc = Callable[[Config, EnvInfo, Tensor, PolicyID, ParameterServer], BaseLearner]
 
 
 class LearnerFactory:
