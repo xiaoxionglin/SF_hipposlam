@@ -5,7 +5,7 @@ from typing import Optional
 from tensorboardX import SummaryWriter
 
 from sample_factory.algo.runners.runner import AlgoObserver, Runner
-from sample_factory.algo.utils.model_context import global_model_factory
+from sample_factory.algo.utils.model_context import global_model_factory, global_learner_factory
 from sample_factory.algo.utils.misc import ExperimentStatus
 from sample_factory.algo.utils.multiprocessing_utils import get_mp_ctx
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
@@ -25,6 +25,7 @@ from sf_workingdir.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_c
 # from sf_examples.dmlab.dmlab_model import make_dmlab_encoder
 from sf_workingdir.dmlab.custom_core import make_hipposlam_core
 from sf_workingdir.dmlab.custom_encoder import make_hipposlam_encoder
+from sf_workingdir.dmlab.custom_learner import make_hipposlam_learner
 from sf_workingdir.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
 from sf_workingdir.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
 
@@ -47,6 +48,7 @@ def register_dmlab_components(level_caches: Optional[DmlabLevelCaches] = None):
     register_dmlab_envs(level_caches)
     global_model_factory().register_encoder_factory(make_hipposlam_encoder)
     global_model_factory().register_model_core_factory(make_hipposlam_core)
+    global_learner_factory().register_learner_factory(make_hipposlam_learner)
 
 
 class DmlabExtraSummariesObserver(AlgoObserver):

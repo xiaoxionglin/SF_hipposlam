@@ -574,12 +574,6 @@ def add_model_args(p: ArgumentParser):
         help="Whether to share the weights between policy and value function",
     )
     p.add_argument(
-        "--encoder_decoder_share_losses",
-        default=True,
-        type=str2bool,
-        help="Whether to propagate the losses for encoder and decoder separately. Uses different Learner Classes. Subject to change",
-    )
-    p.add_argument(
         "--adaptive_stddev",
         default=True,
         type=str2bool,

@@ -57,6 +57,25 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
 
 
     p.add_argument("--rec_distances", default=None, type=bool, help="Record the distance between the propagation of each individual sequence")
+    p.add_argument(
+        "--encoder_decoder_share_losses",
+        default=True,
+        type=str2bool,
+        help="Whether to propagate the losses for encoder and decoder separately. Uses different Learner Classes. Subject to change",
+    )
+    p.add_argument(
+        "--masked_distance_matrix",
+        default=False,
+        type=str2bool,
+        help="Whether to use the masked version of the distance matrix for calculations. Everything is logged",
+    )
+    p.add_argument(
+        "--distance_learning",
+        default=True,
+        type=str2bool,
+        help="Whether to use the distance matrix for learning instead of the advantage",
+    )
+    
 
 
     

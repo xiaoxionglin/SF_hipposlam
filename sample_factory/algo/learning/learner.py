@@ -924,7 +924,7 @@ class DefaultLearner(BaseLearner):
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
-
+            log.info(f'Advantage Shape: {adv.shape}')
 
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
