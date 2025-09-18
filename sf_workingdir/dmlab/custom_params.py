@@ -75,6 +75,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         type=str2bool,
         help="Whether to use the distance matrix for learning instead of the advantage",
     )
+    p.add_argument(
+        "--normalize_advantage",
+        default=True,
+        type=str2bool,
+        help="When using distance learning wether to normalize the metric or nor. just for testing/understanind purposes",
+    )
     
 
 

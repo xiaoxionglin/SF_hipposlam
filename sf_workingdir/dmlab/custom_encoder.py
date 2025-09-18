@@ -278,6 +278,27 @@ class DGProjection_batchnorm_relu(nn.Module):
 
         return x
 
+class DGProjection_batchnorm_relu_fixed(nn.Module):
+    def __init__(self, in_features: int, out_features: int, intercept=2):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+
+        self.linear = nn.Linear(in_features, out_features, bias=True)
+        # Freeze parameters of the linear layer
+        for param in self.linear.parameters():
+            param.requires_grad = False
+
+        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False, momentum=0.05)
+        self.activation = nn.ReLU()
+        self.intercept = intercept
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear(x)  # Shape: [batch_size, out_features] (fixed)
+        x = self.batchnorm1d(x)
+        x = self.activation(x - self.intercept)
+        return x
+
 class DGProjection_log_softmax(nn.Module):
     def __init__(self, in_features: int, out_features: int):
         """
@@ -615,6 +636,9 @@ class HipposlamEncoder(Encoder):
         elif cfg.DG_name == "batchnorm_relu":
             intercept=getattr(cfg, "DG_BN_intercept",2)
             self.DG_projection = DGProjection_batchnorm_relu(self.encoder_out_size,cfg.Hippo_n_feature,intercept=intercept)
+        elif cfg.DG_name == "batchnorm_relu_fixed":
+            intercept=getattr(cfg, "DG_BN_intercept",2)
+            self.DG_projection = DGProjection_batchnorm_relu_fixed(self.encoder_out_size,cfg.Hippo_n_feature,intercept=intercept)
 
         tmp_out_size = cfg.Hippo_n_feature
 

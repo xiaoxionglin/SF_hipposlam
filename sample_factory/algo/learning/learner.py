@@ -863,7 +863,7 @@ class DefaultLearner(BaseLearner):
 
             valids = mb.valids
 
-        outputs = self._forward_pass(mb = mb, recurrence=recurrence, valids = valids, return_outputs=[True,True,True])
+        outputs = self._forward_pass(mb = mb, recurrence=recurrence, valids = valids, return_outputs=[True,False,True])
 
         with self.timing.add_time("post_forward"):
             action_distribution = self.actor_critic.action_distribution()

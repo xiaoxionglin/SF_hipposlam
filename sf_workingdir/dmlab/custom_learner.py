@@ -108,13 +108,14 @@ class DistanceLearnerSimple(BaseLearner):
                 additional_stats["Distance Matrix Masked"] = masked_distance_matrix
             
             if self.cfg.masked_distance_matrix:
-                adv = torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                adv = -torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
             else:
-                adv = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                adv = -torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
-            adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
-            log.info(f'Advantage Shape: {adv.shape}')
+            if self.cfg.normalize_advantage:
+                adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
+            # log.info(f'Advantage Shape: {adv.shape}')
 
 
         with self.timing.add_time("losses"):
@@ -350,7 +351,7 @@ class DistanceLearnerSimple(BaseLearner):
         return stats
     
 
-class DistanceLearnerSplit(BaseLearner):
+class DistanceRecorder(BaseLearner):
     def __init__(
         self,
         cfg: Config,
@@ -360,7 +361,8 @@ class DistanceLearnerSplit(BaseLearner):
         param_server: ParameterServer,
     ):
         BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
-
+        # We could put these functions in the BaseLearner and always overwrite them.. might change this later
+        # For now this seems a bit cleaner
     def _record_distance_matrix(self, core_outputs, minibatch_size: int, masked_matrix: bool = True):
         locale_verbose = False
         if getattr(self.cfg, 'rec_distances', None) or getattr(self.cfg, 'distance_learning', None):
@@ -436,11 +438,49 @@ class DistanceLearnerSplit(BaseLearner):
                 distance_matrix, masked_distance_matrix = self._record_distance_matrix(outputs.core_outputs, minibatch_size = outputs.minibatch_size, masked_matrix=True)
                 additional_stats["Distance Matrix"] = distance_matrix
                 additional_stats["Distance Matrix Masked"] = masked_distance_matrix
-            
-            if self.cfg.masked_distance_matrix:
-                adv = torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+            if self.cfg.with_vtrace:
+                # V-trace parameters
+                rho_hat = torch.Tensor([self.cfg.vtrace_rho])
+                c_hat = torch.Tensor([self.cfg.vtrace_c])
+
+                ratios_cpu = ratio.cpu()
+                values_cpu = values.cpu()
+                rewards_cpu = mb.rewards_cpu
+                dones_cpu = mb.dones_cpu
+
+                vtrace_rho = torch.min(rho_hat, ratios_cpu)
+                vtrace_c = torch.min(c_hat, ratios_cpu)
+
+                vs = torch.zeros((outputs.num_trajectories * recurrence))
+                adv = torch.zeros((outputs.num_trajectories * recurrence))
+
+                next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
+                next_values /= self.cfg.gamma
+                next_vs = next_values
+
+                for i in reversed(range(self.cfg.recurrence)):
+                    rewards = rewards_cpu[i::recurrence]
+                    dones = dones_cpu[i::recurrence]
+                    not_done = 1.0 - dones
+                    not_done_gamma = not_done * self.cfg.gamma
+
+                    curr_values = values_cpu[i::recurrence]
+                    curr_vtrace_rho = vtrace_rho[i::recurrence]
+                    curr_vtrace_c = vtrace_c[i::recurrence]
+
+                    delta_s = curr_vtrace_rho * (rewards + not_done_gamma * next_values - curr_values)
+                    adv[i::recurrence] = curr_vtrace_rho * (rewards + not_done_gamma * next_vs - curr_values)
+                    next_vs = curr_values + delta_s + not_done_gamma * curr_vtrace_c * (next_vs - next_values)
+                    vs[i::recurrence] = next_vs
+
+                    next_values = curr_values
+
+                targets = vs.to(self.device)
+                adv = adv.to(self.device)
             else:
-                adv = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                # using regular GAE
+                adv = mb.advantages
+                targets = mb.returns
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
@@ -459,11 +499,7 @@ class DistanceLearnerSplit(BaseLearner):
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
             old_values = mb["values"]
-            # value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
-            value_loss = torch.zeros(1)
-        
-        
-        
+            value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
 
         loss_summaries = dict(
             ratio=ratio,
@@ -548,7 +584,7 @@ class DistanceLearnerSplit(BaseLearner):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
                     critic_loss = value_loss
-                    loss: Tensor = actor_loss #+ critic_loss
+                    loss: Tensor = actor_loss + critic_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -686,4 +722,7 @@ def make_hipposlam_learner(cfg: Config, env_info: EnvInfo, policy_versions_tenso
     if cfg.distance_learning:
         return DistanceLearnerSimple(cfg, env_info, policy_versions_tensor, policy_id, param_server)
     else:
-        return DefaultLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        if cfg.rec_distances:
+            return DistanceRecorder(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        else:
+            return DefaultLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
