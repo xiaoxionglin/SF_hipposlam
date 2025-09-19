@@ -544,7 +544,13 @@ class BaseLearner(Configurable):
     
 
     
-    def _forward_pass(self, mb: AttrDict, recurrence: int, valids, return_outputs: tuple[bool, bool, bool] = (True, True, True)):
+    def _forward_pass(
+            self, 
+            mb: AttrDict, 
+            recurrence: int, 
+            valids, 
+            return_outputs: tuple[bool, bool, bool] = (True, True, True)
+            ):
         with torch.no_grad(), self.timing.add_time("forward_init"):
             outputs = AttrDict()
 
