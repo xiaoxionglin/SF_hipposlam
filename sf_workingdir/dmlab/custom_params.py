@@ -77,9 +77,15 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--alternate_learning",
-        default=True,
+        default=False,
         type=str2bool,
         help="When True alternates the learning of encoder and decoder. Only works in combination with distance_learning right now",
+    )
+    p.add_argument(
+        "--combined_learning",
+        default=False,
+        type=str2bool,
+        help="When True combines the advantage and distance metric. Only works in combination with distance_learning right now",
     )
     p.add_argument(
         "--normalize_advantage",
