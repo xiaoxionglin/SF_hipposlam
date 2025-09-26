@@ -243,6 +243,9 @@ class BaseLearner(Configurable):
         self.optimizer = optimizer_cls(params, **optimizer_kwargs)
 
         self.load_from_checkpoint(self.policy_id)
+        self._register_forward_hooks()
+        self._register_backward_hooks()
+        ### Is this the right place to register all hooks for both new initializations & restarts? ###
         self.param_server.init(self.actor_critic, self.train_step, self.device)
         self.policy_versions_tensor[self.policy_id] = self.train_step
 
@@ -319,6 +322,14 @@ class BaseLearner(Configurable):
     def _after_optimizer_step(self):
         """A hook to be called after each optimizer step."""
         self.train_step += 1
+    
+    def _register_forward_hooks(self):
+        log.info("Trying to register forward hooks, but no hooks are implemented. Continuing without forward hooks.")
+        pass
+
+    def _register_backward_hooks(self):
+        log.info("Trying to register backward hooks, but no hooks are implemented. Continuing without backward hooks.")
+        pass
 
     def _get_checkpoint_dict(self):
         checkpoint = {

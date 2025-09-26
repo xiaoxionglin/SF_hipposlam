@@ -28,5 +28,5 @@ class LearnerFactory:
         """
         Override the default learner with a custom model.
         """
-        log.debug(f"register_actor_critic_factory: {make_learner_func}")
+        log.debug(f"register_learner_factory: {make_learner_func}")
         self.make_learner_func = make_learner_func

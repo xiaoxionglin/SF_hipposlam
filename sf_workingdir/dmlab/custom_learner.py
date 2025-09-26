@@ -142,7 +142,7 @@ class BaseDistanceRecorder(BaseLearner):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
                     critic_loss = value_loss
-                    loss: Tensor = actor_loss #+ critic_loss
+                    loss: Tensor = actor_loss + critic_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -370,7 +370,7 @@ class DistanceLearnerSimple(BaseDistanceRecorder):
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
 
-class DistanceLearnerAlternating(BaseDistanceRecorder):
+class DistanceLearnerEncoderDecoderSeparate(BaseDistanceRecorder):
     def __init__(
         self,
         cfg: Config,
@@ -381,13 +381,24 @@ class DistanceLearnerAlternating(BaseDistanceRecorder):
     ):
         BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
     
+    @staticmethod
+    def _make_grad_flip_hook(name):
+        def _grad_flip_hook(module, grad_output: Tensor) -> Tensor:
+            # log.debug(f"Flipping gradients on module {name}")
+            return tuple(-g if g is not None else None for g in grad_output)
+        return _grad_flip_hook
+    
+    def _register_backward_hooks(self):
+        self.actor_critic.encoder.DG_projection.register_full_backward_pre_hook(DistanceLearnerEncoderDecoderSeparate._make_grad_flip_hook("encoder"))
+        log.info("Succesfully registered backward hooks.")
+
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
     ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
         additional_stats = AttrDict()
 
         # for param_group in self.optimizer.param_groups:
-        log.info(f'Parameter Group: {self.optimizer.param_groups[-1]}')
+        # log.info(f'Parameter Group: {self.optimizer.param_groups[-1]}')
 
         with torch.no_grad(), self.timing.add_time("losses_init"):
             recurrence: int = self.cfg.recurrence
@@ -400,11 +411,6 @@ class DistanceLearnerAlternating(BaseDistanceRecorder):
 
             valids = mb.valids
         
-        train_encoder = random.getrandbits(1) # 1 trains Encoder, 0 trains decoder (Performance: https://stackoverflow.com/a/6824868)
-        if train_encoder:
-            grad_context = [True,True,False]
-        else:
-            grad_context = [False,True,True]
         outputs = self._forward_pass(
             mb = mb, 
             recurrence=recurrence, 
@@ -436,9 +442,6 @@ class DistanceLearnerAlternating(BaseDistanceRecorder):
                 adv = torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
             else:
                 adv = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
-
-            if not train_encoder:
-                adv *= -1
             
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             if self.cfg.normalize_advantage:
@@ -746,10 +749,10 @@ class DistanceRecorder(BaseDistanceRecorder):
 
 def make_hipposlam_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
     if cfg.distance_learning:
-        if cfg.alternate_learning:
+        if not cfg.encoder_decoder_share_losses:
             if cfg.combined_learning:
-                log.warn("Using alternate & combined learning at the same time! Choosing AlternateLearner.")
-            return DistanceLearnerAlternating(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+                log.warn("Using encoder_decoder_share_losses & combined learning at the same time! Choosing DistanceLearnerEncoderDecoderSeparate.")
+            return DistanceLearnerEncoderDecoderSeparate(cfg, env_info, policy_versions_tensor, policy_id, param_server)
         elif cfg.combined_learning:
             return DistanceLearnerCombined(cfg, env_info, policy_versions_tensor, policy_id, param_server)
         else:
