@@ -865,7 +865,7 @@ class DistanceLearnerMaster(BaseDistanceRecorder):
                 # targets = torch.zeros(1)
             if self.cfg.use_internal:
                 if self.cfg.metric == 'minimum':
-                    metric = -torch.sum(torch.min(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                    metric = -torch.sum(torch.min(masked_distance_matrix.to(dtype=torch.float),dim=-1).values,dim=-1)
                 elif self.cfg.metric == 'masked_sum':
                     metric = -torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
                 elif self.cfg.metric == 'sum':
