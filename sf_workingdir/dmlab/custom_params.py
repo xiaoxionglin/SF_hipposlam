@@ -93,6 +93,24 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         type=str2bool,
         help="When using distance learning wether to normalize the metric or nor. just for testing/understanind purposes",
     )
+    p.add_argument(
+        "--use_internal",
+        default=False,
+        type=str2bool,
+        help="Use internal metric for optimization. Can be combined with external using --use_external. Can be injected at reward level or advantage level using --injection_level (not implemented yet!)",
+    )
+    p.add_argument(
+        "--use_external",
+        default=True,
+        type=str2bool,
+        help="Use external reward for optimization. Can be combined with internal using --use_internal",
+    )
+    p.add_argument(
+        "--metric",
+        default=None,
+        type=str,
+        help="Define which metric should be used for optimization of internal structure. Options currently include 'sum', 'masked_sum', 'minimum'",
+    )
     
 
 

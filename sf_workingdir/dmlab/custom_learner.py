@@ -439,9 +439,9 @@ class DistanceLearnerEncoderDecoderSeparate(BaseDistanceRecorder):
                 additional_stats["Distance Matrix Masked"] = masked_distance_matrix
             
             if self.cfg.masked_distance_matrix:
-                adv = torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                adv = -torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
             else:
-                adv = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                adv = -torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
             
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             if self.cfg.normalize_advantage:
@@ -743,20 +743,186 @@ class DistanceRecorder(BaseDistanceRecorder):
         del outputs
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+
+
+
+
+
+class DistanceLearnerMaster(BaseDistanceRecorder):
+    def __init__(
+        self,
+        cfg: Config,
+        env_info: EnvInfo,
+        policy_versions_tensor: Tensor,
+        policy_id: PolicyID,
+        param_server: ParameterServer,
+    ):
+        BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
+
+    @staticmethod
+    def make_grad_flip_hook(name): # name useful for debugging only. This wrapper preserves the variable for the actual hook
+        def grad_flip_hook(module, grad_output: Tensor) -> Tensor: # full_backward_pre_hook needs these inputs.
+            # log.debug(f"Flipping gradients on module {name}")
+            return tuple(-g if g is not None else None for g in grad_output)
+        return grad_flip_hook
     
+    def _register_backward_hooks(self):
+        if self.cfg.encoder_decoder_share_losses:
+            pass
+        else:
+            self.actor_critic.encoder.DG_projection.register_full_backward_pre_hook(DistanceLearnerMaster.make_grad_flip_hook("encoder.DG_projection"))
+            log.info("Succesfully registered backward hooks.")
+
+    def _calculate_losses(
+        self, mb: AttrDict, num_invalids: int
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+        additional_stats = AttrDict()
+        with torch.no_grad(), self.timing.add_time("losses_init"):
+            recurrence: int = self.cfg.recurrence
+
+            # PPO clipping
+            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
+            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
+            clip_ratio_low = 1.0 / clip_ratio_high
+            clip_value = self.cfg.ppo_clip_value
+
+            valids = mb.valids
+
+        outputs = self._forward_pass(
+            mb = mb, 
+            recurrence=recurrence, 
+            valids = valids, 
+            # grad_context=[True,True,True],
+            return_outputs=[True,True,True])
+
+        additional_stats["Head Output"] = outputs.head_outputs[:,:getattr(self.cfg, 'Hippo_n_feature', 64)]
+
+        with self.timing.add_time("post_forward"):
+            action_distribution = self.actor_critic.action_distribution()
+            log_prob_actions = action_distribution.log_prob(mb.actions)
+            ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
+
+            # super large/small values can cause numerical problems and are probably noise anyway
+            ratio = torch.clamp(ratio, 0.05, 20.0)
+
+            values = outputs.result["values"].squeeze()
+        
+
+        # these computations are not the part of the computation graph
+        with torch.no_grad(), self.timing.add_time("advantages_returns"):
+            with self.timing.add_time("Distance Matrix"):
+                distance_matrix, masked_distance_matrix = self._record_distance_matrix(outputs.core_outputs, minibatch_size = outputs.minibatch_size, masked_matrix=True)
+                additional_stats["Distance Matrix"] = distance_matrix
+                additional_stats["Distance Matrix Masked"] = masked_distance_matrix
+            
+            if self.cfg.use_external:
+                if self.cfg.with_vtrace:
+                    # V-trace parameters
+                    rho_hat = torch.Tensor([self.cfg.vtrace_rho])
+                    c_hat = torch.Tensor([self.cfg.vtrace_c])
+
+                    ratios_cpu = ratio.cpu()
+                    values_cpu = values.cpu()
+                    rewards_cpu = mb.rewards_cpu
+                    dones_cpu = mb.dones_cpu
+
+                    vtrace_rho = torch.min(rho_hat, ratios_cpu)
+                    vtrace_c = torch.min(c_hat, ratios_cpu)
+
+                    vs = torch.zeros((outputs.num_trajectories * recurrence))
+                    adv = torch.zeros((outputs.num_trajectories * recurrence))
+
+                    next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
+                    next_values /= self.cfg.gamma
+                    next_vs = next_values
+
+                    for i in reversed(range(self.cfg.recurrence)):
+                        rewards = rewards_cpu[i::recurrence]
+                        dones = dones_cpu[i::recurrence]
+                        not_done = 1.0 - dones
+                        not_done_gamma = not_done * self.cfg.gamma
+
+                        curr_values = values_cpu[i::recurrence]
+                        curr_vtrace_rho = vtrace_rho[i::recurrence]
+                        curr_vtrace_c = vtrace_c[i::recurrence]
+
+                        delta_s = curr_vtrace_rho * (rewards + not_done_gamma * next_values - curr_values)
+                        adv[i::recurrence] = curr_vtrace_rho * (rewards + not_done_gamma * next_vs - curr_values)
+                        next_vs = curr_values + delta_s + not_done_gamma * curr_vtrace_c * (next_vs - next_values)
+                        vs[i::recurrence] = next_vs
+
+                        next_values = curr_values
+
+                    targets = vs.to(self.device)
+                    adv = adv.to(self.device)
+                else:
+                    # using regular GAE
+                    adv = mb.advantages
+                    targets = mb.returns
+            else:
+                # Could this cause problems down the line?
+                adv = torch.zeros(outputs.minibatch_size)
+                # targets = torch.zeros(1)
+            if self.cfg.use_internal:
+                if self.cfg.metric == 'minimum':
+                    metric = -torch.sum(torch.min(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                elif self.cfg.metric == 'masked_sum':
+                    metric = -torch.sum(torch.sum(masked_distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                elif self.cfg.metric == 'sum':
+                    metric = -torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
+                else:
+                    raise NotImplementedError()
+                adv += metric
+
+            adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
+            if self.cfg.normalize_advantage:
+                adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
+            # log.info(f'Advantage Shape: {adv.shape}')
+
+        with self.timing.add_time("losses"):
+            # noinspection PyTypeChecker
+            policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
+            l1_loss = self._l1_loss(outputs.head_outputs)
+            
+            policy_loss += l1_loss
+            
+            exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
+            kl_old, kl_loss = self.kl_loss_func(
+                self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
+            )
+            old_values = mb["values"]
+            if self.cfg.use_external:
+                value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+            else:
+                value_loss = torch.zeros(1)
+
+        loss_summaries = dict(
+            ratio=ratio,
+            clip_ratio_low=clip_ratio_low,
+            clip_ratio_high=clip_ratio_high,
+            values=outputs.result["values"],
+            adv=adv,
+            adv_std=adv_std,
+            adv_mean=adv_mean,
+            additional_stats=additional_stats,
+        )
+        del outputs
+
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
 
 
 
 def make_hipposlam_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
     if cfg.distance_learning:
-        if not cfg.encoder_decoder_share_losses:
-            if cfg.combined_learning:
-                log.warn("Using encoder_decoder_share_losses & combined learning at the same time! Choosing DistanceLearnerEncoderDecoderSeparate.")
-            return DistanceLearnerEncoderDecoderSeparate(cfg, env_info, policy_versions_tensor, policy_id, param_server)
-        elif cfg.combined_learning:
-            return DistanceLearnerCombined(cfg, env_info, policy_versions_tensor, policy_id, param_server)
-        else:
-            return DistanceLearnerSimple(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        return DistanceLearnerMaster(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        # if not cfg.encoder_decoder_share_losses:
+        #     if cfg.combined_learning:
+        #         log.warn("Using encoder_decoder_share_losses & combined learning at the same time! Choosing DistanceLearnerEncoderDecoderSeparate.")
+        #     return DistanceLearnerEncoderDecoderSeparate(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        # elif cfg.combined_learning:
+        #     return DistanceLearnerCombined(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        # else:
+        #     return DistanceLearnerSimple(cfg, env_info, policy_versions_tensor, policy_id, param_server)
     else:
         if cfg.rec_distances:
             return DistanceRecorder(cfg, env_info, policy_versions_tensor, policy_id, param_server)
