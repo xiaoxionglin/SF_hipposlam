@@ -80,6 +80,9 @@ class BaseDistanceRecorder(BaseLearner):
         else:
             return distance_matrix, masked_distance_matrix
     
+    def _manipulate_gradients(self):
+        pass
+    
     
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -191,6 +194,8 @@ class BaseDistanceRecorder(BaseLearner):
                         p.grad = None
 
                     loss.backward()
+
+                    self._manipulate_gradients()
                     
                     if self.cfg.max_grad_norm > 0.0:
                         with timing.add_time("clip"):
@@ -933,17 +938,39 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
     @staticmethod
     def make_grad_flip_hook(name): # name useful for debugging only. This wrapper preserves the variable for the actual hook
-        def grad_flip_hook(module, grad_output: Tensor) -> Tensor: # full_backward_pre_hook needs these inputs.
-            # log.debug(f"Flipping gradients on module {name}")
+        def grad_flip_hook(module: torch.nn.Module, grad_output: tuple[Tensor, ...]) -> tuple[Tensor, ...]: # full_backward_pre_hook needs these inputs.
+            log.debug(f"Flipping gradients on module {name}")
+            print(f"Flipping gradients on module {name}")
             return tuple(-g if g is not None else None for g in grad_output)
         return grad_flip_hook
     
-    def _register_backward_hooks(self):
+    def _register_forward_hooks(self):
+        return super()._register_forward_hooks()
         if self.cfg.encoder_decoder_share_losses:
-            pass
+            return super()._register_forward_hooks()
         else:
-            self.actor_critic.encoder.DG_projection.register_full_backward_pre_hook(DistanceLearnerMaster.make_grad_flip_hook("encoder.DG_projection"))
+            return
+            handle = self.actor_critic.encoder.DG_projection.register_full_backward_pre_hook(DistanceLearnerMaster.make_grad_flip_hook("encoder.DG_projection"))
+            log.debug(handle)
             log.info("Succesfully registered backward hooks.")
+            log.info(self.actor_critic.encoder.DG_projection._forward_pre_hooks)   # should contain a handle id
+            log.info(self.actor_critic.encoder.DG_projection._backward_pre_hooks) # should contain a handle id for full‑backward‑pre
+    
+    def flip_module_grads(self, module: torch.nn.Module):
+        """
+        Multiply the .grad of every Parameter belonging to *module*
+        by -1, in‑place.
+        """
+        log.warn(f'Flipping gradients on module {module}')
+        for p in module.parameters():
+            if p.grad is not None:
+                # log.debug(p.grad)
+                p.grad.detach_()          # detach from graph – we only need the tensor
+                p.grad.mul_(-1)           # in‑place negation
+    
+    def _manipulate_gradients(self):
+        # flip the gradients of the Encoder
+        self.flip_module_grads(self.actor_critic.encoder.DG_projection)
 
     def _extra_encoder_loss(self, head_outputs, rnn_states, progression, minibatch_size):
         sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
@@ -958,7 +985,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         reward_mask = mask_new_activations & (mask_active_now.sum(dim=2) == self.cfg.Hippo_R)
         reward_mask = F.pad(reward_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
         loss_reward = -(head_outputs * reward_mask).pow(2).sum() / (reward_mask.sum() + 1e-6)
-        log.info(f'ADDITIONAL LOSSES: {loss_penalty}; {loss_reward}')
+        log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}')
         return loss_penalty, loss_reward
 
     def _calculate_losses(
@@ -1011,7 +1038,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
                     ratios_cpu = ratio.cpu()
                     values_cpu = values.cpu()
-                    rewards_cpu = mb.rewards_cpu #CHANGE HERE SUFFICIENT?
+                    rewards_cpu = mb.rewards_cpu 
                     
                     dones_cpu = mb.dones_cpu
 
@@ -1145,7 +1172,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 for r, c in lookup.items():
                     vec = distance_matrix[r, c]
                     vec_mask = vec!=0
-                    internal_reward[r] = vec[vec_mask].min() if vec_mask.numel() > 0 else fallback_value
+                    internal_reward[r] = vec[vec_mask].min() if vec_mask.any() else fallback_value
                     # log.info(f'Adjusting internal reward at position {r,c} to be the minimum of {distance_matrix[r, c]}')
                 buff["rewards"] = (-internal_reward.view(*rnn_state_shape[:2])[:, 1:]+baseline)*self.cfg.reward_scale
                 # log.info(f'Internal Reward2: {buff["rewards"][:,:10]}')
@@ -1230,7 +1257,6 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
             return buff, dataset_size, num_invalids
-
 
 
 def make_hipposlam_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
