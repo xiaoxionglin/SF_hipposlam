@@ -146,6 +146,9 @@ wandb/
 cmake-build*
 sf_examples/vizdoom/doom/multiplayer/tests/_vizdoom/
 
+# png
+**/*.png
+
 
 # extra folders
 sample_factory_online
@@ -153,3 +156,9 @@ sample_factory_local
 inference_worker_online.py
 view.ipynb
 git_diff_output.txt
+online_data_telemetry
+
+
+# obsidian
+.obsidian
+private/
