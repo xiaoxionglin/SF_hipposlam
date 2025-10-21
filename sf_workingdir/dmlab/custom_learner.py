@@ -23,6 +23,8 @@ from sample_factory.utils.dicts import iterate_recursively
 
 from sample_factory.algo.learning.learner import BaseLearner, DefaultLearner
 
+from sf_workingdir.dmlab.custom_core import straight_through_binary
+
 
 
 class BaseDistanceRecorder(BaseLearner):
@@ -961,32 +963,40 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         Multiply the .grad of every Parameter belonging to *module*
         by -1, in‑place.
         """
-        log.warn(f'Flipping gradients on module {module}')
+        # log.warn(f'Flipping gradients on module {module}')
         for p in module.parameters():
             if p.grad is not None:
                 # log.debug(p.grad)
                 p.grad.detach_()          # detach from graph – we only need the tensor
                 p.grad.mul_(-1)           # in‑place negation
+                # log.debug(p.grad)
     
     def _manipulate_gradients(self):
         # flip the gradients of the Encoder
         self.flip_module_grads(self.actor_critic.encoder.DG_projection)
 
     def _extra_encoder_loss(self, head_outputs, rnn_states, progression, minibatch_size):
+        straight_through = straight_through_binary(head_outputs)
+        # log.debug(f'Straight_Through: {straight_through}')
         sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
         # log.info(f'Shapes: {head_outputs.shape}, {sequence_core.shape}')
         # Punishment for multi-activation
         mask_new_activations = (progression == 0)
         penalty_mask = mask_new_activations & (mask_new_activations.sum(dim=1) > 1).unsqueeze(1)
         penalty_mask = F.pad(penalty_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_penalty = (head_outputs * penalty_mask).pow(2).sum() / (penalty_mask.sum() + 1e-6)
+        loss_penalty = -(straight_through * penalty_mask).sum() / (penalty_mask.sum() + 1e-6)
         # Reward for new activations of not used sequences
         mask_active_now = (sequence_core != 0)
         reward_mask = mask_new_activations & (mask_active_now.sum(dim=2) == self.cfg.Hippo_R)
         reward_mask = F.pad(reward_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_reward = -(head_outputs * reward_mask).pow(2).sum() / (reward_mask.sum() + 1e-6)
-        log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}')
-        return loss_penalty, loss_reward
+        loss_reward = (straight_through * reward_mask).sum() / (reward_mask.sum() + 1e-6)
+        # Reward for not used sequences in this mini batch
+        batch_mask = mask_active_now.sum(dim=2) > 0
+        batch_mask = torch.logical_not(torch.any(batch_mask, dim=0))
+        batch_mask = F.pad(batch_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0).unsqueeze(0)
+        batch_penalty = (straight_through * batch_mask).sum() / (batch_mask.sum() + 1e-6)
+        log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}; {batch_penalty.item()}')
+        return loss_penalty, loss_reward, batch_penalty
 
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
@@ -1103,9 +1113,15 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
             l1_loss = self._l1_loss(outputs.head_outputs)
 
-            encoder_penalty_loss, encoder_reward_loss = self._extra_encoder_loss(outputs.head_outputs, mb["rnn_states"].clone(), progression, outputs.minibatch_size)
+            encoder_penalty_loss, encoder_reward_loss, encoder_batch_loss = self._extra_encoder_loss(outputs.head_outputs, mb["rnn_states"].clone(), progression, outputs.minibatch_size)
 
-            encoder_losses = l1_loss + encoder_reward_loss + encoder_penalty_loss
+            additional_stats["intrinsic_rewards"] = mb["rewards"]
+            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
+            additional_stats["encoder_reward_loss"] = encoder_reward_loss
+            additional_stats["batch_penalty_loss"] = encoder_batch_loss
+            
+
+            encoder_losses = l1_loss + encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
             
             policy_loss += encoder_losses
             
@@ -1257,6 +1273,18 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
             return buff, dataset_size, num_invalids
+    
+    def _record_summaries(self, train_loop_vars):
+        var = train_loop_vars # TODO: Think of a better way, why is this necessary? Just redirecting pointer?
+        stats = super()._record_summaries(train_loop_vars)
+
+        stats.intrinsic_rewards = var.additional_stats["intrinsic_rewards"].mean().detach().float()
+        stats.encoder_penalty_loss = var.additional_stats["encoder_penalty_loss"].detach().float()
+        stats.encoder_reward_loss = var.additional_stats["encoder_reward_loss"].detach().float()
+        stats.batch_penalty_loss = var.additional_stats["batch_penalty_loss"].detach().float()
+
+        return stats
+    
 
 
 def make_hipposlam_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
