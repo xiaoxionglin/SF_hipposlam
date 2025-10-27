@@ -74,6 +74,14 @@ def initialize_level_cache(cfg: Config, mp_ctx: BaseContext) -> Optional[DmlabLe
     caches = make_dmlab_caches(experiment_dir(cfg), all_levels, num_policies, level_cache_dir, mp_ctx)
     return caches
 
+def maybe_overwrite_rnn_size(cfg):
+    if getattr(cfg, 'cli_args.rnn_size', 0) == 0:
+        R = getattr(cfg, 'Hippo_R', 8)
+        L = getattr(cfg, 'Hippo_L', 48)
+        hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        rnn_size = hippo_n_feature * (R + L - 1) + 13
+        cfg.cli_args["rnn_size"] = rnn_size
+        cfg.rnn_size = rnn_size
 
 def parse_dmlab_args(argv=None, evaluation=False):
     parser, cfg = parse_sf_args(argv, evaluation=evaluation)
@@ -81,6 +89,7 @@ def parse_dmlab_args(argv=None, evaluation=False):
     add_dmlab_env_args(parser)
     hipposlam_override_defaults(parser)
     cfg = parse_full_cfg(parser, argv)
+    maybe_overwrite_rnn_size(cfg)
     return cfg
 
 
