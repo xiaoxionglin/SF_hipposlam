@@ -36,7 +36,7 @@ class DmLabSpec:
 
 
 DMLAB_ENVS = [
-    DmLabSpec("openfield_map2_fixed_loc3", "hippodunk/openfield_map2_fixed_loc3"),
+    DmLabSpec("openfield_map2_fixed_loc3", "openfield_map2_fixed_loc3"),
     DmLabSpec("dmlab_benchmark", "contributed/dmlab30/rooms_collect_good_objects_train"),
     # train a single agent for all 30 DMLab tasks
     DmLabSpec("dmlab_30", [dmlab30_level_name_to_level(lvl) for lvl in DMLAB30_LEVELS]),
