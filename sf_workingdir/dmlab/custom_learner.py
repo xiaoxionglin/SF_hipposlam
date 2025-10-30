@@ -1341,7 +1341,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         self.flip_module_grads(self.actor_critic.encoder.DG_projection)
 
     def _extra_encoder_loss(self, head_outputs, rnn_states, progression, minibatch_size):
-        straight_through = straight_through_binary(head_outputs)
+        straight_through = head_outputs #straight_through_binary(head_outputs)
         # log.debug(f'Straight_Through: {straight_through}')
         sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
         # log.info(f'Shapes: {head_outputs.shape}, {sequence_core.shape}')
@@ -1349,19 +1349,22 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         mask_new_activations = (progression == 0)
         penalty_mask = mask_new_activations & (mask_new_activations.sum(dim=1) > 1).unsqueeze(1)
         penalty_mask = F.pad(penalty_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_penalty = -(straight_through * penalty_mask).sum() / (penalty_mask.sum() + 1e-6)
+        loss_penalty = (straight_through * penalty_mask).sum(dim=1).mean(dim=0)#.sum() / (penalty_mask.sum() + 1e-6)
         # Reward for new activations of not used sequences
         mask_active_now = (sequence_core != 0)
         reward_mask = mask_new_activations & (mask_active_now.sum(dim=2) == self.cfg.Hippo_R)
         reward_mask = F.pad(reward_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_reward = (straight_through * reward_mask).sum() / (reward_mask.sum() + 1e-6)
+        loss_reward = -(straight_through * reward_mask).sum(dim=1).mean(dim=0)#.sum() / (reward_mask.sum() + 1e-6)
         # Reward for not used sequences in this mini batch
         batch_mask = mask_active_now.sum(dim=2) > 0
         batch_mask = torch.logical_not(torch.any(batch_mask, dim=0))
         batch_mask = F.pad(batch_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0).unsqueeze(0)
-        batch_penalty = (straight_through * batch_mask).sum() / (batch_mask.sum() + 1e-6)
+        batch_penalty = -(straight_through * batch_mask).sum(dim=1).mean(dim=0)#.sum() / (batch_mask.sum() + 1e-6)
         log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}; {batch_penalty.item()}')
         return loss_penalty, loss_reward, batch_penalty
+    
+    def _encoder_loss(self, head_outputs:Tensor, rewards:Tensor) -> Tensor:
+        return (rewards.unsqueeze(1) * head_outputs[:,:getattr(self.cfg, 'Hippo_n_feature', 64)]).sum(dim=1).mean(dim=0) #/ (rewards.sum() + 1e-6)
 
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
@@ -1405,50 +1408,9 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 additional_stats["Distance Matrix"] = distance_matrix
                 additional_stats["Distance Matrix Masked"] = masked_distance_matrix
             
-            if self.cfg.with_vtrace:
-                # V-trace parameters
-                rho_hat = torch.Tensor([self.cfg.vtrace_rho])
-                c_hat = torch.Tensor([self.cfg.vtrace_c])
-
-                ratios_cpu = ratio.cpu()
-                values_cpu = values.cpu()
-                rewards_cpu = mb.rewards_cpu 
-                
-                dones_cpu = mb.dones_cpu
-
-                vtrace_rho = torch.min(rho_hat, ratios_cpu)
-                vtrace_c = torch.min(c_hat, ratios_cpu)
-
-                vs = torch.zeros((outputs.num_trajectories * recurrence))
-                adv = torch.zeros((outputs.num_trajectories * recurrence))
-
-                next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
-                next_values /= self.cfg.gamma
-                next_vs = next_values
-
-                for i in reversed(range(self.cfg.recurrence)):
-                    rewards = rewards_cpu[i::recurrence]
-                    dones = dones_cpu[i::recurrence]
-                    not_done = 1.0 - dones
-                    not_done_gamma = not_done * self.cfg.gamma
-
-                    curr_values = values_cpu[i::recurrence]
-                    curr_vtrace_rho = vtrace_rho[i::recurrence]
-                    curr_vtrace_c = vtrace_c[i::recurrence]
-
-                    delta_s = curr_vtrace_rho * (rewards + not_done_gamma * next_values - curr_values)
-                    adv[i::recurrence] = curr_vtrace_rho * (rewards + not_done_gamma * next_vs - curr_values)
-                    next_vs = curr_values + delta_s + not_done_gamma * curr_vtrace_c * (next_vs - next_values)
-                    vs[i::recurrence] = next_vs
-
-                    next_values = curr_values
-
-                targets = vs.to(self.device)
-                adv = adv.to(self.device)
-            else:
-                # using regular GAE
-                adv = mb.advantages
-                targets = mb.returns
+            # using regular GAE
+            adv = mb.advantages
+            targets = mb.returns
             
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
@@ -1456,34 +1418,51 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
             # log.info(f'Advantage Shape: {adv.shape}')
 
-        with self.timing.add_time("losses"):
+        with self.timing.add_time("decoder_losses"):
             # noinspection PyTypeChecker
+            old_values = mb["values"]
+            value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
-            l1_loss = self._l1_loss(outputs.head_outputs)
 
-            encoder_penalty_loss, encoder_reward_loss, encoder_batch_loss = self._extra_encoder_loss(outputs.head_outputs, mb["rnn_states"].clone(), progression, outputs.minibatch_size)
-
-            additional_stats["intrinsic_rewards"] = mb["rewards"]
-            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
-            additional_stats["encoder_reward_loss"] = encoder_reward_loss
-            additional_stats["batch_penalty_loss"] = encoder_batch_loss
-            
-            if self.cfg.extra_encoder_losses:
-                encoder_losses = l1_loss + encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
-            else:
-                encoder_losses = l1_loss
-            
-            policy_loss += encoder_losses
-            
             exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
+
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
-            old_values = mb["values"]
-            if self.cfg.use_external:
-                value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
+
+        with self.timing.add_time("second_forward_pass"):
+            head_outputs_only = self._forward_pass(
+            mb = mb, 
+            recurrence=recurrence, 
+            valids = valids, 
+            return_outputs=[True,True,True],
+            head_only = True
+            )
+        
+        with self.timing.add_time("encoder_losses"):
+            # noinspection PyTypeChecker
+            encoder_loss = self._encoder_loss(head_outputs_only.head_outputs, mb["rewards"])
+            l1_loss = self._l1_loss(head_outputs_only.head_outputs)
+
+            if self.cfg.extra_encoder_losses:
+                (
+                    encoder_penalty_loss, 
+                    encoder_reward_loss, 
+                    encoder_batch_loss
+                 ) = self._extra_encoder_loss(
+                     head_outputs_only.head_outputs, 
+                     mb["rnn_states"].clone(), 
+                     progression, 
+                     head_outputs_only.minibatch_size
+                     )
+                encoder_loss = l1_loss + encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
             else:
-                value_loss = torch.zeros(1)
+                encoder_loss = l1_loss
+            additional_stats["intrinsic_rewards"] = mb["rewards"]
+            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
+            additional_stats["encoder_reward_loss"] = encoder_reward_loss
+            additional_stats["batch_reward_loss"] = encoder_batch_loss
+            
 
         loss_summaries = dict(
             ratio=ratio,
@@ -1497,7 +1476,191 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         )
         del outputs
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, encoder_loss, loss_summaries
+
+
+    def _train(
+        self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
+    ) -> Optional[AttrDict]:
+        timing = self.timing
+        with torch.no_grad():
+            early_stopping_tolerance = 1e-6
+            early_stop = False
+            prev_epoch_actor_loss = 1e9
+            epoch_actor_losses = [0] * self.cfg.num_batches_per_epoch
+
+            # recent mean KL-divergences per minibatch, this used by LR schedulers
+            recent_kls = []
+
+            if self.cfg.with_vtrace:
+                assert (
+                    self.cfg.recurrence == self.cfg.rollout and self.cfg.recurrence > 1
+                ), "V-trace requires to recurrence and rollout to be equal"
+
+            num_sgd_steps = 0
+            stats_and_summaries: Optional[AttrDict] = None
+
+            # When it is time to record train summaries, we randomly sample epoch/batch for which the summaries are
+            # collected to get equal representation from different stages of training.
+            # Half the time, we record summaries from the very large step of training. There we will have the highest
+            # KL-divergence and ratio of PPO-clipped samples, which makes this data even more useful for analysis.
+            # Something to consider: maybe we should have these last-batch metrics in a separate summaries category?
+            with_summaries = self._should_save_summaries()
+            if np.random.rand() < 0.5:
+                summaries_epoch = np.random.randint(0, self.cfg.num_epochs)
+                summaries_batch = np.random.randint(0, self.cfg.num_batches_per_epoch)
+            else:
+                summaries_epoch = self.cfg.num_epochs - 1
+                summaries_batch = self.cfg.num_batches_per_epoch - 1
+
+            assert self.actor_critic.training
+
+        for epoch in range(self.cfg.num_epochs):
+            with timing.add_time("epoch_init"):
+                if early_stop:
+                    break
+
+                force_summaries = False
+                minibatches = self._get_minibatches(batch_size, experience_size)
+
+            for batch_num in range(len(minibatches)):
+                with torch.no_grad(), timing.add_time("minibatch_init"):
+                    indices = minibatches[batch_num]
+
+                    # current minibatch consisting of short trajectory segments with length == recurrence
+                    mb = self._get_minibatch(gpu_buffer, indices)
+
+                    # enable syntactic sugar that allows us to access dict's keys as object attributes
+                    mb = AttrDict(mb)
+
+                with timing.add_time("calculate_losses"):
+                    (
+                        action_distribution,
+                        policy_loss,
+                        exploration_loss,
+                        kl_old,
+                        kl_loss,
+                        value_loss,
+                        encoder_loss,
+                        loss_summaries,
+                    ) = self._calculate_losses(mb, num_invalids)
+
+                with timing.add_time("losses_postprocess"):
+                    # noinspection PyTypeChecker
+                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
+                    critic_loss = value_loss
+                    decoder_loss: Tensor = actor_loss + critic_loss
+
+                    epoch_actor_losses[batch_num] = float(actor_loss)
+
+                    high_loss = 30.0
+                    if torch.abs(decoder_loss) > high_loss:
+                        log.warning(
+                            "High loss value: decl:%.4f encl:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
+                            to_scalar(decoder_loss),
+                            to_scalar(encoder_loss),
+                            to_scalar(policy_loss),
+                            to_scalar(value_loss),
+                            to_scalar(exploration_loss),
+                            to_scalar(kl_loss),
+                        )
+
+                        # perhaps something weird is happening, we definitely want summaries from this step
+                        force_summaries = True
+
+                with torch.no_grad(), timing.add_time("kl_divergence"):
+                    # if kl_old is not None it is already calculated above
+                    if kl_old is None:
+                        # calculate KL-divergence with the behaviour policy action distribution
+                        old_action_distribution = get_action_distribution(
+                            self.actor_critic.action_space,
+                            mb.action_logits,
+                        )
+                        kl_old = action_distribution.kl_divergence(old_action_distribution)
+                        kl_old = masked_select(kl_old, mb.valids, num_invalids)
+
+                    kl_old_mean = float(kl_old.mean().item())
+                    recent_kls.append(kl_old_mean)
+                    if kl_old.numel() > 0 and kl_old.max().item() > 100:
+                        log.warning(f"KL-divergence is very high: {kl_old.max().item():.4f}")
+
+                # update the weights
+                with timing.add_time("update"):
+                    # following advice from https://youtu.be/9mS1fIYj1So set grad to None instead of optimizer.zero_grad()
+                    for p in self.actor_critic.parameters():
+                        p.grad = None
+
+                    decoder_loss.backward()
+                    
+                    for p in self.actor_critic.encoder.DG_projection.parameters():
+                        p.grad = None
+                    # This second backward pass only works if the encoder loss was calculated on a separate forward pass
+                    encoder_loss.backward()
+
+                    loss = decoder_loss + encoder_loss
+
+                    # self._manipulate_gradients()
+                    
+                    if self.cfg.max_grad_norm > 0.0:
+                        with timing.add_time("clip"):
+                            torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
+
+                    curr_policy_version = self.train_step  # policy version before the weight update
+
+                    actual_lr = self.curr_lr
+                    if num_invalids > 0:
+                        # if we have masked (invalid) data we should reduce the learning rate accordingly
+                        # this prevents a situation where most of the data in the minibatch is invalid
+                        # and we end up doing SGD with super noisy gradients
+                        actual_lr = self.curr_lr * (experience_size - num_invalids) / experience_size
+                    self._apply_lr(actual_lr)
+
+                    with self.param_server.policy_lock:
+                        self.optimizer.step()
+
+                    num_sgd_steps += 1
+
+                with torch.no_grad(), timing.add_time("after_optimizer"):
+                    self._after_optimizer_step()
+
+                    if self.lr_scheduler.invoke_after_each_minibatch():
+                        self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
+
+                    # collect and report summaries
+                    should_record_summaries = with_summaries
+                    should_record_summaries &= epoch == summaries_epoch and batch_num == summaries_batch
+                    should_record_summaries |= force_summaries
+                    if should_record_summaries:
+                        # hacky way to collect all of the intermediate variables for summaries
+                        summary_vars = {**locals(), **loss_summaries}
+                        stats_and_summaries = self._record_summaries(AttrDict(summary_vars))
+                        del summary_vars
+                        force_summaries = False
+
+                    # make sure everything (such as policy weights) is committed to shared device memory
+                    synchronize(self.cfg, self.device)
+                    # this will force policy update on the inference worker (policy worker)
+                    self.policy_versions_tensor[self.policy_id] = self.train_step
+
+            # end of an epoch
+            if self.lr_scheduler.invoke_after_each_epoch():
+                self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
+
+            new_epoch_actor_loss = float(np.mean(epoch_actor_losses))
+            loss_delta_abs = abs(prev_epoch_actor_loss - new_epoch_actor_loss)
+            if loss_delta_abs < early_stopping_tolerance:
+                early_stop = True
+                log.debug(
+                    "Early stopping after %d epochs (%d sgd steps), loss delta %.7f",
+                    epoch + 1,
+                    num_sgd_steps,
+                    loss_delta_abs,
+                )
+                break
+
+            prev_epoch_actor_loss = new_epoch_actor_loss
+
+        return stats_and_summaries
     
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
@@ -1628,6 +1791,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
             return buff, dataset_size, num_invalids
     
+
+    
     def _record_summaries(self, train_loop_vars):
         var = train_loop_vars # TODO: Think of a better way, why is this necessary? Just redirecting pointer?
         stats = super()._record_summaries(train_loop_vars)
@@ -1635,7 +1800,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.intrinsic_rewards = var.additional_stats["intrinsic_rewards"].mean().detach().float()
         stats.encoder_penalty_loss = var.additional_stats["encoder_penalty_loss"].detach().float()
         stats.encoder_reward_loss = var.additional_stats["encoder_reward_loss"].detach().float()
-        stats.batch_penalty_loss = var.additional_stats["batch_penalty_loss"].detach().float()
+        stats.batch_reward_loss = var.additional_stats["batch_reward_loss"].detach().float()
 
         return stats
     

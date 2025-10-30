@@ -560,7 +560,8 @@ class BaseLearner(Configurable):
             mb: AttrDict, 
             recurrence: int, 
             valids, 
-            return_outputs: tuple[bool, bool, bool] = (True, True, True)
+            return_outputs: tuple[bool, bool, bool] = (True, True, True),
+            head_only: bool = False
             ):
         with torch.no_grad(), self.timing.add_time("forward_init"):
             outputs = AttrDict()
@@ -572,6 +573,8 @@ class BaseLearner(Configurable):
             outputs["minibatch_size"] = minibatch_size
             if return_outputs[0]:
                 outputs['head_outputs'] = head_outputs
+            if head_only:
+                return outputs
 
         # initial rnn states
         with self.timing.add_time("bptt_initial"):
