@@ -1455,9 +1455,10 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                      progression, 
                      head_outputs_only.minibatch_size
                      )
-                encoder_loss = l1_loss + encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
+                encoder_loss += l1_loss + encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
             else:
-                encoder_loss = l1_loss
+                encoder_loss += l1_loss
+            encoder_loss *= self.cfg.encoder_grad_coeff
             additional_stats["intrinsic_rewards"] = mb["rewards"]
             additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
             additional_stats["encoder_reward_loss"] = encoder_reward_loss
