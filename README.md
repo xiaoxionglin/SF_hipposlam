@@ -1,3 +1,27 @@
+# quick start
+
+
+- mamba create -n "yourname" python=3.10.12
+	- older versions also work until 3.8
+- pip install `magic dmlab wheel`
+- pip uninstall numpy
+- pip install dm_env
+- (fork samplefactory)
+- clone samplefactory
+- cd samplefactory
+- pip install -e .\[dev,mujoco,atari,vizdoom\] -> arguments depend on which environment, we do not need any
+
+when encountering numpy.ndarray error, `pip uninstall numpy` and `pip install -e .` again
+
+patch deepmindlab (transparent reward, custom maps)
+```
+cd deepmindlab_patch
+chmod +x patch_deepmindlab.sh
+./patch_deepmindlab.sh
+```
+
+
+
 [![tests](https://github.com/alex-petrenko/sample-factory/actions/workflows/test-ci.yml/badge.svg?branch=master)](https://github.com/alex-petrenko/sample-factory/actions/workflows/test-ci.yml)
 [![codecov](https://codecov.io/gh/alex-petrenko/sample-factory/branch/master/graph/badge.svg?token=9EHMIU5WYV)](https://codecov.io/gh/alex-petrenko/sample-factory)
 [![pre-commit](https://github.com/alex-petrenko/sample-factory/actions/workflows/pre-commit.yml/badge.svg?branch=master)](https://github.com/alex-petrenko/sample-factory/actions/workflows/pre-commit.yml)
