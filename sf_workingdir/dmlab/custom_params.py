@@ -58,12 +58,6 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
 
     p.add_argument("--rec_distances", default=None, type=bool, help="Record the distance between the propagation of each individual sequence")
     p.add_argument(
-        "--encoder_decoder_share_losses",
-        default=True,
-        type=str2bool,
-        help="Whether to propagate the losses for encoder and decoder separately. Uses different Learner Classes. Subject to change",
-    )
-    p.add_argument(
         "--masked_distance_matrix",
         default=False,
         type=str2bool,
@@ -74,18 +68,6 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         default=True,
         type=str2bool,
         help="Whether to use the distance matrix for learning instead of the advantage",
-    )
-    p.add_argument(
-        "--alternate_learning",
-        default=False,
-        type=str2bool,
-        help="When True alternates the learning of encoder and decoder. Only works in combination with distance_learning right now",
-    )
-    p.add_argument(
-        "--combined_learning",
-        default=False,
-        type=str2bool,
-        help="When True combines the advantage and distance metric. Only works in combination with distance_learning right now",
     )
     p.add_argument(
         "--normalize_advantage",
@@ -106,11 +88,42 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="Use external reward for optimization. Can be combined with internal using --use_internal",
     )
     p.add_argument(
+        "--extra_encoder_losses",
+        default=True,
+        type=str2bool,
+        help="Use additional encoder losses. Might differentiate in the future",
+    )
+    p.add_argument(
+        "--double_value",
+        default=False,
+        type=str2bool,
+        help="Use two values, one trained on external, the other on internal reward. Which one is used is defined by use_internl/use_external",
+    )
+    p.add_argument(
+        "--reset_critic",
+        default=False,
+        type=str2bool,
+        help="Reset all critic parameters. Useful after pre-training.",
+    )
+    p.add_argument(
+        "--reset_decoder",
+        default=False,
+        type=str2bool,
+        help="Reset all Decoder parameters (This includes Action-Parametrization/Value-Estimator Layers as well). Useful after pre-training.",
+    )
+    p.add_argument(
+        "--encoder_grad_coeff",
+        default=1.,
+        type=float,
+        help="A factor by which the gradients of the encoder get multiplied. Only works when the gradients get flipped/",
+    )
+    p.add_argument(
         "--metric",
         default=None,
         type=str,
         help="Define which metric should be used for optimization of internal structure. Options currently include 'sum', 'masked_sum', 'minimum'",
     )
+    p.add_argument("--load_model_path", default=None, type=str, help="Path to specific .pth file for the entire model")
     
 
 

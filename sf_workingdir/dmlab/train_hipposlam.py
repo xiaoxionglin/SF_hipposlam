@@ -26,6 +26,7 @@ from sf_workingdir.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_c
 from sf_workingdir.dmlab.custom_core import make_hipposlam_core
 from sf_workingdir.dmlab.custom_encoder import make_hipposlam_encoder
 from sf_workingdir.dmlab.custom_learner import make_hipposlam_learner
+from sf_workingdir.dmlab.custom_actor_critic import make_hipposlam_actor_critic
 from sf_workingdir.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
 from sf_workingdir.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
 
@@ -48,6 +49,9 @@ def register_dmlab_components(level_caches: Optional[DmlabLevelCaches] = None):
     register_dmlab_envs(level_caches)
     global_model_factory().register_encoder_factory(make_hipposlam_encoder)
     global_model_factory().register_model_core_factory(make_hipposlam_core)
+
+    global_model_factory().register_actor_critic_factory(make_hipposlam_actor_critic)
+
     global_learner_factory().register_learner_factory(make_hipposlam_learner)
 
 
