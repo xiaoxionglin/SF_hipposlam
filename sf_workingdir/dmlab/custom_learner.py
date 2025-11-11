@@ -15,6 +15,7 @@ from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.tensor_dict import TensorDict, shallow_recursive_copy
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.algo.utils.rl_utils import gae_advantages
+from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, STATS_KEY, TRAIN_STATS, EPISODIC, memory_stats
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.typing import ActionDistribution, Config, PolicyID
 from sample_factory.utils.utils import log
@@ -67,7 +68,7 @@ class BaseDistanceRecorder(BaseLearner):
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
         name_prefix = dict(latest="checkpoint", best="best")[self.cfg.load_checkpoint_kind]
         checkpoints = self.get_checkpoints(self.checkpoint_dir(self.cfg, policy_id), pattern=f"{name_prefix}_*")
-        if self.cfg.load_model_path:
+        if self.cfg.load_model_path and load_progress: # Hacky way to prevent this injection from happening every time pbt replaces a policy
             log.debug(f'Injecting custom load_model_path')
             checkpoints.append(self._replace_checkpoint_policy_id(self.cfg.load_model_path, policy_id))
         checkpoint_dict = self.load_checkpoint(checkpoints, self.device)
@@ -77,10 +78,12 @@ class BaseDistanceRecorder(BaseLearner):
             log.debug("Loading model from checkpoint")
             # if we're replacing our policy with another policy (under PBT), let's not reload the env_steps
             self._load_state(checkpoint_dict, load_progress=load_progress)
-            self._maybe_reset_critic()
-            self._maybe_reset_decoder()
+            if load_progress: #see above
+                self._maybe_reset_critic()
+                self._maybe_reset_decoder()
     
-    def _calculate_sequence_core(self, rnn_state, minibatch_size):
+    def _calculate_sequence_core(self, rnn_state:Tensor, minibatch_size:int|tuple):
+    #     log.debug(f'minibatch_size: {minibatch_size}')
         R = getattr(self.cfg, 'Hippo_R', 8)
         L = getattr(self.cfg, 'Hippo_L', 48)
         hippo_n_feature = getattr(self.cfg, 'Hippo_n_feature', 64)
@@ -89,13 +92,16 @@ class BaseDistanceRecorder(BaseLearner):
         # Core (shift register) output dimension.
         core_output_size = hippo_n_feature * expanded_length
         return rnn_state[:, :core_output_size].view(minibatch_size, hippo_n_feature, expanded_length), expanded_length
+    
+    def _calculate_progression(self, sequence_core):
+        return torch.argmax(torch.cat(((sequence_core != 0).to(dtype=torch.int), torch.ones(sequence_core.shape[:-1] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
 
     def _record_distance_matrix(self, core_outputs, minibatch_size: int, masked_matrix: bool = True, return_progression: bool = False):
         locale_verbose = False
         if getattr(self.cfg, 'rec_distances', None) or getattr(self.cfg, 'distance_learning', None):
             sequence_core, _ = self._calculate_sequence_core(core_outputs, minibatch_size)
 
-            progression = torch.argmax(torch.cat(((sequence_core != 0).to(dtype=torch.int), torch.ones(sequence_core.shape[:2] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
+            progression = self._calculate_progression(sequence_core)
             distance_matrix = torch.abs(progression.unsqueeze(-1) - progression.unsqueeze(-2)).to(dtype=torch.float)
 
             # sum = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
@@ -329,6 +335,40 @@ class BaseDistanceRecorder(BaseLearner):
             stats.activated_sequences_min = activated_sequences.min().detach()
             stats.activated_sequences_std = stded_activated_sequences.detach()
         return stats
+    
+    """def train(self, batch: TensorDict) -> Optional[Dict]:
+        with self.timing.add_time("misc"):
+            self._maybe_update_cfg()
+            self._maybe_load_policy()
+
+        with self.timing.add_time("prepare_batch"):
+            buff, experience_size, num_invalids = self._prepare_batch(batch)
+
+        if num_invalids >= experience_size:
+            if self.cfg.with_pbt:
+                log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
+            else:
+                log.error(f"Learner {self.policy_id=} received an entire batch of invalid data, skipping...")
+            return None
+        else:
+            with self.timing.add_time("train"):
+                train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
+
+            # multiply the number of samples by frameskip so that FPS metrics reflect the number
+            # of environment steps actually simulated
+            if self.cfg.summaries_use_frameskip:
+                self.env_steps += experience_size * self.env_info.frameskip
+            else:
+                self.env_steps += experience_size
+
+            stats = {LEARNER_ENV_STEPS: self.env_steps, POLICY_ID_KEY: self.policy_id}
+            if train_stats is not None:
+                if train_stats is not None: #?
+                    stats[TRAIN_STATS] = train_stats
+                    stats[EPISODIC]["distance_metric] = train_stats["distance_metric"]
+                stats[STATS_KEY] = memory_stats("learner", self.device)
+
+            return stats""" # Assigning stats[EPISODIC] here does not seem to work and you will not be able to stop the program anymore by keyboard interupt
 
 
 class DistanceLearnerSimple(BaseDistanceRecorder):
@@ -776,9 +816,9 @@ class DistanceRecorder(BaseDistanceRecorder):
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
-            l1_loss = self._l1_loss(outputs.head_outputs)
+            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
             
-            policy_loss += l1_loss
+            # policy_loss += l1_loss
             
             exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
             kl_old, kl_loss = self.kl_loss_func(
@@ -1340,31 +1380,52 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         # flip the gradients of the Encoder
         self.flip_module_grads(self.actor_critic.encoder.DG_projection)
 
-    def _extra_encoder_loss(self, head_outputs, rnn_states, progression, minibatch_size):
+    def _extra_encoder_loss(self, head_outputs, rnn_states, progression, minibatch_size, valids, num_invalids):
         straight_through = head_outputs #straight_through_binary(head_outputs)
         # log.debug(f'Straight_Through: {straight_through}')
         sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
         # log.info(f'Shapes: {head_outputs.shape}, {sequence_core.shape}')
         # Punishment for multi-activation
         mask_new_activations = (progression == 0)
+        mask_active_now = (sequence_core != 0)
+        mask_new_activations = mask_new_activations & (mask_active_now.sum(dim=2) >= 2*self.cfg.Hippo_R) # Mask sequences that got activated multiple times in quick succession
         penalty_mask = mask_new_activations & (mask_new_activations.sum(dim=1) > 1).unsqueeze(1)
         penalty_mask = F.pad(penalty_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_penalty = (straight_through * penalty_mask).sum(dim=1).mean(dim=0)#.sum() / (penalty_mask.sum() + 1e-6)
+        max_mask = straight_through != straight_through.max(dim=-1, keepdim=True).values
+        loss_penalty = (straight_through * max_mask * penalty_mask).sum(dim=1)#.sum() / (penalty_mask.sum() + 1e-6)
+        loss_penalty = masked_select(loss_penalty, valids, num_invalids).mean(dim=0)
         # Reward for new activations of not used sequences
-        mask_active_now = (sequence_core != 0)
         reward_mask = mask_new_activations & (mask_active_now.sum(dim=2) == self.cfg.Hippo_R)
         reward_mask = F.pad(reward_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_reward = -(straight_through * reward_mask).sum(dim=1).mean(dim=0)#.sum() / (reward_mask.sum() + 1e-6)
+        loss_reward = (straight_through * reward_mask).sum(dim=1)#.sum() / (reward_mask.sum() + 1e-6)
+        loss_reward = -masked_select(loss_reward, valids, num_invalids).mean(dim=0)
         # Reward for not used sequences in this mini batch
         batch_mask = mask_active_now.sum(dim=2) > 0
         batch_mask = torch.logical_not(torch.any(batch_mask, dim=0))
         batch_mask = F.pad(batch_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0).unsqueeze(0)
-        batch_penalty = -(straight_through * batch_mask).sum(dim=1).mean(dim=0)#.sum() / (batch_mask.sum() + 1e-6)
-        log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}; {batch_penalty.item()}')
+        batch_penalty = (straight_through * batch_mask).sum(dim=1)#.sum() / (batch_mask.sum() + 1e-6)
+        batch_penalty = -masked_select(batch_penalty, valids, num_invalids).mean(dim=0)
+        # log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}; {batch_penalty.item()}')
         return loss_penalty, loss_reward, batch_penalty
     
-    def _encoder_loss(self, head_outputs:Tensor, rewards:Tensor) -> Tensor:
-        return (rewards.unsqueeze(1) * head_outputs[:,:getattr(self.cfg, 'Hippo_n_feature', 64)]).sum(dim=1).mean(dim=0) #/ (rewards.sum() + 1e-6)
+    def _encoder_loss(self, head_outputs:Tensor, rewards:Tensor, rnn_states, progression, minibatch_size, valids, num_invalids) -> Tensor:
+        sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
+        mask_new_activations = (progression == 0)
+        mask_active_now = (sequence_core != 0)
+        mask_new_activations = mask_new_activations & (mask_active_now.sum(dim=2) >= 2*self.cfg.Hippo_R) # Mask sequences that got activated multiple times in quick succession
+        encoder_loss = (rewards.unsqueeze(1) * head_outputs[:,:getattr(self.cfg, 'Hippo_n_feature', 64)] * mask_new_activations).sum(dim=1) #/ (rewards.sum() + 1e-6)
+        return -masked_select(encoder_loss, valids, num_invalids).mean(dim=0)
+    
+    def _extra_decoder_loss(self, ratio, rnn_states, progression, minibatch_size, clip_ratio_low, clip_ratio_high, valids, num_invalids):
+        clipped_ratio = torch.clamp(ratio, clip_ratio_low, clip_ratio_high)
+        sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
+        mask_new_activations = (progression == 0)
+        mask_active_now = (sequence_core != 0)
+        reward_mask = (mask_new_activations & (mask_active_now.sum(dim=2) >= 2*self.cfg.Hippo_R)).sum(dim=1)
+        loss_unclipped = ratio * reward_mask
+        loss_clipped = clipped_ratio * reward_mask
+        extra_decoder_loss = torch.min(loss_unclipped, loss_clipped)
+        return masked_select(extra_decoder_loss, valids, num_invalids).mean(dim=0)
 
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
@@ -1404,7 +1465,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         # these computations are not the part of the computation graph
         with torch.no_grad(), self.timing.add_time("advantages_returns"):
             with self.timing.add_time("Distance Matrix"):
-                distance_matrix, masked_distance_matrix, progression = self._record_distance_matrix(outputs.core_outputs, minibatch_size = outputs.minibatch_size, masked_matrix=True, return_progression=True)
+                distance_matrix, masked_distance_matrix, progression = self._record_distance_matrix(outputs.core_outputs.detach(), minibatch_size = outputs.minibatch_size, masked_matrix=True, return_progression=True)
                 additional_stats["Distance Matrix"] = distance_matrix
                 additional_stats["Distance Matrix Masked"] = masked_distance_matrix
             
@@ -1426,6 +1487,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
             exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
 
+            extra_decoder_loss = self._extra_decoder_loss(ratio, outputs.core_outputs.detach(), progression, outputs.minibatch_size, clip_ratio_low, clip_ratio_high, valids, num_invalids)
+
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
@@ -1441,8 +1504,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         
         with self.timing.add_time("encoder_losses"):
             # noinspection PyTypeChecker
-            encoder_loss = self._encoder_loss(head_outputs_only.head_outputs, mb["rewards"])
-            l1_loss = self._l1_loss(head_outputs_only.head_outputs)
+            encoder_loss = self._encoder_loss(head_outputs_only.head_outputs, mb["rewards_encoder"], outputs.core_outputs.detach(), progression, outputs.minibatch_size, valids, num_invalids)
+            l1_loss = self._l1_loss(head_outputs_only.head_outputs, valids, num_invalids)
 
             if self.cfg.extra_encoder_losses:
                 (
@@ -1451,14 +1514,17 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     encoder_batch_loss
                  ) = self._extra_encoder_loss(
                      head_outputs_only.head_outputs, 
-                     mb["rnn_states"].clone(), 
+                     mb["rnn_states"].detach(), 
                      progression, 
-                     head_outputs_only.minibatch_size
+                     head_outputs_only.minibatch_size, 
+                     valids, 
+                     num_invalids
                      )
-                encoder_loss += l1_loss + encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
+                encoder_loss += encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
             else:
                 encoder_loss += l1_loss
             encoder_loss *= self.cfg.encoder_grad_coeff
+            additional_stats["encoder_loss"] = encoder_loss
             additional_stats["intrinsic_rewards"] = mb["rewards"]
             additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
             additional_stats["encoder_reward_loss"] = encoder_reward_loss
@@ -1477,7 +1543,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         )
         del outputs
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, encoder_loss, loss_summaries
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, extra_decoder_loss, encoder_loss, loss_summaries
 
 
     def _train(
@@ -1542,6 +1608,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        extra_decoder_loss,
                         encoder_loss,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
@@ -1550,7 +1617,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     # noinspection PyTypeChecker
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
                     critic_loss = value_loss
-                    decoder_loss: Tensor = actor_loss + critic_loss
+                    decoder_loss: Tensor = actor_loss + critic_loss + extra_decoder_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -1597,6 +1664,13 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                         p.grad = None
                     # This second backward pass only works if the encoder loss was calculated on a separate forward pass
                     encoder_loss.backward()
+
+                    target_norm = 1
+                    with torch.no_grad():
+                        for p in self.actor_critic.encoder.DG_projection.linear.parameters():
+                            if p.ndim > 1:
+                                norm = p.norm(dim=1, keepdim=True).clamp_min(1e-6)
+                                p.mul_(target_norm/norm)
 
                     loss = decoder_loss + encoder_loss
 
@@ -1663,6 +1737,99 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
         return stats_and_summaries
     
+    def _calculate_internal_reward(self, buff, additional_step):
+        buff["rewards_external"] = buff["rewards"].clone()
+        # rnn_state_shape = buff["rnn_states"].shape
+        # log.debug(f'rnn_state_shape: {rnn_state_shape}')
+        # dataset_size = rnn_state_shape[0]*rnn_state_shape[1]
+        rnn_states_clone:Tensor = buff["rnn_states"].clone()
+        # log.debug(f'additional_step["new_rnn_states"] Shape: {additional_step["new_rnn_states"].unsqueeze(1).shape}; rnn_state_shape: {rnn_state_shape}')
+        rnn_states_clone = torch.cat((rnn_states_clone, additional_step["new_rnn_states"].unsqueeze(1)), dim = 1)
+
+        rnn_state_shape = rnn_states_clone.shape
+        # log.debug(f'rnn_state_shape: {rnn_state_shape}')
+        dataset_size = rnn_state_shape[0]*rnn_state_shape[1]
+        rnn_states_clone = rnn_states_clone.reshape((dataset_size,) + tuple(rnn_state_shape[2:]))
+        sequence_core, _ = self._calculate_sequence_core(
+            rnn_states_clone, 
+            dataset_size
+            )
+        # log.debug(f'sequence_core: {sequence_core}')
+
+        progression = self._calculate_progression(sequence_core)
+        progression = progression.view(*rnn_state_shape[:2], self.cfg.Hippo_n_feature)
+        # log.debug(f'progression: {progression.long()}')
+        # log.debug(f'progression == 0: {(progression == 0).long()}')
+        # log.debug(f'rolled progression: {(torch.roll(progression, shifts = 1, dims = 1) >= self.cfg.Hippo_R).long()}')
+        
+        mask_new_activations = (progression == 0) & (torch.roll(progression, shifts = 1, dims = 1) >= self.cfg.Hippo_R)
+        # progression = progression.view(dataset_size, self.cfg.Hippo_n_feature)
+        # mask_new_activations = mask_new_activations.view(dataset_size, self.cfg.Hippo_n_feature)
+
+        batch_idx, time_idx, row_idx = torch.where(mask_new_activations)
+        # Only use first (row, col) pair for each row_idx
+        lookup = {}
+        for r, t, c in zip(batch_idx.tolist(), time_idx.tolist(), row_idx.tolist()):
+            if (r,t) not in lookup:
+                lookup[r,t] = [c]
+            else:
+                lookup[r,t].append(c)
+        
+
+        
+        # sequence_core = sequence_core.view(*rnn_state_shape[:2] + (self.cfg.Hippo_n_feature, expanded_length))
+        # progression = progression.view(*rnn_state_shape[:2], self.cfg.Hippo_n_feature)
+        # Prepare result tensor, filled with baseline value
+        baseline = self.cfg.Hippo_L + self.cfg.Hippo_R - 1 
+
+        internal_reward = torch.full((*rnn_state_shape[:2], 1), baseline, dtype=torch.float)
+        # Fill in values if a sequence is activated
+        for (r, t), c in lookup.items():
+            if len(c)==1:
+                vec = progression[r, t].clone()
+                vec[c] = baseline + 100
+                vec_argmin = vec.argmin()
+                log.debug(f'r, t, c, vec_argmin: {r, t-1, c, vec_argmin}')
+                # log.debug(f'New sequence activated!')
+                internal_reward[r, t] = vec[vec_argmin]
+            else:
+                vec = progression[r, t-1].clone()
+                vec[c] = baseline + 100
+                vec_argmin = vec.argmin()
+                log.debug(f'r, t, c, vec_argmin: {r, t-1, c, vec_argmin}')
+                # log.debug(f'New sequence activated!')
+                internal_reward[r, t] = vec[vec_argmin]+1
+            # log.info(f'Adjusting internal reward at position {r,c} to be the minimum of {distance_matrix[r, c]}')
+
+
+        buff["rewards"] = (-internal_reward.view(*rnn_state_shape[:2])[:, 2:]+baseline)*self.cfg.reward_scale
+        if self.cfg.encoder_reward_method == 'encourage':
+            buff["rewards_encoder"] = (internal_reward.view(*rnn_state_shape[:2])[:, 1:-1])*self.cfg.reward_scale
+        elif self.cfg.encoder_reward_method == 'punish':
+            buff["rewards_encoder"] = (internal_reward.view(*rnn_state_shape[:2])[:, 1:-1]-baseline)*self.cfg.reward_scale
+        elif self.cfg.encoder_reward_method == 'mean':
+            reward_mask = internal_reward != baseline
+            # log.debug(f'masked: {internal_reward[reward_mask]}')
+            baseline_mean = internal_reward.mean()
+            # baseline_mean = internal_reward[reward_mask].mean(dim=-1)
+            buff["rewards_encoder"] = (internal_reward.view(*rnn_state_shape[:2])[:, 1:-1]-baseline_mean)*self.cfg.reward_scale
+        elif self.cfg.encoder_reward_method == 'baseline_adjusted':
+            reward_mask = internal_reward != baseline
+            log.debug(f'masked: {internal_reward[reward_mask]}')
+            internal_reward[~reward_mask] -= baseline
+            buff["rewards_encoder"] = (internal_reward.view(*rnn_state_shape[:2])[:, 1:-1])*self.cfg.reward_scale
+        elif self.cfg.encoder_reward_method == 'mean_baseline_adjusted':
+            reward_mask = internal_reward != baseline
+            # log.debug(f'masked: {internal_reward[reward_mask]}')
+            baseline_mean = internal_reward[reward_mask].mean() if reward_mask[reward_mask].numel() > 0 else baseline
+            # log.debug(f'Baseline Mean: {baseline_mean}')
+            internal_reward[reward_mask] -= baseline_mean
+            internal_reward[~reward_mask] -= baseline
+            buff["rewards_encoder"] = (internal_reward.view(*rnn_state_shape[:2])[:, 1:-1])*self.cfg.reward_scale
+        log.debug(f'reward decoder: {buff["rewards"]}')
+        log.debug(f'reward encoder: {buff["rewards_encoder"]}')
+
+    
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
             # create a shallow copy so we can modify the dictionary
@@ -1680,38 +1847,6 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             # log.info(f'Internal Reward1: {buff["rewards"][:,:10]}')
             # log.info(f'Reward Shape1: {buff["rewards"].shape}')
             # Calculate Internal Reward
-            
-            if True:#self.cfg.replace_reward:#False: # 
-                buff["rewards_external"] = buff["rewards"].clone()
-                rnn_state_shape = buff["rnn_states"].shape
-                dataset_size = rnn_state_shape[0]*rnn_state_shape[1]
-                distance_matrix, _, progression = self._record_distance_matrix(
-                    buff["rnn_states"].clone().reshape((dataset_size,) + tuple(rnn_state_shape[2:])), 
-                    dataset_size, 
-                    masked_matrix=False, 
-                    return_progression=True)
-                dataset_idx, row_idx = torch.where(progression == 0)
-                # Only use first (row, col) pair for each row_idx
-                lookup = {}
-                for r, c in zip(dataset_idx.tolist(), row_idx.tolist()):
-                    if r not in lookup:
-                        lookup[r] = c
-                # Prepare result tensor, filled with fallback value
-                baseline = progression.shape[-1]
-                internal_reward = torch.full((dataset_size, 1), baseline, dtype=torch.int32)
-
-                # Fill in values where match was found
-                # If all sequences got activated have a fallback_value
-                fallback_value = torch.tensor(2*baseline)
-                for r, c in lookup.items():
-                    vec = distance_matrix[r, c]
-                    vec_mask = vec!=0
-                    internal_reward[r] = vec[vec_mask].min() if vec_mask.any() else fallback_value
-                    # log.info(f'Adjusting internal reward at position {r,c} to be the minimum of {distance_matrix[r, c]}')
-                buff["rewards"] = (-internal_reward.view(*rnn_state_shape[:2])[:, 1:]+baseline)*self.cfg.reward_scale
-                # log.info(f'Internal Reward2: {buff["rewards"][:,:10]}')
-                # log.info(f'Reward Shape2: {buff["rewards"].shape}')
-                del lookup, rnn_state_shape, distance_matrix, progression, dataset_idx, row_idx, baseline, internal_reward, fallback_value
 
             # ensure we're in train mode so that normalization statistics are updated
             if not self.actor_critic.training:
@@ -1722,8 +1857,11 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
             # calculate estimated value for the next step (T+1)
             normalized_last_obs = buff["normalized_obs"][:, -1]
-            next_values = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)["values"]
+            additional_step = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)
+            next_values = additional_step["values"]
             buff["values"][:, -1] = next_values
+            
+            self._calculate_internal_reward(buff, additional_step)
 
             if self.cfg.normalize_returns:
                 # Since our value targets are normalized, the values will also have normalized statistics.
@@ -1797,11 +1935,15 @@ class DistanceLearnerReward(BaseDistanceRecorder):
     def _record_summaries(self, train_loop_vars):
         var = train_loop_vars # TODO: Think of a better way, why is this necessary? Just redirecting pointer?
         stats = super()._record_summaries(train_loop_vars)
-
-        stats.intrinsic_rewards = var.additional_stats["intrinsic_rewards"].mean().detach().float()
+        stats.encoder_loss = var.additional_stats["encoder_loss"].detach().float()
+        stats.decoder_loss = var.decoder_loss.detach().float()
+        stats.loss = var.loss.detach().float()
+        stats.decoder_rewards = var.additional_stats["intrinsic_rewards"].mean().detach().float()
         stats.encoder_penalty_loss = var.additional_stats["encoder_penalty_loss"].detach().float()
         stats.encoder_reward_loss = var.additional_stats["encoder_reward_loss"].detach().float()
         stats.batch_reward_loss = var.additional_stats["batch_reward_loss"].detach().float()
+        stats.extra_decoder_loss = var.extra_decoder_loss.detach().float()
+        stats.encoder_punishment = var.mb.rewards_encoder.float().mean()
 
         return stats
     

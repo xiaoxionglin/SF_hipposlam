@@ -357,6 +357,19 @@ def set_process_cpu_affinity(worker_idx, num_workers):
 
 # working with filesystem
 
+def get_folder_names(path):
+    """Return a list of folder names in the given directory."""
+    return [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
+
+def get_file_names(path, ending:str = None):
+    """Return a list of .txt file names (not folders) in the given directory."""
+    if ending:
+        return [name for name in os.listdir(path) 
+            if os.path.isfile(os.path.join(path, name)) and name.lower().endswith(ending)]
+    else:
+        return [name for name in os.listdir(path) 
+            if os.path.isfile(os.path.join(path, name))]
+
 
 def ensure_dir_exists(path) -> str:
     if not os.path.exists(path):

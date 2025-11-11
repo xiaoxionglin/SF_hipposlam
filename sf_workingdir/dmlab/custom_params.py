@@ -123,7 +123,31 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Define which metric should be used for optimization of internal structure. Options currently include 'sum', 'masked_sum', 'minimum'",
     )
+    p.add_argument(
+        "--encoder_reward_method",
+        default=None,
+        type=str,
+        help="How the encoder reward is shifted. Options include '' ",
+    )
     p.add_argument("--load_model_path", default=None, type=str, help="Path to specific .pth file for the entire model")
+    # p.add_argument(
+    #     "--expname",
+    #     default=False,
+    #     type=str,
+    #     help="Name of the folder of the experiment",
+    # )
+    # p.add_argument(
+    #     "--train_dir_path",
+    #     default=False,
+    #     type=str,
+    #     help="Path to the folder of the experiment",
+    # )
+    # p.add_argument(
+    #     "--number_epochs_analysis",
+    #     default=1,
+    #     type=int,
+    #     help="How many epochs distributed over an experiment should be run",
+    # )
     
 
 

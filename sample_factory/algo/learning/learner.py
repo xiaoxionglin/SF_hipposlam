@@ -481,12 +481,12 @@ class BaseLearner(Configurable):
 
         return kl_old, kl_loss
     
-    def _l1_loss(self, head_outputs):
+    def _l1_loss(self, head_outputs, valids, num_invalids):
         if self.cfg.head_l1_coef:
             # only the first 64 features, assuming bypass
-            l1_loss = self.cfg.head_l1_coef * torch.norm(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], p=1)
+            l1_loss = self.cfg.head_l1_coef * torch.norm(masked_select(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], valids, num_invalids), p=1)
         else:
-            l1_loss = 0
+            l1_loss = torch.zeros(1)
         return l1_loss
 
     def _entropy_exploration_loss(self, action_distribution, valids, num_invalids: int) -> Tensor:

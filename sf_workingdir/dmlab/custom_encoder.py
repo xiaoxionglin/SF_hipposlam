@@ -266,7 +266,7 @@ class DGProjection_batchnorm_relu(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.linear = nn.Linear(in_features, out_features, bias=False)
-        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False,momentum=0.05)
+        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False,momentum=0.1)
         self.activation= nn.ReLU()
         self.intercept=intercept
 
@@ -284,12 +284,12 @@ class DGProjection_batchnorm_relu_fixed(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        self.linear = nn.Linear(in_features, out_features, bias=True)
+        self.linear = nn.Linear(in_features, out_features, bias=False)
         # Freeze parameters of the linear layer
         for param in self.linear.parameters():
             param.requires_grad = False
 
-        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False, momentum=0.05)
+        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False, momentum=0.1)
         self.activation = nn.ReLU()
         self.intercept = intercept
 

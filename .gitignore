@@ -157,6 +157,7 @@ inference_worker_online.py
 view.ipynb
 git_diff_output.txt
 online_data_telemetry
+slurm_grid
 
 
 # obsidian

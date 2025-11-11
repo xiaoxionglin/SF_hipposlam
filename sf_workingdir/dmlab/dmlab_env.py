@@ -36,6 +36,8 @@ class DmLabSpec:
 
 
 DMLAB_ENVS = [
+    DmLabSpec("openfield_map2_fixed_loc1", "hippodunk/openfield_map2_fixed_loc1"),
+    DmLabSpec("openfield_map2_fixed_loc2", "hippodunk/openfield_map2_fixed_loc2"),
     DmLabSpec("openfield_map2_fixed_loc3", "hippodunk/openfield_map2_fixed_loc3"),
     DmLabSpec("openfield_map2_fixed_loc3_noreward", "hippodunk/openfield_map2_fixed_loc3_noreward"),
     DmLabSpec("dmlab_benchmark", "contributed/dmlab30/rooms_collect_good_objects_train"),
