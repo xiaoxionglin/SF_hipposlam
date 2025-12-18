@@ -4,12 +4,12 @@ import os
 
 
 
-path = "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_"
+path = "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/RandomTest_"
 folder_names_list = get_folder_names(path)
 
 _params = ParamGrid(
     [
-        # ("seed", [34, 45]),
+        # ("seed", [8, 99]),
         ("expname", list(folder_names_list)),
     ]
 )
@@ -30,16 +30,17 @@ cli = (
     "--with_pos_obs=True "
     "--no_render "
     "--number_epochs_analysis=2 "
+    "--reset_params=True "
 )
 
 
 
 _experiments = [
-    Experiment("InternalRewardSeparateReward3DG", cli, _params.generate_params(False)),
+    Experiment("RandomTest", cli, _params.generate_params(False)),
 ]
 
 RUN_DESCRIPTION = RunDescription(f"{vstr}", experiments=_experiments)
 
 
 #Generate Telemtry
-# python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=/work/classic/fr_js1764-sample_factory/workplace_training_directory/training_templates/generate_telemetry.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.run_generate_telemetry --slurm_partition=genoa --slurm_timeout=1:00:00
+# python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=/work/classic/fr_js1764-sample_factory/workplace_training_directory/training_templates/generate_telemetry.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.run_generate_telemetry --slurm_partition=cpu --slurm_timeout=3:00:00

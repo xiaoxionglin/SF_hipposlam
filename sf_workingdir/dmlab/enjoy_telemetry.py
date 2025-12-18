@@ -15,13 +15,14 @@ from sample_factory.algo.utils.env_info import extract_env_info
 from sample_factory.algo.utils.make_env import make_env_func_batched
 from sample_factory.algo.utils.rl_utils import make_dones, prepare_and_normalize_obs
 from sample_factory.algo.utils.tensor_utils import unsqueeze_tensor
-from sample_factory.cfg.arguments import load_from_checkpoint
+from sample_factory.cfg.arguments import load_from_checkpoint, maybe_load_from_checkpoint
 from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.utils import experiment_dir, log
 
 from sf_workingdir.dmlab.custom_learner import BaseDistanceRecorder
+from sf_workingdir.dmlab.custom_decoder import MlpDecoderJit
 
 # import datetime, pathlib, json, pandas as pd, torch, h5py
 
@@ -56,6 +57,7 @@ def single_run(cfg, time_str: str, verbose:bool = False):
     cfg.experiment = cfg.expname
     cfg.cli_args["experiment"] = cfg.expname
     cfg = load_from_checkpoint(cfg)
+    # cfg = maybe_load_from_checkpoint(cfg)
 
     eval_env_frameskip: int = cfg.env_frameskip 
     assert (
@@ -99,8 +101,8 @@ def single_run(cfg, time_str: str, verbose:bool = False):
         "encoder.DG_projection.linear",
         "core",
         
-        # "decoder.mlp.0",
-        # "decoder.mlp.2"
+        "decoder.mlp.0",
+        "decoder.mlp.2"
     ]          # <- example; edit to taste
 
     # 2B. activation buffer
@@ -132,7 +134,14 @@ def single_run(cfg, time_str: str, verbose:bool = False):
     # log.info(Learner.checkpoint_dir(cfg, policy_id))
     checkpoints = BaseDistanceRecorder.get_checkpoints(BaseDistanceRecorder.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*")
     checkpoint_dict = BaseDistanceRecorder.load_checkpoint(checkpoints, device)
-    actor_critic.load_state_dict(checkpoint_dict["model"])
+    # actor_critic.load_state_dict(checkpoint_dict["model"])
+
+    # if cfg.reset_params:
+    #     actor_critic.encoder.DG_projection.linear.reset_parameters()
+    #     actor_critic.encoder.DG_projection.batchnorm1d.reset_parameters()
+    #     actor_critic.decoder.mlp.reset_parameters()
+    #     actor_critic.action_parameterization.reset_parameters() 
+    #     actor_critic.critic_linear.reset_parameters()
 
     episode_rewards = [deque([], maxlen=100) for _ in range(env.num_agents)]
     true_objectives = [deque([], maxlen=100) for _ in range(env.num_agents)]

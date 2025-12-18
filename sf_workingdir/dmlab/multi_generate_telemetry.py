@@ -20,6 +20,10 @@ def _ensure_parent(path: pathlib.Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_dir(path: pathlib.Path):
+    path.mkdir(parents=True, exist_ok=True)
+
+
 mapname="openfield_map2_fixed_loc3_noreward"
 expname='02_InternalRewardSeparateLoss4_see_99_e.g.coe_1'
 train_dir="/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateLoss4_"
@@ -57,22 +61,31 @@ cli_dict={
 
 
 def experiment_run(cfg, verbose:bool = True):
-    joint_path = pathlib.Path(cfg.train_dir_path) / pathlib.Path(cfg.expname) / "checkpoint_p0" / "milestones"
-    log.debug(f'Joint Path: {joint_path}')
-    milestones = get_file_names(joint_path, ending='.pth')
-    log.debug(f'milestones: {milestones}')
-    if len(milestones) < cfg.number_epochs_analysis:
-        raise ValueError("Too many epochs to analyze specified. Reduce --number_epochs_analysis")
+    get_files_old = True
+    if get_files_old:
+        joint_path = pathlib.Path(cfg.train_dir_path) / pathlib.Path(cfg.expname) / "checkpoint_p0" / "milestones"
+        log.debug(f'Joint Path: {joint_path}')
+        milestones = get_file_names(joint_path, ending='.pth', sort_files=True)
+        log.debug(f'milestones: {milestones}')
+        if len(milestones) < cfg.number_epochs_analysis:
+            raise ValueError("Too many epochs to analyze specified. Reduce --number_epochs_analysis")
+        else:
+            step = len(milestones)/cfg.number_epochs_analysis
+            log.debug(f'len milestones & step: {len(milestones), step}')
+            for i in range(cfg.number_epochs_analysis):
+                epoch_i = int(round(i * step))
+                if verbose:
+                    log.debug(-epoch_i)
+                cfg.load_model_path = joint_path / milestones[-epoch_i-1]
+                log.debug(f'load model path: {cfg.load_model_path}')
+                destination_path = pathlib.Path(cfg.train_dir_path) / pathlib.Path(cfg.expname) / "telemetry"
+                _ensure_dir(destination_path)
+                if pathlib.Path(milestones[-epoch_i-1]).stem not in get_folder_names(destination_path):
+                    single_run(cfg, pathlib.Path(milestones[-epoch_i-1]).stem, verbose)
+                else:
+                    log.warn(f"There is already telemetry for this run! Please remove if a re-run is wanted. {cfg.expname} and {milestones[-epoch_i-1]}")
     else:
-        step = len(milestones)/cfg.number_epochs_analysis
-        log.debug(f'len milestones & step: {len(milestones), step}')
-        for i in range(cfg.number_epochs_analysis):
-            epoch_i = int(round(i * step))
-            if verbose:
-                log.debug(-epoch_i)
-            cfg.load_model_path = joint_path / milestones[-epoch_i-1]
-            log.debug(f'load model path: {cfg.load_model_path}')
-            single_run(cfg, pathlib.Path(milestones[-epoch_i-1]).stem, verbose)
+        single_run(cfg, 'telemetry_random', verbose)
 
 
 
@@ -96,6 +109,12 @@ def add_gen_args(parser: argparse.ArgumentParser) -> None:
         default=1,
         type=int,
         help="How many epochs distributed over an experiment should be run",
+    )
+    p.add_argument(
+        "--reset_params",
+        default=False,
+        type=bool,
+        help="Wether to reset all actor-critic parameters",
     )
 
 def parse_gen_args(evaluation=True, argv=None):

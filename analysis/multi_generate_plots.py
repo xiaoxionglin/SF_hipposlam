@@ -209,13 +209,41 @@ def plot_individual_traj(occu_xy, pddata, experiment, experiment_subname, epoch_
     log.debug(f'Picture path: {picture_path}')
     plt.savefig(picture_path)
 
+def plot_corr(seq0_xya, experiment, experiment_subname, epoch_name):
+    # correlation of PFs between enjoys for each layer
+    corr = pd.DataFrame(seq0_xya.reshape(-1,16)).corr()
+    fig,ax=plt.subplots(1,1,figsize=(5.5, 5.5), dpi=150)
+    im=ax.imshow(corr,cmap='coolwarm',vmax=1,vmin=0)
+    ax.set_axis_off()
+    ax.set_title(f"Epoch {i if i<7 else 'new'}",fontsize=8)
+    # Label just one of them (optional)
+    ax.set_xlabel('DG feature index')
+    ax.set_ylabel('DG feature index')
+
+    # --- add a single colorbar on the right ---
+    # 1) create a new axes to the right of all subplots
+    cbar_ax = fig.add_axes([0.96, 0.25, 0.01, 0.55])  
+    #    [left, bottom, width, height] in fractions of figure size
+
+    # 2) draw the colorbar based on the last 'im' (they’re all the same scale)
+    fig.colorbar(im, cax=cbar_ax, label='Correlation')
+
+    # tidy up and save
+    fig.tight_layout(rect=[0,0,0.94,1],pad=0.15)  # leave space on the right for the colorbar
+    base_picture_path = "/work/classic/fr_js1764-sample_factory/pictures"
+    file_name = experiment + "_" + experiment_subname + "_" + epoch_name + "_correlation.png"
+    picture_path = pathlib.Path(base_picture_path)/ experiment / file_name
+    _ensure_parent(picture_path)
+    log.debug(f'Picture path: {picture_path}')
+    plt.savefig(picture_path)
+
 
 hippo_n_feature = 16
 length = 71
 
 rootpath = "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam"
 
-experiment = "InternalRewardSeparateReward2_"
+experiment = "InternalRewardSeparateReward3DG_"
 experiment_path = pathlib.Path(rootpath) / experiment# / "telemetry"
 
 experiment_subnames = get_folder_names(experiment_path)
@@ -237,7 +265,7 @@ for i in range(len(experiment_subnames)):
         # log.warn("Path exists!")
         epoch_names = get_folder_names(telemetry_path)
         log.debug(f"Epoch names for experiment {experiment_subnames[i]}: {epoch_names}")
-        epoch_names = epoch_names[3:]
+        # epoch_names = epoch_names[3:]
 
         for j in range(len(epoch_names)):
             telemetry_list_csv = glob(str(telemetry_path / epoch_names[j] / "*.csv"))
