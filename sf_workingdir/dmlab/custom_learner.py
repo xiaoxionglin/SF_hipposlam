@@ -1389,23 +1389,32 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         mask_new_activations = (progression == 0)
         mask_active_now = (sequence_core != 0)
         mask_new_activations = mask_new_activations & (mask_active_now.sum(dim=2) >= 2*self.cfg.Hippo_R) # Mask sequences that got activated multiple times in quick succession
-        penalty_mask = mask_new_activations & (mask_new_activations.sum(dim=1) > 1).unsqueeze(1)
-        penalty_mask = F.pad(penalty_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        max_mask = straight_through != straight_through.max(dim=-1, keepdim=True).values
-        loss_penalty = (straight_through * max_mask * penalty_mask).sum(dim=1)#.sum() / (penalty_mask.sum() + 1e-6)
-        loss_penalty = masked_select(loss_penalty, valids, num_invalids).mean(dim=0)
+        if self.cfg.encoder_multi_activation_loss:
+            penalty_mask = mask_new_activations & (mask_new_activations.sum(dim=1) > 1).unsqueeze(1)
+            penalty_mask = F.pad(penalty_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
+            max_mask = straight_through != straight_through.max(dim=-1, keepdim=True).values
+            loss_penalty = (straight_through * max_mask * penalty_mask).sum(dim=1)#.sum() / (penalty_mask.sum() + 1e-6)
+            loss_penalty = masked_select(loss_penalty, valids, num_invalids).mean(dim=0)
+        else:
+            loss_penalty = 0
         # Reward for new activations of not used sequences
-        reward_mask = mask_new_activations & (mask_active_now.sum(dim=2) == self.cfg.Hippo_R)
-        reward_mask = F.pad(reward_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
-        loss_reward = (straight_through * reward_mask).sum(dim=1)#.sum() / (reward_mask.sum() + 1e-6)
-        loss_reward = -masked_select(loss_reward, valids, num_invalids).mean(dim=0)
+        if self.cfg.encoder_unused_sequence_loss:
+            reward_mask = mask_new_activations & (mask_active_now.sum(dim=2) == self.cfg.Hippo_R)
+            reward_mask = F.pad(reward_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0)
+            loss_reward = (straight_through * reward_mask).sum(dim=1)#.sum() / (reward_mask.sum() + 1e-6)
+            loss_reward = -masked_select(loss_reward, valids, num_invalids).mean(dim=0)
+        else:
+            loss_reward = 0
         # Reward for not used sequences in this mini batch
-        batch_mask = mask_active_now.sum(dim=2) > 0
-        batch_mask = torch.logical_not(torch.any(batch_mask, dim=0))
-        batch_mask = F.pad(batch_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0).unsqueeze(0)
-        batch_penalty = (straight_through * batch_mask).sum(dim=1)#.sum() / (batch_mask.sum() + 1e-6)
-        batch_penalty = -masked_select(batch_penalty, valids, num_invalids).mean(dim=0)
+        if self.cfg.encoder_batch_loss:
+            batch_mask = mask_active_now.sum(dim=2) > 0
+            batch_mask = torch.logical_not(torch.any(batch_mask, dim=0))
+            batch_mask = F.pad(batch_mask, pad=(0, head_outputs.shape[-1]-self.cfg.Hippo_n_feature), mode='constant', value=0).unsqueeze(0)
+            batch_penalty = (straight_through * batch_mask).sum(dim=1)#.sum() / (batch_mask.sum() + 1e-6)
+            batch_penalty = -masked_select(batch_penalty, valids, num_invalids).mean(dim=0)
         # log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}; {batch_penalty.item()}')
+        else:
+            batch_penalty = 0
         return loss_penalty, loss_reward, batch_penalty
     
     def _encoder_loss(self, head_outputs:Tensor, rewards:Tensor, rnn_states, progression, minibatch_size, valids, num_invalids) -> Tensor:
@@ -1417,15 +1426,18 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         return -masked_select(encoder_loss, valids, num_invalids).mean(dim=0)
     
     def _extra_decoder_loss(self, ratio, rnn_states, progression, minibatch_size, clip_ratio_low, clip_ratio_high, valids, num_invalids):
-        clipped_ratio = torch.clamp(ratio, clip_ratio_low, clip_ratio_high)
-        sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
-        mask_new_activations = (progression == 0)
-        mask_active_now = (sequence_core != 0)
-        reward_mask = (mask_new_activations & (mask_active_now.sum(dim=2) >= 2*self.cfg.Hippo_R)).sum(dim=1)
-        loss_unclipped = ratio * reward_mask
-        loss_clipped = clipped_ratio * reward_mask
-        extra_decoder_loss = torch.min(loss_unclipped, loss_clipped)
-        return masked_select(extra_decoder_loss, valids, num_invalids).mean(dim=0)
+        if self.cfg.extra_decoder_loss:
+            clipped_ratio = torch.clamp(ratio, clip_ratio_low, clip_ratio_high)
+            sequence_core, _ = self._calculate_sequence_core(rnn_states, minibatch_size)
+            mask_new_activations = (progression == 0)
+            mask_active_now = (sequence_core != 0)
+            reward_mask = (mask_new_activations & (mask_active_now.sum(dim=2) >= 2*self.cfg.Hippo_R)).sum(dim=1)
+            loss_unclipped = ratio * reward_mask
+            loss_clipped = clipped_ratio * reward_mask
+            extra_decoder_loss = torch.min(loss_unclipped, loss_clipped)
+            return masked_select(extra_decoder_loss, valids, num_invalids).mean(dim=0)
+        else:
+            return 0
 
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
@@ -1789,14 +1801,14 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 vec = progression[r, t].clone()
                 vec[c] = baseline + 100
                 vec_argmin = vec.argmin()
-                log.debug(f'r, t, c, vec_argmin: {r, t-1, c, vec_argmin}')
+                # log.debug(f'r, t, c, vec_argmin: {r, t-1, c, vec_argmin}')
                 # log.debug(f'New sequence activated!')
                 internal_reward[r, t] = vec[vec_argmin]
             else:
                 vec = progression[r, t-1].clone()
                 vec[c] = baseline + 100
                 vec_argmin = vec.argmin()
-                log.debug(f'r, t, c, vec_argmin: {r, t-1, c, vec_argmin}')
+                # log.debug(f'r, t, c, vec_argmin: {r, t-1, c, vec_argmin}')
                 # log.debug(f'New sequence activated!')
                 internal_reward[r, t] = vec[vec_argmin]+1
             # log.info(f'Adjusting internal reward at position {r,c} to be the minimum of {distance_matrix[r, c]}')
@@ -1826,8 +1838,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             internal_reward[reward_mask] -= baseline_mean
             internal_reward[~reward_mask] -= baseline
             buff["rewards_encoder"] = (internal_reward.view(*rnn_state_shape[:2])[:, 1:-1])*self.cfg.reward_scale
-        log.debug(f'reward decoder: {buff["rewards"]}')
-        log.debug(f'reward encoder: {buff["rewards_encoder"]}')
+        # log.debug(f'reward decoder: {buff["rewards"]}')
+        # log.debug(f'reward encoder: {buff["rewards_encoder"]}')
 
     
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
@@ -1939,10 +1951,22 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.decoder_loss = var.decoder_loss.detach().float()
         stats.loss = var.loss.detach().float()
         stats.decoder_rewards = var.additional_stats["intrinsic_rewards"].mean().detach().float()
-        stats.encoder_penalty_loss = var.additional_stats["encoder_penalty_loss"].detach().float()
-        stats.encoder_reward_loss = var.additional_stats["encoder_reward_loss"].detach().float()
-        stats.batch_reward_loss = var.additional_stats["batch_reward_loss"].detach().float()
-        stats.extra_decoder_loss = var.extra_decoder_loss.detach().float()
+        if self.cfg.encoder_multi_activation_loss:
+            stats.encoder_penalty_loss = var.additional_stats["encoder_penalty_loss"].detach().float()
+        else:
+            stats.encoder_penalty_loss = float(var.additional_stats["encoder_penalty_loss"])
+        if self.cfg.encoder_unused_sequence_loss:
+            stats.encoder_reward_loss = var.additional_stats["encoder_reward_loss"].detach().float()
+        else:
+            stats.encoder_reward_loss = float(var.additional_stats["encoder_reward_loss"])
+        if self.cfg.encoder_batch_loss:
+            stats.batch_reward_loss = var.additional_stats["batch_reward_loss"].detach().float()
+        else:
+            stats.batch_reward_loss = float(var.additional_stats["batch_reward_loss"])
+        if self.cfg.extra_decoder_loss:
+            stats.extra_decoder_loss = var.extra_decoder_loss.detach().float()
+        else:
+            stats.extra_decoder_loss = float(var.extra_decoder_loss)
         stats.encoder_punishment = var.mb.rewards_encoder.float().mean()
 
         return stats

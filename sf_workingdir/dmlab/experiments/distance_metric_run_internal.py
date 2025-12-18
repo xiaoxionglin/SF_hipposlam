@@ -3,11 +3,17 @@ from sample_factory.launcher.run_description import Experiment, ParamGrid, RunDe
 
 _params = ParamGrid(
     [
-        ("seed", [99, 8]),
+        ("seed", [8, 99]),
+        # ("seed", [1111, 2222, 3333, 4444, 5555, 6666, 7777, 8888, 9999]),
         # ("Hippo_n_feature", [2, 4, 16, 64]),
         # ("Hippo_L", [32, 128]),
-        ("encoder_reward_method", ["punish", "baseline_adjusted", "mean_baseline_adjusted"]),
-        ("DG_BN_intercept", [2,2.43,2.8])
+        # ("encoder_reward_method", ["punish", "baseline_adjusted", "mean_baseline_adjusted"]),
+        # ("DG_BN_intercept", [2, 2.2, 2.43, 2.6, 2.8]),
+        ("encoder_batch_loss", [True, False]),
+        ("encoder_multi_activation_loss", [True, False]),
+        ("encoder_unused_sequence_loss", [True, False]),
+        ("extra_decoder_loss", [True, False]),
+
     ]
 )
 
@@ -17,7 +23,7 @@ vstr = "hipposlam"
 
 cli = (
     "--env=openfield_map2_fixed_loc3_noreward "
-    "--seed=42 "
+    "--seed=99 "
     "--train_for_seconds=144000 "
     "--algo=APPO "
     "--gamma=0.99 "
@@ -76,7 +82,7 @@ cli = (
     "--nonlinearity=relu "
     "--with_wandb=True "
     "--wandb_user=xiaoxionglin-bernstein-center-freiburg "
-    "--wandb_project=SF_distanceMetric_seperateReward3DG "
+    "--wandb_project=SF_distanceMetric_seperateRewardLossControl "
     "--benchmark=False "
     "--with_number_instruction=True "
     "--number_instruction_coef=9 "
@@ -96,13 +102,14 @@ cli = (
     "--reset_critic=False "
     "--reset_decoder=False "
     "--encoder_grad_coeff=1 "
+    "--encoder_reward_method=punish "
 )
 
 
 
 
 _experiments = [
-    Experiment("InternalRewardSeparateReward3DG", cli, _params.generate_params(False)),
+    Experiment("seperateRewardLossControl", cli, _params.generate_params(False)),
 ]
 
 RUN_DESCRIPTION = RunDescription(f"{vstr}", experiments=_experiments)
@@ -113,6 +120,6 @@ RUN_DESCRIPTION = RunDescription(f"{vstr}", experiments=_experiments)
 # python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=train_dir/slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=50 --slurm_sbatch_template=train_dir/training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run --slurm_partition=genoa --slurm_timeout=0:10:00
 
 #INTERNAL
-# python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_internal --slurm_partition=cpu --slurm_timeout=24:10:00
+# python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_internal --slurm_partition=cpu --slurm_timeout=8:10:00
 #EXTERNAL
 # python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_external --slurm_partition=genoa --slurm_timeout=30:10:00

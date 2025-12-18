@@ -3,19 +3,26 @@ from sample_factory.launcher.run_description import Experiment, ParamGrid, RunDe
 
 _params = ParamGrid(
     [
-        ("seed", [1111,2222]),
-        ("DG_name", ["batchnorm_relu", "batchnorm_relu_fixed"]),
-        (
-            ("reset_critic", "reset_decoder"),
-            (
-                [True, False],
-                [False, True]
-            )
-        ),
+        ("seed", [1111,2222, 3333, 4444, 5555]),
+        # ("DG_name", ["batchnorm_relu"]),
+        # (
+        #     ("reset_critic", "reset_decoder"),
+        #     (
+        #         [True, False],
+        #         [False, True]
+        #     )
+        # ),
         ("env", ["openfield_map2_fixed_loc2", "openfield_map2_fixed_loc3"]),
-        ("load_model_path", ["/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward2_/21_InternalRewardSeparateReward2_see_8_e.g.coe_1_e.r.met_punish/checkpoint_p0/milestones/checkpoint_000006940_113704960.pth",
-                             "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward2_/23_InternalRewardSeparateReward2_see_8_e.g.coe_1_e.r.met_baseline_adjusted/checkpoint_p0/milestones/checkpoint_000006808_111542272.pth",
-                             "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward2_/24_InternalRewardSeparateReward2_see_8_e.g.coe_1_e.r.met_mean_baseline_adjusted/checkpoint_p0/milestones/checkpoint_000006792_111280128.pth"]),
+        # ("env", ["openfield_map2_fixed_loc2", "openfield_map2_fixed_loc3"]),
+        # ("load_model_path", ["/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/01_InternalRewardSeparateReward3DG_see_99_e.r.met_punish_D.B.int_2.43/checkpoint_p0/milestones/checkpoint_000001960_32112640.pth",
+        #                     #  "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/00_InternalRewardSeparateReward3DG_see_99_e.r.met_punish_D.B.int_2/checkpoint_p0/milestones/checkpoint_000001978_32407552.pth",
+        #                     #  "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/02_InternalRewardSeparateReward3DG_see_99_e.r.met_punish_D.B.int_2.8/checkpoint_p0/milestones/checkpoint_000001966_32210944.pth",
+        #                     #  "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/03_InternalRewardSeparateReward3DG_see_99_e.r.met_baseline_adjusted_D.B.int_2/checkpoint_p0/milestones/checkpoint_000001976_32374784.pth",
+        #                      "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/04_InternalRewardSeparateReward3DG_see_99_e.r.met_baseline_adjusted_D.B.int_2.43/checkpoint_p0/milestones/checkpoint_000001912_31326208.pth",
+        #                     #  "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/05_InternalRewardSeparateReward3DG_see_99_e.r.met_baseline_adjusted_D.B.int_2.8/checkpoint_p0/milestones/checkpoint_000001970_32276480.pth",
+        #                      "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/06_InternalRewardSeparateReward3DG_see_99_e.r.met_mean_baseline_adjusted_D.B.int_2/checkpoint_p0/milestones/checkpoint_000001962_32145408.pth",
+        #                      "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/07_InternalRewardSeparateReward3DG_see_99_e.r.met_mean_baseline_adjusted_D.B.int_2.43/checkpoint_p0/milestones/checkpoint_000001998_32735232.pth",
+        #                      "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/08_InternalRewardSeparateReward3DG_see_99_e.r.met_mean_baseline_adjusted_D.B.int_2.8/checkpoint_p0/milestones/checkpoint_000002002_32800768.pth"]),
     ]
 )
 
@@ -84,7 +91,7 @@ cli = (
     "--nonlinearity=relu "
     "--with_wandb=True "
     "--wandb_user=xiaoxionglin-bernstein-center-freiburg "
-    "--wandb_project=SF_distancemetric_TransferpreTest "
+    "--wandb_project=SF_distancemetric_Comparison "
     "--benchmark=False "
     "--with_number_instruction=True "
     "--number_instruction_coef=9 "
@@ -109,7 +116,7 @@ cli = (
 
 
 _experiments = [
-    Experiment("TransferpreTEST", cli, _params.generate_params(False)),
+    Experiment("Comparison", cli, _params.generate_params(False)),
 ]
 
 RUN_DESCRIPTION = RunDescription(f"{vstr}", experiments=_experiments)
@@ -122,4 +129,4 @@ RUN_DESCRIPTION = RunDescription(f"{vstr}", experiments=_experiments)
 #INTERNAL
 # python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_internal --slurm_partition=genoa --slurm_timeout=30:10:00
 #EXTERNAL
-# python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_external --slurm_partition=genoa --slurm_timeout=30:10:00
+# python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_external --slurm_partition=cpu --slurm_timeout=24:10:00
