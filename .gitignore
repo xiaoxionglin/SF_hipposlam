@@ -149,6 +149,7 @@ sf_examples/vizdoom/doom/multiplayer/tests/_vizdoom/
 # png
 **/*.png
 **/*.svg
+**/*.csv
 
 
 # extra folders
@@ -164,3 +165,4 @@ slurm_grid
 # obsidian
 .obsidian
 private/
+python -m hipposlam_sf.dmlab.txt

@@ -486,7 +486,7 @@ class BaseLearner(Configurable):
             # only the first 64 features, assuming bypass
             l1_loss = self.cfg.head_l1_coef * torch.norm(masked_select(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], valids, num_invalids), p=1)
         else:
-            l1_loss = torch.zeros(1)
+            l1_loss = torch.zeros((), device=head_outputs.device)
         return l1_loss
 
     def _entropy_exploration_loss(self, action_distribution, valids, num_invalids: int) -> Tensor:
@@ -949,7 +949,7 @@ class DefaultLearner(BaseLearner):
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
-            l1_loss = self._l1_loss(outputs.head_outputs)
+            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
             
             policy_loss += l1_loss
             
@@ -1149,11 +1149,8 @@ class DefaultLearner(BaseLearner):
 
 def default_make_learner_func(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
     return DefaultLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
-    # if cfg.encoder_decoder_share_losses:
-    #     return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
-    # else:
-    #     return Learner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
-    
+
+
 def create_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
     # check if user specified custom actor/critic creation function
     from sample_factory.algo.utils.model_context import global_learner_factory
