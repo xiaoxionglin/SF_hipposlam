@@ -5,7 +5,8 @@ from signal_slot.signal_slot import EventLoop, EventLoopProcess
 from sample_factory.algo.learning.learner_worker import init_learner_process
 from sample_factory.algo.runners.runner import Runner
 from sample_factory.algo.sampling.sampler import ParallelSampler
-from sample_factory.algo.utils.context import sf_global_context
+from sample_factory.algo.utils.env_context import sf_global_env_context
+from sample_factory.algo.utils.model_context import sf_global_model_context
 from sample_factory.algo.utils.misc import ExperimentStatus
 from sample_factory.algo.utils.multiprocessing_utils import get_mp_ctx
 from sample_factory.utils.typing import StatusCode
@@ -38,7 +39,7 @@ class ParallelRunner(Runner):
                 self.batchers[policy_id],
             )
             learner_proc.event_loop.owner = self.learners[policy_id]
-            learner_proc.set_init_func_args((sf_global_context(), self.learners[policy_id]))
+            learner_proc.set_init_func_args((sf_global_env_context(), sf_global_model_context(), self.learners[policy_id]))
 
         self.sampler = self._make_sampler(ParallelSampler, self.event_loop)
 

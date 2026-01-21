@@ -11,7 +11,8 @@ from signal_slot.signal_slot import signal
 from sample_factory.algo.sampling.batched_sampling import BatchedVectorEnvRunner
 from sample_factory.algo.sampling.non_batched_sampling import NonBatchedVectorEnvRunner
 from sample_factory.algo.sampling.sampling_utils import VectorEnvRunner, rollout_worker_device
-from sample_factory.algo.utils.context import SampleFactoryContext, set_global_context
+from sample_factory.algo.utils.env_context import SampleFactoryEnvContext, set_global_env_context
+from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import advance_rollouts_signal, new_trajectories_signal
@@ -30,10 +31,11 @@ from sample_factory.utils.utils import (
 )
 
 
-def init_rollout_worker_process(sf_context: SampleFactoryContext, worker: RolloutWorker):
+def init_rollout_worker_process(sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, worker: RolloutWorker):
     log.debug(f"Rollout worker {worker.worker_idx} starting...")
 
-    set_global_context(sf_context)
+    set_global_env_context(sf_context_env)
+    set_global_model_context(sf_context_model)
     log.info(f"ROLLOUT worker {worker.worker_idx}\tpid {os.getpid()}\tparent {os.getppid()}")
 
     # workers should ignore Ctrl+C because the termination is handled in the event loop by a special msg

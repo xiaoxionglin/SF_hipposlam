@@ -12,7 +12,8 @@ import psutil
 import torch
 from signal_slot.signal_slot import TightLoop, Timer, signal
 
-from sample_factory.algo.utils.context import SampleFactoryContext, set_global_context
+from sample_factory.algo.utils.env_context import SampleFactoryEnvContext, set_global_env_context
+from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import (
@@ -40,8 +41,9 @@ AdvanceRolloutSignals = Dict[int, List[Tuple[int, PolicyID]]]
 PrepareOutputsFunc = Callable[[int, TensorDict, List], AdvanceRolloutSignals]
 
 
-def init_inference_process(sf_context: SampleFactoryContext, worker: InferenceWorker):
-    set_global_context(sf_context)
+def init_inference_process(sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, worker: InferenceWorker):
+    set_global_env_context(sf_context_env)
+    set_global_model_context(sf_context_model)
     log.info(f"{worker.object_id}\tpid {os.getpid()}\tparent {os.getppid()}")
 
     # workers should ignore Ctrl+C because the termination is handled in the event loop by a special msg

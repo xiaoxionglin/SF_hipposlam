@@ -122,7 +122,7 @@ def model_initialization_data(
     return model_state
 
 
-class Learner(Configurable):
+class BaseLearner(Configurable):
     def __init__(
         self,
         cfg: Config,
@@ -243,6 +243,9 @@ class Learner(Configurable):
         self.optimizer = optimizer_cls(params, **optimizer_kwargs)
 
         self.load_from_checkpoint(self.policy_id)
+        self._register_forward_hooks()
+        self._register_backward_hooks()
+        ### Is this the right place to register all hooks for both new initializations & restarts? ###
         self.param_server.init(self.actor_critic, self.train_step, self.device)
         self.policy_versions_tensor[self.policy_id] = self.train_step
 
@@ -319,6 +322,14 @@ class Learner(Configurable):
     def _after_optimizer_step(self):
         """A hook to be called after each optimizer step."""
         self.train_step += 1
+    
+    def _register_forward_hooks(self):
+        log.info("Trying to register forward hooks, but no hooks are implemented. Continuing without forward hooks.")
+        pass
+
+    def _register_backward_hooks(self):
+        log.info("Trying to register backward hooks, but no hooks are implemented. Continuing without backward hooks.")
+        pass
 
     def _get_checkpoint_dict(self):
         checkpoint = {
@@ -469,6 +480,14 @@ class Learner(Configurable):
         kl_loss *= self.cfg.kl_loss_coeff
 
         return kl_old, kl_loss
+    
+    def _l1_loss(self, head_outputs, valids, num_invalids):
+        if self.cfg.head_l1_coef:
+            # only the first 64 features, assuming bypass
+            l1_loss = self.cfg.head_l1_coef * torch.norm(masked_select(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], valids, num_invalids), p=1)
+        else:
+            l1_loss = torch.zeros((), device=head_outputs.device)
+        return l1_loss
 
     def _entropy_exploration_loss(self, action_distribution, valids, num_invalids: int) -> Tensor:
         entropy = action_distribution.entropy()
@@ -533,25 +552,29 @@ class Learner(Configurable):
 
         mb = buffer[indices]
         return mb
+    
 
-    def _calculate_losses(
-        self, mb: AttrDict, num_invalids: int
-    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
-        with torch.no_grad(), self.timing.add_time("losses_init"):
-            recurrence: int = self.cfg.recurrence
-
-            # PPO clipping
-            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
-            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
-            clip_ratio_low = 1.0 / clip_ratio_high
-            clip_value = self.cfg.ppo_clip_value
-
-            valids = mb.valids
+    
+    def _forward_pass(
+            self, 
+            mb: AttrDict, 
+            recurrence: int, 
+            valids, 
+            return_outputs: tuple[bool, bool, bool] = (True, True, True),
+            head_only: bool = False
+            ):
+        with torch.no_grad(), self.timing.add_time("forward_init"):
+            outputs = AttrDict()
 
         # calculate policy head outside of recurrent loop
         with self.timing.add_time("forward_head"):
             head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
             minibatch_size: int = head_outputs.size(0)
+            outputs["minibatch_size"] = minibatch_size
+            if return_outputs[0]:
+                outputs['head_outputs'] = head_outputs
+            if head_only:
+                return outputs
 
         # initial rnn states
         with self.timing.add_time("bptt_initial"):
@@ -577,56 +600,292 @@ class Learner(Configurable):
                 del core_output_seq
             else:
                 core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
-            if self.cfg.head_l1_coef:
-                # only the first 64 features, assuming bypass
-                l1_loss = self.cfg.head_l1_coef * torch.norm(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], p=1)
-            else:
-                l1_loss = 0
+            
             del head_outputs
+            if return_outputs[1]:
+                outputs['core_outputs'] = core_outputs
 
-        num_trajectories = minibatch_size // recurrence
+
+        if self.cfg.with_vtrace:
+            num_trajectories = minibatch_size // recurrence
+            outputs['num_trajectories'] = num_trajectories
         assert core_outputs.shape[0] == minibatch_size
-
-
-        locale_verbose = False
-        if getattr(self.cfg, 'rec_distances', None):
-            R = getattr(self.cfg, 'Hippo_R', 8)
-            L = getattr(self.cfg, 'Hippo_L', 48)
-            hippo_n_feature = getattr(self.cfg, 'Hippo_n_feature', 64)
-            # Total length of the shift register.
-            expanded_length = R + L - 1
-            # Core (shift register) output dimension.
-            core_output_size = hippo_n_feature * expanded_length
-            sequence_core = core_outputs[:, :core_output_size].view(minibatch_size, hippo_n_feature, expanded_length)
-            
-
-            progression = torch.argmax(torch.cat(((sequence_core != 0).to(dtype=torch.int), torch.ones(sequence_core.shape[:2] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
-
-            distance_matrix = torch.abs(progression.unsqueeze(-1) - progression.unsqueeze(-2)).to(dtype=torch.float)
-
-            # sum = torch.sum(torch.sum(distance_matrix.to(dtype=torch.float),dim=-1),dim=-1)
-            # value = sum/(distance_matrix.shape[1]**2)
-            # meaned_value = value.mean().detach()
-            
-
-            if locale_verbose:
-                log.info(f'RNN States shape: {core_outputs.shape}')
-                log.info(f'SeququenceCore shape: {sequence_core.shape}')
-                log.info(f'Progression: {progression}')
-                log.info(f'Progression shape: {progression.shape}')
-                log.info(f'Distance Matrix: {distance_matrix}')
-                log.info(f'Distance Matrix shape: {distance_matrix.shape}')
-                # log.info(f'Summed values: {value}')
-                # log.info(f'Summed values shape: {value.shape}')
-        else:
-            distance_matrix = None
-
-
-
 
         with self.timing.add_time("tail"):
             # calculate policy tail outside of recurrent loop
             result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
+            
+
+            del core_outputs
+            if return_outputs[2]:
+                outputs['result'] = result
+        
+        return outputs
+
+    def _calculate_losses(
+        self, mb: AttrDict, num_invalids: int
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+        raise NotImplementedError()
+
+    def _train(
+        self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
+    ) -> Optional[AttrDict]:
+        raise NotImplementedError()
+
+    def _record_summaries(self, train_loop_vars) -> AttrDict:
+        var = train_loop_vars
+
+        self.last_summary_time = time.time()
+        stats = AttrDict()
+
+        stats.env_steps = self.env_steps
+        stats.lr = self.curr_lr
+        stats.actual_lr = train_loop_vars.actual_lr  # potentially scaled because of masked data
+
+        stats.update(self.actor_critic.summaries())
+
+        stats.valids_fraction = var.mb.valids.float().mean()
+        stats.same_policy_fraction = (var.mb.policy_id == self.policy_id).float().mean()
+
+        grad_norm = (
+            sum(p.grad.data.norm(2).item() ** 2 for p in self.actor_critic.parameters() if p.grad is not None) ** 0.5
+        )
+        stats.grad_norm = grad_norm
+        stats.loss = var.loss
+        stats.value = var.values.mean()
+        stats.entropy = var.action_distribution.entropy().mean()
+        stats.policy_loss = var.policy_loss
+        stats.kl_loss = var.kl_loss
+        stats.value_loss = var.value_loss
+        stats.exploration_loss = var.exploration_loss
+
+        stats.act_min = var.mb.actions.min()
+        stats.act_max = var.mb.actions.max()
+
+        stats.adv_min = var.mb.advantages.min()
+        stats.adv_max = var.mb.advantages.max()
+        stats.adv_std = var.adv_std
+        stats.adv_mean = var.adv_mean
+        stats.max_abs_logprob = torch.abs(var.mb.action_logits).max()
+
+        if hasattr(var.action_distribution, "summaries"):
+            stats.update(var.action_distribution.summaries())
+
+        if var.epoch == self.cfg.num_epochs - 1 and var.batch_num == len(var.minibatches) - 1:
+            # we collect these stats only for the last PPO batch, or every time if we're only doing one batch, IMPALA-style
+            valid_ratios = masked_select(var.ratio, var.mb.valids, var.num_invalids)
+            ratio_mean = torch.abs(1.0 - valid_ratios).mean().detach()
+            ratio_min = valid_ratios.min().detach()
+            ratio_max = valid_ratios.max().detach()
+            # log.debug('Learner %d ratio mean min max %.4f %.4f %.4f', self.policy_id, ratio_mean.cpu().item(), ratio_min.cpu().item(), ratio_max.cpu().item())
+
+            value_delta = torch.abs(var.values - var.mb.values)
+            value_delta_avg, value_delta_max = value_delta.mean(), value_delta.max()
+
+            stats.kl_divergence = var.kl_old_mean
+            stats.kl_divergence_max = var.kl_old.max()
+            stats.value_delta = value_delta_avg
+            stats.value_delta_max = value_delta_max
+            # noinspection PyUnresolvedReferences
+            stats.fraction_clipped = (
+                (valid_ratios < var.clip_ratio_low).float() + (valid_ratios > var.clip_ratio_high).float()
+            ).mean()
+            stats.ratio_mean = ratio_mean
+            stats.ratio_min = ratio_min
+            stats.ratio_max = ratio_max
+            stats.num_sgd_steps = var.num_sgd_steps
+
+        # this caused numerical issues on some versions of PyTorch with second moment reaching infinity
+        adam_max_second_moment = 0.0
+        for key, tensor_state in self.optimizer.state.items():
+            if "exp_avg_sq" in tensor_state:
+                adam_max_second_moment = max(tensor_state["exp_avg_sq"].max().item(), adam_max_second_moment)
+        stats.adam_max_second_moment = adam_max_second_moment
+
+        version_diff = (var.curr_policy_version - var.mb.policy_version)[var.mb.policy_id == self.policy_id]
+        stats.version_diff_avg = version_diff.mean()
+        stats.version_diff_min = version_diff.min()
+        stats.version_diff_max = version_diff.max()
+
+        for key, value in stats.items():
+            stats[key] = to_scalar(value)
+        
+        return stats
+
+    def _prepare_and_normalize_obs(self, obs: TensorDict) -> TensorDict:
+        og_shape = dict()
+
+        # assuming obs is a flat dict, collapse time and envs dimensions into a single batch dimension
+        for key, x in obs.items():
+            og_shape[key] = x.shape
+            obs[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
+
+        # hold the lock while we alter the state of the normalizer since they can be used in other processes too
+        with self.param_server.policy_lock:
+            normalized_obs = prepare_and_normalize_obs(self.actor_critic, obs)
+
+        # restore original shape
+        for key, x in normalized_obs.items():
+            normalized_obs[key] = x.view(og_shape[key])
+
+        return normalized_obs
+
+    def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
+        with torch.no_grad():
+            # create a shallow copy so we can modify the dictionary
+            # we still reference the same buffers though
+            buff = shallow_recursive_copy(batch)
+
+            # ignore experience from other agents (i.e. on episode boundary) and from inactive agents
+            valids: Tensor = buff["policy_id"] == self.policy_id
+            # ignore experience that was older than the threshold even before training started
+            curr_policy_version: int = self.train_step
+            buff["valids"][:, :-1] = valids & (curr_policy_version - buff["policy_version"] < self.cfg.max_policy_lag)
+            # for last T+1 step, we want to use the validity of the previous step
+            buff["valids"][:, -1] = buff["valids"][:, -2]
+
+            # ensure we're in train mode so that normalization statistics are updated
+            if not self.actor_critic.training:
+                self.actor_critic.train()
+
+            buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
+            del buff["obs"]  # don't need non-normalized obs anymore
+
+            # calculate estimated value for the next step (T+1)
+            normalized_last_obs = buff["normalized_obs"][:, -1]
+            next_values = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)["values"]
+            buff["values"][:, -1] = next_values
+
+            if self.cfg.normalize_returns:
+                # Since our value targets are normalized, the values will also have normalized statistics.
+                # We need to denormalize them before using them for GAE caculation and value bootstrapping.
+                # rl_games PPO uses a similar approach, see:
+                # https://github.com/Denys88/rl_games/blob/7b5f9500ee65ae0832a7d8613b019c333ecd932c/rl_games/algos_torch/models.py#L51
+                denormalized_values = buff["values"].clone()  # need to clone since normalizer is in-place
+                self.actor_critic.returns_normalizer(denormalized_values, denormalize=True)
+            else:
+                # values are not normalized in this case, so we can use them as is
+                denormalized_values = buff["values"]
+
+            if self.cfg.value_bootstrap:
+                # Value bootstrapping is a technique that reduces the surprise for the critic in case
+                # we're ending the episode by timeout. Intuitively, in this case the cumulative return for the last step
+                # should not be zero, but rather what the critic expects. This improves learning in many envs
+                # because otherwise the critic cannot predict the abrupt change in rewards in a timed-out episode.
+                # What we really want here is v(t+1) which we don't have because we don't have obs(t+1) (since
+                # the episode ended). Using v(t) is an approximation that requires that rew(t) can be generally ignored.
+
+                # Multiply by both time_out and done flags to make sure we count only timeouts in terminal states.
+                # There was a bug in older versions of isaacgym where timeouts were reported for non-terminal states.
+                buff["rewards"].add_(self.cfg.gamma * denormalized_values[:, :-1] * buff["time_outs"] * buff["dones"])
+
+            if not self.cfg.with_vtrace:
+                # calculate advantage estimate (in case of V-trace it is done separately for each minibatch)
+                buff["advantages"] = gae_advantages(
+                    buff["rewards"],
+                    buff["dones"],
+                    denormalized_values,
+                    buff["valids"],
+                    self.cfg.gamma,
+                    self.cfg.gae_lambda,
+                )
+                # here returns are not normalized yet, so we should use denormalized values
+                buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
+
+            # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
+            for key in ["normalized_obs", "rnn_states", "values", "valids"]:
+                buff[key] = buff[key][:, :-1]
+
+            dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
+            for d, k, v in iterate_recursively(buff):
+                # collapse first two dimensions (batch and time) into a single dimension
+                d[k] = v.reshape((dataset_size,) + tuple(v.shape[2:]))
+
+            buff["dones_cpu"] = buff["dones"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
+            buff["rewards_cpu"] = buff["rewards"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
+
+            # return normalization parameters are only used on the learner, no need to lock the mutex
+            if self.cfg.normalize_returns:
+                self.actor_critic.returns_normalizer(buff["returns"])  # in-place
+
+            num_invalids = dataset_size - buff["valids"].sum().item()
+            if num_invalids > 0:
+                invalid_fraction = num_invalids / dataset_size
+                if invalid_fraction > 0.5:
+                    log.warning(f"{self.policy_id=} batch has {invalid_fraction:.2%} of invalid samples")
+
+                # invalid action values can cause problems when we calculate logprobs
+                # here we set them to 0 just to be safe
+                invalid_indices = (buff["valids"] == 0).nonzero().squeeze()
+                buff["actions"][invalid_indices] = 0
+                # likewise, some invalid values of log_prob_actions can cause NaNs or infs
+                buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
+
+            return buff, dataset_size, num_invalids
+
+    def train(self, batch: TensorDict) -> Optional[Dict]:
+        with self.timing.add_time("misc"):
+            self._maybe_update_cfg()
+            self._maybe_load_policy()
+
+        with self.timing.add_time("prepare_batch"):
+            buff, experience_size, num_invalids = self._prepare_batch(batch)
+
+        if num_invalids >= experience_size:
+            if self.cfg.with_pbt:
+                log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
+            else:
+                log.error(f"Learner {self.policy_id=} received an entire batch of invalid data, skipping...")
+            return None
+        else:
+            with self.timing.add_time("train"):
+                train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
+
+            # multiply the number of samples by frameskip so that FPS metrics reflect the number
+            # of environment steps actually simulated
+            if self.cfg.summaries_use_frameskip:
+                self.env_steps += experience_size * self.env_info.frameskip
+            else:
+                self.env_steps += experience_size
+
+            stats = {LEARNER_ENV_STEPS: self.env_steps, POLICY_ID_KEY: self.policy_id}
+            if train_stats is not None:
+                if train_stats is not None:
+                    stats[TRAIN_STATS] = train_stats
+                stats[STATS_KEY] = memory_stats("learner", self.device)
+
+            return stats
+
+class DefaultLearner(BaseLearner):
+    def __init__(
+        self,
+        cfg: Config,
+        env_info: EnvInfo,
+        policy_versions_tensor: Tensor,
+        policy_id: PolicyID,
+        param_server: ParameterServer,
+    ):
+        BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
+        # We could put these functions in the BaseLearner and always overwrite them.. might change this later
+        # For now this seems a bit cleaner
+    
+    def _calculate_losses(
+        self, mb: AttrDict, num_invalids: int
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+        with torch.no_grad(), self.timing.add_time("losses_init"):
+            recurrence: int = self.cfg.recurrence
+
+            # PPO clipping
+            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
+            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
+            clip_ratio_low = 1.0 / clip_ratio_high
+            clip_value = self.cfg.ppo_clip_value
+
+            valids = mb.valids
+
+        outputs = self._forward_pass(mb = mb, recurrence=recurrence, valids = valids, return_outputs=[True,False,True])
+
+        with self.timing.add_time("post_forward"):
             action_distribution = self.actor_critic.action_distribution()
             log_prob_actions = action_distribution.log_prob(mb.actions)
             ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
@@ -634,9 +893,8 @@ class Learner(Configurable):
             # super large/small values can cause numerical problems and are probably noise anyway
             ratio = torch.clamp(ratio, 0.05, 20.0)
 
-            values = result["values"].squeeze()
-
-            del core_outputs
+            values = outputs.result["values"].squeeze()
+        
 
         # these computations are not the part of the computation graph
         with torch.no_grad(), self.timing.add_time("advantages_returns"):
@@ -653,8 +911,8 @@ class Learner(Configurable):
                 vtrace_rho = torch.min(rho_hat, ratios_cpu)
                 vtrace_c = torch.min(c_hat, ratios_cpu)
 
-                vs = torch.zeros((num_trajectories * recurrence))
-                adv = torch.zeros((num_trajectories * recurrence))
+                vs = torch.zeros((outputs.num_trajectories * recurrence))
+                adv = torch.zeros((outputs.num_trajectories * recurrence))
 
                 next_values = values_cpu[recurrence - 1 :: recurrence] - rewards_cpu[recurrence - 1 :: recurrence]
                 next_values /= self.cfg.gamma
@@ -686,13 +944,12 @@ class Learner(Configurable):
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
-
-
-
+            log.info(f'Advantage Shape: {adv.shape}')
 
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
+            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
             
             policy_loss += l1_loss
             
@@ -707,15 +964,15 @@ class Learner(Configurable):
             ratio=ratio,
             clip_ratio_low=clip_ratio_low,
             clip_ratio_high=clip_ratio_high,
-            values=result["values"],
+            values=outputs.result["values"],
             adv=adv,
             adv_std=adv_std,
             adv_mean=adv_mean,
-            distance_metric=distance_matrix,
         )
+        del outputs
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
-
+    
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
     ) -> Optional[AttrDict]:
@@ -887,234 +1144,16 @@ class Learner(Configurable):
             prev_epoch_actor_loss = new_epoch_actor_loss
 
         return stats_and_summaries
+    
 
-    def _record_summaries(self, train_loop_vars) -> AttrDict:
-        var = train_loop_vars
 
-        self.last_summary_time = time.time()
-        stats = AttrDict()
+def default_make_learner_func(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
+    return DefaultLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
 
-        stats.env_steps = self.env_steps
-        stats.lr = self.curr_lr
-        stats.actual_lr = train_loop_vars.actual_lr  # potentially scaled because of masked data
 
-        stats.update(self.actor_critic.summaries())
+def create_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
+    # check if user specified custom actor/critic creation function
+    from sample_factory.algo.utils.model_context import global_learner_factory
 
-        stats.valids_fraction = var.mb.valids.float().mean()
-        stats.same_policy_fraction = (var.mb.policy_id == self.policy_id).float().mean()
-
-        grad_norm = (
-            sum(p.grad.data.norm(2).item() ** 2 for p in self.actor_critic.parameters() if p.grad is not None) ** 0.5
-        )
-        stats.grad_norm = grad_norm
-        stats.loss = var.loss
-        stats.value = var.values.mean()
-        stats.entropy = var.action_distribution.entropy().mean()
-        stats.policy_loss = var.policy_loss
-        stats.kl_loss = var.kl_loss
-        stats.value_loss = var.value_loss
-        stats.exploration_loss = var.exploration_loss
-
-        stats.act_min = var.mb.actions.min()
-        stats.act_max = var.mb.actions.max()
-
-        stats.adv_min = var.mb.advantages.min()
-        stats.adv_max = var.mb.advantages.max()
-        stats.adv_std = var.adv_std
-        stats.adv_mean = var.adv_mean
-        stats.max_abs_logprob = torch.abs(var.mb.action_logits).max()
-
-        if hasattr(var.action_distribution, "summaries"):
-            stats.update(var.action_distribution.summaries())
-
-        if var.epoch == self.cfg.num_epochs - 1 and var.batch_num == len(var.minibatches) - 1:
-            # we collect these stats only for the last PPO batch, or every time if we're only doing one batch, IMPALA-style
-            valid_ratios = masked_select(var.ratio, var.mb.valids, var.num_invalids)
-            ratio_mean = torch.abs(1.0 - valid_ratios).mean().detach()
-            ratio_min = valid_ratios.min().detach()
-            ratio_max = valid_ratios.max().detach()
-            # log.debug('Learner %d ratio mean min max %.4f %.4f %.4f', self.policy_id, ratio_mean.cpu().item(), ratio_min.cpu().item(), ratio_max.cpu().item())
-
-            value_delta = torch.abs(var.values - var.mb.values)
-            value_delta_avg, value_delta_max = value_delta.mean(), value_delta.max()
-
-            stats.kl_divergence = var.kl_old_mean
-            stats.kl_divergence_max = var.kl_old.max()
-            stats.value_delta = value_delta_avg
-            stats.value_delta_max = value_delta_max
-            # noinspection PyUnresolvedReferences
-            stats.fraction_clipped = (
-                (valid_ratios < var.clip_ratio_low).float() + (valid_ratios > var.clip_ratio_high).float()
-            ).mean()
-            stats.ratio_mean = ratio_mean
-            stats.ratio_min = ratio_min
-            stats.ratio_max = ratio_max
-            stats.num_sgd_steps = var.num_sgd_steps
-
-        # this caused numerical issues on some versions of PyTorch with second moment reaching infinity
-        adam_max_second_moment = 0.0
-        for key, tensor_state in self.optimizer.state.items():
-            if "exp_avg_sq" in tensor_state:
-                adam_max_second_moment = max(tensor_state["exp_avg_sq"].max().item(), adam_max_second_moment)
-        stats.adam_max_second_moment = adam_max_second_moment
-
-        version_diff = (var.curr_policy_version - var.mb.policy_version)[var.mb.policy_id == self.policy_id]
-        stats.version_diff_avg = version_diff.mean()
-        stats.version_diff_min = version_diff.min()
-        stats.version_diff_max = version_diff.max()
-
-        for key, value in stats.items():
-            stats[key] = to_scalar(value)
-        
-        if var.distance_metric != None:
-            summed = torch.sum(torch.sum(var.distance_metric.to(dtype=torch.float),dim=-1),dim=-1)
-            value = summed/(var.distance_metric.shape[1]**2)
-            meaned_value, stded_value = torch.std_mean(value)
-            stats.distance_metric = meaned_value.detach()
-            stats.distance_metric_std = stded_value.detach()
-
-        return stats
-
-    def _prepare_and_normalize_obs(self, obs: TensorDict) -> TensorDict:
-        og_shape = dict()
-
-        # assuming obs is a flat dict, collapse time and envs dimensions into a single batch dimension
-        for key, x in obs.items():
-            og_shape[key] = x.shape
-            obs[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
-
-        # hold the lock while we alter the state of the normalizer since they can be used in other processes too
-        with self.param_server.policy_lock:
-            normalized_obs = prepare_and_normalize_obs(self.actor_critic, obs)
-
-        # restore original shape
-        for key, x in normalized_obs.items():
-            normalized_obs[key] = x.view(og_shape[key])
-
-        return normalized_obs
-
-    def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
-        with torch.no_grad():
-            # create a shallow copy so we can modify the dictionary
-            # we still reference the same buffers though
-            buff = shallow_recursive_copy(batch)
-
-            # ignore experience from other agents (i.e. on episode boundary) and from inactive agents
-            valids: Tensor = buff["policy_id"] == self.policy_id
-            # ignore experience that was older than the threshold even before training started
-            curr_policy_version: int = self.train_step
-            buff["valids"][:, :-1] = valids & (curr_policy_version - buff["policy_version"] < self.cfg.max_policy_lag)
-            # for last T+1 step, we want to use the validity of the previous step
-            buff["valids"][:, -1] = buff["valids"][:, -2]
-
-            # ensure we're in train mode so that normalization statistics are updated
-            if not self.actor_critic.training:
-                self.actor_critic.train()
-
-            buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
-            del buff["obs"]  # don't need non-normalized obs anymore
-
-            # calculate estimated value for the next step (T+1)
-            normalized_last_obs = buff["normalized_obs"][:, -1]
-            next_values = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)["values"]
-            buff["values"][:, -1] = next_values
-
-            if self.cfg.normalize_returns:
-                # Since our value targets are normalized, the values will also have normalized statistics.
-                # We need to denormalize them before using them for GAE caculation and value bootstrapping.
-                # rl_games PPO uses a similar approach, see:
-                # https://github.com/Denys88/rl_games/blob/7b5f9500ee65ae0832a7d8613b019c333ecd932c/rl_games/algos_torch/models.py#L51
-                denormalized_values = buff["values"].clone()  # need to clone since normalizer is in-place
-                self.actor_critic.returns_normalizer(denormalized_values, denormalize=True)
-            else:
-                # values are not normalized in this case, so we can use them as is
-                denormalized_values = buff["values"]
-
-            if self.cfg.value_bootstrap:
-                # Value bootstrapping is a technique that reduces the surprise for the critic in case
-                # we're ending the episode by timeout. Intuitively, in this case the cumulative return for the last step
-                # should not be zero, but rather what the critic expects. This improves learning in many envs
-                # because otherwise the critic cannot predict the abrupt change in rewards in a timed-out episode.
-                # What we really want here is v(t+1) which we don't have because we don't have obs(t+1) (since
-                # the episode ended). Using v(t) is an approximation that requires that rew(t) can be generally ignored.
-
-                # Multiply by both time_out and done flags to make sure we count only timeouts in terminal states.
-                # There was a bug in older versions of isaacgym where timeouts were reported for non-terminal states.
-                buff["rewards"].add_(self.cfg.gamma * denormalized_values[:, :-1] * buff["time_outs"] * buff["dones"])
-
-            if not self.cfg.with_vtrace:
-                # calculate advantage estimate (in case of V-trace it is done separately for each minibatch)
-                buff["advantages"] = gae_advantages(
-                    buff["rewards"],
-                    buff["dones"],
-                    denormalized_values,
-                    buff["valids"],
-                    self.cfg.gamma,
-                    self.cfg.gae_lambda,
-                )
-                # here returns are not normalized yet, so we should use denormalized values
-                buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
-
-            # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
-            for key in ["normalized_obs", "rnn_states", "values", "valids"]:
-                buff[key] = buff[key][:, :-1]
-
-            dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
-            for d, k, v in iterate_recursively(buff):
-                # collapse first two dimensions (batch and time) into a single dimension
-                d[k] = v.reshape((dataset_size,) + tuple(v.shape[2:]))
-
-            buff["dones_cpu"] = buff["dones"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
-            buff["rewards_cpu"] = buff["rewards"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
-
-            # return normalization parameters are only used on the learner, no need to lock the mutex
-            if self.cfg.normalize_returns:
-                self.actor_critic.returns_normalizer(buff["returns"])  # in-place
-
-            num_invalids = dataset_size - buff["valids"].sum().item()
-            if num_invalids > 0:
-                invalid_fraction = num_invalids / dataset_size
-                if invalid_fraction > 0.5:
-                    log.warning(f"{self.policy_id=} batch has {invalid_fraction:.2%} of invalid samples")
-
-                # invalid action values can cause problems when we calculate logprobs
-                # here we set them to 0 just to be safe
-                invalid_indices = (buff["valids"] == 0).nonzero().squeeze()
-                buff["actions"][invalid_indices] = 0
-                # likewise, some invalid values of log_prob_actions can cause NaNs or infs
-                buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
-
-            return buff, dataset_size, num_invalids
-
-    def train(self, batch: TensorDict) -> Optional[Dict]:
-        with self.timing.add_time("misc"):
-            self._maybe_update_cfg()
-            self._maybe_load_policy()
-
-        with self.timing.add_time("prepare_batch"):
-            buff, experience_size, num_invalids = self._prepare_batch(batch)
-
-        if num_invalids >= experience_size:
-            if self.cfg.with_pbt:
-                log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
-            else:
-                log.error(f"Learner {self.policy_id=} received an entire batch of invalid data, skipping...")
-            return None
-        else:
-            with self.timing.add_time("train"):
-                train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
-
-            # multiply the number of samples by frameskip so that FPS metrics reflect the number
-            # of environment steps actually simulated
-            if self.cfg.summaries_use_frameskip:
-                self.env_steps += experience_size * self.env_info.frameskip
-            else:
-                self.env_steps += experience_size
-
-            stats = {LEARNER_ENV_STEPS: self.env_steps, POLICY_ID_KEY: self.policy_id}
-            if train_stats is not None:
-                if train_stats is not None:
-                    stats[TRAIN_STATS] = train_stats
-                stats[STATS_KEY] = memory_stats("learner", self.device)
-
-            return stats
+    make_learner_func = global_learner_factory().make_learner_func
+    return make_learner_func(cfg, env_info, policy_versions_tensor, policy_id, param_server)
