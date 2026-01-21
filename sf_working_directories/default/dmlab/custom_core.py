@@ -16,7 +16,6 @@ from sample_factory.model.core import ModelCore,ModelCoreIdentity,ModelCoreRNN
 
 
 
-
 class FixedRNNSequenceCore(ModelCore):
     def __init__(self, cfg, input_size):
         """

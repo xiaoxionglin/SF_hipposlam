@@ -78,3 +78,104 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+
+
+    p.add_argument("--other_checkpint_path", default=None, type=str, help="load from other exps checkpoints")
+
+    
+###    Transformer decoder parameters
+
+    p.add_argument(
+        "--decoder_type",
+        default="mlp",
+        type=str,
+        choices=["mlp", "sr_transformer"],
+        help="Decoder type: standard MLP or shift-register transformer",
+    )
+
+    # p.add_argument(
+    #     "--decoder_sr_T",
+    #     default=None,
+    #     type=int,
+    #     help="Shift-register window length T (expanded_length). If None, inferred as Hippo_R + Hippo_L - 1.",
+    # )
+    # p.add_argument(
+    #     "--decoder_sr_df",
+    #     default=None,
+    #     type=int,
+    #     help="Per-token feature dimension d_f (usually Hippo_n_feature). If None, inferred from Hippo_n_feature.",
+    # )
+    # p.add_argument(
+    #     "--decoder_sr_bypass_size",
+    #     default=None,
+    #     type=int,
+    #     help="Bypass feature size appended after T*d_f. If None, inferred from core_input_size.",
+    # )
+    p.add_argument(
+        "--decoder_sr_include_bypass_in_output",
+        default=True,
+        type=str2bool,
+        help="If True, append bypass features to decoder output",
+    )
+
+    # -------------------------------------------------------------------------
+    # Transformer core (decoder)
+    # -------------------------------------------------------------------------
+    p.add_argument("--decoder_attn_d_model", default=64, type=int, help="Transformer model width d_model")
+    p.add_argument("--decoder_attn_n_heads", default=1, type=int, help="Number of attention heads")
+    p.add_argument(
+        "--decoder_attn_d_ff",
+        default=None,
+        type=int,
+        help="Transformer FFN hidden size. If None, uses 4*d_model",
+    )
+    p.add_argument("--decoder_attn_dropout", default=0.0, type=float, help="Dropout probability in transformer decoder")
+
+    # -------------------------------------------------------------------------
+    # Positional encoding for decoder transformer
+    # -------------------------------------------------------------------------
+    p.add_argument(
+        "--decoder_attn_pos_mode",
+        default="rope",
+        type=str,
+        choices=["none", "sin_add", "learned_add", "concat_sin", "concat_fourier", "rope" ,"concat_smoothed"],
+        help="Positional encoding mode for transformer decoder",
+    )
+    p.add_argument(
+        "--decoder_attn_d_p",
+        default=16,
+        type=int,
+        help="Positional encoding dimension when using concat_* modes",
+    )
+    p.add_argument(
+        "--decoder_attn_fourier_max_freq",
+        default=1.0,
+        type=float,
+        help="Max frequency for concat_fourier positional encoding",
+    )
+    p.add_argument(
+        "--decoder_attn_rope_base",
+        default=100.0,
+        type=float,
+        help="Base for RoPE positional encoding",
+    )
+
+    # -------------------------------------------------------------------------
+    # Decoder output
+    # -------------------------------------------------------------------------
+    p.add_argument(
+        "--decoder_attn_out_dim",
+        default=128,
+        type=int,
+        help="Output dimension of transformer decoder (before policy head)",
+    )
+
+    # Smoothed canonical time basis (only used when pos_mode=concat_smoothed)
+    p.add_argument("--decoder_attn_time_basis_normalize", default=True, type=str2bool,
+                help="Normalize rows of smoothed time basis so they sum to 1")
+
+    # Readout options
+    p.add_argument("--decoder_attn_readout_mode", default="last", type=str,
+                help="Readout mode: last|weighted_sum")
+    p.add_argument("--decoder_attn_readout_attn_hidden", default=0, type=int,
+                help="Hidden dim for pooling scorer. 0 => linear scorer.")
