@@ -24,7 +24,7 @@ from sample_factory.utils.dicts import iterate_recursively
 
 from sample_factory.algo.learning.learner import BaseLearner, DefaultLearner
 
-from sf_workingdir.dmlab.custom_core import straight_through_binary
+from sf_working_directories.jannek.dmlab.custom_core import straight_through_binary
 
 
 
@@ -66,6 +66,14 @@ class BaseDistanceRecorder(BaseLearner):
         return re.sub(r'see_\d+', f'see_{self.cfg.seed}', checkpoint_path)
     
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
+        """
+        Docstring for load_from_checkpoint
+        
+        :param policy_id: Description
+        :type policy_id: PolicyID
+        :param load_progress: Description
+        :type load_progress: bool
+        """
         name_prefix = dict(latest="checkpoint", best="best")[self.cfg.load_checkpoint_kind]
         checkpoints = self.get_checkpoints(self.checkpoint_dir(self.cfg, policy_id), pattern=f"{name_prefix}_*")
         if self.cfg.load_model_path and load_progress: # Hacky way to prevent this injection from happening every time pbt replaces a policy
@@ -83,6 +91,15 @@ class BaseDistanceRecorder(BaseLearner):
                 self._maybe_reset_decoder()
     
     def _calculate_sequence_core(self, rnn_state:Tensor, minibatch_size:int|tuple):
+        """
+        From rnn states this returns just the sequence core with all units that are part of a sequence.
+        Additionally it returns L+R-1 as a value.
+        
+        :param rnn_state: Batched rnn states.
+        :type rnn_state: Tensor
+        :param minibatch_size: The number of minibatches (forward pass records this automatically during calculation of the head output.)
+        :type minibatch_size: int | tuple
+        """
     #     log.debug(f'minibatch_size: {minibatch_size}')
         R = getattr(self.cfg, 'Hippo_R', 8)
         L = getattr(self.cfg, 'Hippo_L', 48)
@@ -94,9 +111,29 @@ class BaseDistanceRecorder(BaseLearner):
         return rnn_state[:, :core_output_size].view(minibatch_size, hippo_n_feature, expanded_length), expanded_length
     
     def _calculate_progression(self, sequence_core):
+        """
+        For one time step this gives a tensor where each entry is a number showing how far the corresponding indexed sequence activation progressed.
+        Must be batched? Might be easily adaptable though.
+        0: just activated
+        L+R-1: Fading out
+        
+        :param sequence_core: The sequence core. Can be batched I think.
+        """
         return torch.argmax(torch.cat(((sequence_core != 0).to(dtype=torch.int), torch.ones(sequence_core.shape[:-1] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
 
     def _record_distance_matrix(self, core_outputs, minibatch_size: int, masked_matrix: bool = True, return_progression: bool = False):
+        """
+        Calculates the distance matrix (see Janneks report) and returns a full matrix as well as a masked version for 
+        the distances between active sequences only.
+        
+        :param core_outputs: The core outputs as recorded from a forward pass. Must be batched? Might be easily adaptable though.
+        :param minibatch_size: The number of minibatches (forward pass records this automatically during calculation of the head output.)
+        :type minibatch_size: int
+        :param masked_matrix: Wether the masked_matrix should be returned. If *False*: returns a null-tensor instead
+        :type masked_matrix: bool
+        :param return_progression: Wether the progression tensor is returned. If *False*: Only the two matrices are returned
+        :type return_progression: bool
+        """
         locale_verbose = False
         if getattr(self.cfg, 'rec_distances', None) or getattr(self.cfg, 'distance_learning', None):
             sequence_core, _ = self._calculate_sequence_core(core_outputs, minibatch_size)

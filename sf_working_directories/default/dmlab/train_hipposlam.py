@@ -5,7 +5,7 @@ from typing import Optional
 from tensorboardX import SummaryWriter
 
 from sample_factory.algo.runners.runner import AlgoObserver, Runner
-from sample_factory.algo.utils.context import global_model_factory
+from sample_factory.algo.utils.model_context import global_model_factory, global_learner_factory
 from sample_factory.algo.utils.misc import ExperimentStatus
 from sample_factory.algo.utils.multiprocessing_utils import get_mp_ctx
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
@@ -13,16 +13,22 @@ from sample_factory.envs.env_utils import register_env
 from sample_factory.train import make_runner
 from sample_factory.utils.typing import Config, Env, PolicyID
 from sample_factory.utils.utils import experiment_dir
-from sf_examples.dmlab.dmlab_env import (
+
+from sf_working_directories.default.dmlab.dmlab_env import (
     DMLAB_ENVS,
     dmlab_extra_episodic_stats_processing,
     dmlab_extra_summaries,
     list_all_levels_for_experiment,
     make_dmlab_env,
 )
-from sf_examples.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_caches
-from sf_examples.dmlab.dmlab_model import make_dmlab_encoder
-from sf_examples.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
+from sf_working_directories.default.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_caches
+from sf_working_directories.default.dmlab.custom_core import make_hipposlam_core
+from sf_working_directories.default.dmlab.custom_encoder import make_hipposlam_encoder
+from sf_working_directories.default.dmlab.custom_decoder import make_hipposlam_decoder
+# from sf_working_directories.default.dmlab.custom_learner import make_hipposlam_learner
+# from sf_working_directories.default.dmlab.custom_actor_critic import make_hipposlam_actor_critic
+from sf_working_directories.default.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
+from sf_working_directories.default.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
 
 
 class DmlabEnvWithCache:
@@ -41,12 +47,18 @@ def register_dmlab_envs(level_caches: Optional[DmlabLevelCaches] = None):
 
 def register_dmlab_components(level_caches: Optional[DmlabLevelCaches] = None):
     register_dmlab_envs(level_caches)
-    global_model_factory().register_encoder_factory(make_dmlab_encoder)
+    global_model_factory().register_encoder_factory(make_hipposlam_encoder)
+    global_model_factory().register_model_core_factory(make_hipposlam_core)
+    global_model_factory().register_decoder_factory(make_hipposlam_decoder)
+
+    # global_model_factory().register_actor_critic_factory(make_hipposlam_actor_critic)
+
+    # global_learner_factory().register_learner_factory(make_hipposlam_learner)
 
 
 class DmlabExtraSummariesObserver(AlgoObserver):
     def extra_summaries(self, runner: Runner, policy_id: PolicyID, writer: SummaryWriter, env_steps: int) -> None:
-        dmlab_extra_summaries(runner, policy_id, env_steps, writer)
+        dmlab_extra_summaries(runner, policy_id, writer, env_steps)
 
 
 def register_msg_handlers(cfg: Config, runner: Runner):
@@ -67,12 +79,22 @@ def initialize_level_cache(cfg: Config, mp_ctx: BaseContext) -> Optional[DmlabLe
     caches = make_dmlab_caches(experiment_dir(cfg), all_levels, num_policies, level_cache_dir, mp_ctx)
     return caches
 
+def maybe_overwrite_rnn_size(cfg):
+    if getattr(cfg, 'cli_args.rnn_size', 0) == 0:
+        R = getattr(cfg, 'Hippo_R', 8)
+        L = getattr(cfg, 'Hippo_L', 48)
+        hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        rnn_size = hippo_n_feature * (R + L - 1) + 13
+        cfg.cli_args["rnn_size"] = rnn_size
+        cfg.rnn_size = rnn_size
 
 def parse_dmlab_args(argv=None, evaluation=False):
     parser, cfg = parse_sf_args(argv, evaluation=evaluation)
+    add_hipposlam_env_args(parser)
     add_dmlab_env_args(parser)
-    dmlab_override_defaults(parser)
+    hipposlam_override_defaults(parser)
     cfg = parse_full_cfg(parser, argv)
+    maybe_overwrite_rnn_size(cfg)
     return cfg
 
 
@@ -87,6 +109,7 @@ def main():
 
     level_caches = initialize_level_cache(cfg, get_mp_ctx(cfg.serial_mode))
     register_dmlab_components(level_caches)
+        
 
     status = runner.init()
     if status == ExperimentStatus.SUCCESS:

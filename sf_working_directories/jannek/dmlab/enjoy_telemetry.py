@@ -21,8 +21,8 @@ from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.utils import experiment_dir, log
 
-from sf_workingdir.dmlab.custom_learner import BaseDistanceRecorder
-from sf_workingdir.dmlab.custom_decoder import MlpDecoderJit
+from sf_working_directories.jannek.dmlab.custom_learner import BaseDistanceRecorder
+from sf_working_directories.jannek.dmlab.custom_decoder import MlpDecoderJit
 
 # import datetime, pathlib, json, pandas as pd, torch, h5py
 

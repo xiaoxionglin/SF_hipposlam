@@ -6,10 +6,10 @@ import argparse
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
 from sample_factory.utils.utils import experiment_dir, log, get_folder_names, get_file_names
 
-from sf_workingdir.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components, maybe_overwrite_rnn_size
-from sf_workingdir.dmlab.dmlab_params import add_dmlab_env_args
-from sf_workingdir.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
-from sf_workingdir.dmlab.enjoy_telemetry import single_run
+from sf_working_directories.jannek.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components, maybe_overwrite_rnn_size
+from sf_working_directories.jannek.dmlab.dmlab_params import add_dmlab_env_args
+from sf_working_directories.jannek.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
+from sf_working_directories.jannek.dmlab.enjoy_telemetry import single_run
 
 # ---------------------------------------------------------------------------
 # logging helpers (put near the top of the file, after imports)

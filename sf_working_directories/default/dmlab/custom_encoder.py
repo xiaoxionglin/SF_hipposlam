@@ -19,9 +19,9 @@ from sample_factory.utils.utils import log
 
 
 from sample_factory.model.encoder import Encoder, ResnetEncoder, ConvEncoder
-from sf_examples.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
+from sf_working_directories.default.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
 
-from sf_examples.dmlab.dmlab_model import DmlabEncoder
+from sf_working_directories.default.dmlab.dmlab_model import DmlabEncoder
 
 
 

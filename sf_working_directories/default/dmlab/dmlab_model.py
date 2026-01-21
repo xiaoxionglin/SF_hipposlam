@@ -5,7 +5,7 @@ from sample_factory.model.encoder import Encoder, make_img_encoder
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.typing import Config, ObsSpace
 from sample_factory.utils.utils import log
-from sf_examples.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
+from sf_working_directories.default.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
 
 
 class DmlabEncoder(Encoder):

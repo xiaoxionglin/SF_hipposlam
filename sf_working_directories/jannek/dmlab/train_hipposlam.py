@@ -14,22 +14,22 @@ from sample_factory.train import make_runner
 from sample_factory.utils.typing import Config, Env, PolicyID
 from sample_factory.utils.utils import experiment_dir
 
-from sf_workingdir.dmlab.dmlab_env import (
+from sf_working_directories.jannek.dmlab.dmlab_env import (
     DMLAB_ENVS,
     dmlab_extra_episodic_stats_processing,
     dmlab_extra_summaries,
     list_all_levels_for_experiment,
     make_dmlab_env,
 )
-from sf_workingdir.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_caches
-# from sf_examples.dmlab.dmlab_model import make_dmlab_encoder
-from sf_workingdir.dmlab.custom_core import make_hipposlam_core
-from sf_workingdir.dmlab.custom_encoder import make_hipposlam_encoder
-from sf_workingdir.dmlab.custom_decoder import make_hipposlam_decoder
-from sf_workingdir.dmlab.custom_learner import make_hipposlam_learner
-from sf_workingdir.dmlab.custom_actor_critic import make_hipposlam_actor_critic
-from sf_workingdir.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
-from sf_workingdir.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
+from sf_working_directories.jannek.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_caches
+# from sf_working_directories.sf_examples.dmlab.dmlab_model import make_dmlab_encoder
+from sf_working_directories.jannek.dmlab.custom_core import make_hipposlam_core
+from sf_working_directories.jannek.dmlab.custom_encoder import make_hipposlam_encoder
+from sf_working_directories.jannek.dmlab.custom_decoder import make_hipposlam_decoder
+from sf_working_directories.jannek.dmlab.custom_learner import make_hipposlam_learner
+from sf_working_directories.jannek.dmlab.custom_actor_critic import make_hipposlam_actor_critic
+from sf_working_directories.jannek.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
+from sf_working_directories.jannek.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
 
 
 class DmlabEnvWithCache:
