@@ -34,8 +34,8 @@ from sample_factory.utils.typing import Config, StatusCode
 from sample_factory.utils.utils import debug_log_every_n, experiment_dir, log
 
 # from sample_factory.enjoy import enjoy
-from sf_workingdir.dmlab.enjoy_hipposlam import enjoy
-from sf_workingdir.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
+from sf_working_directories.jannek.dmlab.enjoy_hipposlam import enjoy
+from sf_working_directories.jannek.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
 
 # ---------------------------------------------------------------------------
 # logging helpers (put near the top of the file, after imports)
