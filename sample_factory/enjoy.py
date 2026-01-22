@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from sample_factory.algo.learning.learner import Learner
+from sample_factory.algo.learning.learner import BaseLearner
 from sample_factory.algo.sampling.batched_sampling import preprocess_actions
 from sample_factory.algo.utils.action_distributions import argmax_actions
 from sample_factory.algo.utils.env_info import extract_env_info
@@ -92,8 +92,8 @@ def make_env(cfg: Config, render_mode: Optional[str] = None) -> BatchedVecEnv:
 def load_state_dict(cfg: Config, actor_critic: ActorCritic, device: torch.device) -> None:
     policy_id = cfg.policy_index
     name_prefix = dict(latest="checkpoint", best="best")[cfg.load_checkpoint_kind]
-    checkpoints = Learner.get_checkpoints(Learner.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*")
-    checkpoint_dict = Learner.load_checkpoint(checkpoints, device)
+    checkpoints = BaseLearner.get_checkpoints(BaseLearner.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*")
+    checkpoint_dict = BaseLearner.load_checkpoint(checkpoints, device)
     if checkpoint_dict:
         actor_critic.load_state_dict(checkpoint_dict["model"])
     else:

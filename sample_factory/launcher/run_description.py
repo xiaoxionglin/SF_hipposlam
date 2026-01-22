@@ -125,16 +125,20 @@ class Experiment:
 
                     param_shorthands.append(shorthand)
                     experiment_name_token = f"{shorthand}_{value}"
-                    experiment_name_tokens.append(experiment_name_token)
+                    if "/" not in experiment_name_token:
+                        experiment_name_tokens.append(experiment_name_token)
 
             if customize_experiment_name:
                 experiment_name = f"{experiment_idx:02d}_" + "_".join(experiment_name_tokens)
                 if len(experiment_name) > 100:
-                    log.warning("Experiment name is extra long! (%d characters)", len(experiment_name))
+                    # TODO: Figure out a nice way to name the experiment with multiple different changing settings.
+                    log.warning("Experiment name is too long! (%d characters). Cutting the name of at character 100!", len(experiment_name))
+                    experiment_name = experiment_name[:100]
             else:
                 experiment_name = f"{experiment_idx:02d}_{self.base_name}"
 
             cmd_tokens.append(f"{experiment_arg_name}={experiment_name}")
+            log.debug(f"CMD Tokens: {cmd_tokens}")
             param_str = " ".join(cmd_tokens)
 
             yield param_str, experiment_name

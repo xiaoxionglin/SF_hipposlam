@@ -1,0 +1,19 @@
+- copy & rename sf_examples to create own working directory
+- update import dependencies from in:
+	- dmlab_env.py
+	- dmlab_gym.py
+- create custom model files (can be subdivided into encoder, decoder, core,...)
+	- if code is copied, update import dependencies
+- create custom train/enjoy/params.py files
+	- if code is copied, update import dependencies
+- create custom dmlab environment, if you copy one:
+	- update asset.pk3 to site-packages/deepmindlab/baselab
+	- add goal_transparent.md3 to site-packages/deepmindlab/baselab
+	- add level file to site-packages/deepmindlab/baselab/game_scripts/levels/
+		- can be in a custom folder
+	- add Level Reference to dmlab_env.py as relative path from the levels folder
+	- adapt dmlab_gym.py & dmlab_env.py -> see git
+- necessary changes in sample-factory
+	- https://github.com/alex-petrenko/sample-factory/commit/f40f61d310b864fe6868f6405084118b4942d1f8
+	- https://github.com/alex-petrenko/sample-factory/commit/b7eb811f661518863a5247d903ca8c8625f7a311
+	- https://github.com/alex-petrenko/sample-factory/commit/74dbe62ea11912fd7426bc2d6062f13bf1b5754d
