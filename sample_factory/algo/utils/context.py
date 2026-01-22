@@ -1,50 +1,60 @@
-from typing import Dict
+# from typing import Dict
 
-from sample_factory.model.model_factory import ModelFactory
-from sample_factory.utils.typing import CreateEnvFunc
-
-
-class SampleFactoryContext:
-    def __init__(self):
-        self.env_registry = dict()
-        self.model_factory = ModelFactory()
+# from sample_factory.model.model_factory import ModelFactory
+# from sample_factory.algo.learning.learner_factory import LearnerFactory
+# from sample_factory.utils.typing import CreateEnvFunc
 
 
-GLOBAL_CONTEXT = None
+# class SampleFactoryContext:
+#     def __init__(self):
+#         self.env_registry = dict()
+#         self.model_factory = ModelFactory()
+#         self.learner_factory = LearnerFactory()
 
 
-def sf_global_context() -> SampleFactoryContext:
-    global GLOBAL_CONTEXT
-    if GLOBAL_CONTEXT is None:
-        GLOBAL_CONTEXT = SampleFactoryContext()
-    return GLOBAL_CONTEXT
+# GLOBAL_CONTEXT = None
 
 
-def set_global_context(ctx: SampleFactoryContext):
-    global GLOBAL_CONTEXT
-    GLOBAL_CONTEXT = ctx
+# def sf_global_context() -> SampleFactoryContext:
+#     global GLOBAL_CONTEXT
+#     if GLOBAL_CONTEXT is None:
+#         GLOBAL_CONTEXT = SampleFactoryContext()
+#     return GLOBAL_CONTEXT
 
 
-def reset_global_context():
-    """
-    Most useful in tests, call this after any part of the global context has been modified
-    by a test in any way.
-    """
-    global GLOBAL_CONTEXT
-    GLOBAL_CONTEXT = SampleFactoryContext()
+# def set_global_context(ctx: SampleFactoryContext):
+#     global GLOBAL_CONTEXT
+#     GLOBAL_CONTEXT = ctx
 
 
-def global_env_registry() -> Dict[str, CreateEnvFunc]:
-    """
-    :return: global env registry
-    :rtype: EnvRegistry
-    """
-    return sf_global_context().env_registry
+# def reset_global_context():
+#     """
+#     Most useful in tests, call this after any part of the global context has been modified
+#     by a test in any way.
+#     """
+#     global GLOBAL_CONTEXT
+#     GLOBAL_CONTEXT = SampleFactoryContext()
 
 
-def global_model_factory() -> ModelFactory:
-    """
-    :return: global model factory
-    :rtype: ModelFactory
-    """
-    return sf_global_context().model_factory
+# def global_env_registry() -> Dict[str, CreateEnvFunc]:
+#     """
+#     :return: global env registry
+#     :rtype: EnvRegistry
+#     """
+#     return sf_global_context().env_registry
+
+
+# def global_model_factory() -> ModelFactory:
+#     """
+#     :return: global model factory
+#     :rtype: ModelFactory
+#     """
+#     return sf_global_context().model_factory
+
+
+# def global_learner_factory() -> LearnerFactory:
+#     """
+#     :return: global learner factory
+#     :rtype: LearnerFactory
+#     """
+#     return sf_global_context().learner_factory

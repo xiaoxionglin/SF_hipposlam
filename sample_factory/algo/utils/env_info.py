@@ -10,7 +10,9 @@ from typing import Dict, List, Optional
 import gymnasium as gym
 
 from sample_factory.algo.utils.action_distributions import calc_num_actions
-from sample_factory.algo.utils.context import set_global_context, sf_global_context
+
+# from sample_factory.algo.utils.context import set_global_context, sf_global_context
+from sample_factory.algo.utils.env_context import set_global_env_context, sf_global_env_context
 from sample_factory.algo.utils.make_env import BatchedVecEnv, NonBatchedVecEnv, make_env_func_batched
 from sample_factory.envs.env_utils import get_default_reward_shaping
 from sample_factory.utils.typing import Config
@@ -92,8 +94,8 @@ def check_env_info(env: BatchedVecEnv | NonBatchedVecEnv, env_info: EnvInfo, cfg
         raise ValueError("Env info mismatch. See logs above for details.")
 
 
-def spawn_tmp_env_and_get_info(sf_context, res_queue, cfg):
-    set_global_context(sf_context)
+def spawn_tmp_env_and_get_info(sf_context_env, res_queue, cfg):
+    set_global_env_context(sf_context_env)
 
     tmp_env = make_env_func_batched(cfg, env_config=None)
     env_info = extract_env_info(tmp_env, cfg)
@@ -117,11 +119,11 @@ def obtain_env_info_in_a_separate_process(cfg: Config) -> EnvInfo:
             if env_info.env_info_protocol_version == ENV_INFO_PROTOCOL_VERSION:
                 return env_info
 
-    sf_context = sf_global_context()
+    sf_context_env = sf_global_env_context()
 
     ctx = multiprocessing.get_context("spawn")
     q = ctx.Queue()
-    p = ctx.Process(target=spawn_tmp_env_and_get_info, args=(sf_context, q, cfg))
+    p = ctx.Process(target=spawn_tmp_env_and_get_info, args=(sf_context_env, q, cfg))
     p.start()
 
     env_info = q.get()

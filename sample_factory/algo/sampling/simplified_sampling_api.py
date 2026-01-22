@@ -41,16 +41,13 @@ class SamplingLoop(EventLoopObject, Configurable):
         self.stopped: bool = False
 
     @signal
-    def model_initialized(self):
-        ...
+    def model_initialized(self): ...
 
     @signal
-    def trajectory_buffers_available(self):
-        ...
+    def trajectory_buffers_available(self): ...
 
     @signal
-    def stop(self):
-        ...
+    def stop(self): ...
 
     def init(
         self, buffer_mgr: Optional[BufferMgr] = None, param_servers: Optional[Dict[PolicyID, ParameterServer]] = None

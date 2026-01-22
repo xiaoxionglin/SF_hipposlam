@@ -4,7 +4,7 @@ from functools import wraps
 from time import sleep
 from typing import Any, Dict, Optional
 
-from sample_factory.algo.utils.context import global_env_registry
+from sample_factory.algo.utils.env_context import global_env_registry
 from sample_factory.utils.typing import CreateEnvFunc
 from sample_factory.utils.utils import is_module_available, log
 

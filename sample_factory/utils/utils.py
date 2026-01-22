@@ -358,6 +358,32 @@ def set_process_cpu_affinity(worker_idx, num_workers):
 # working with filesystem
 
 
+def get_folder_names(path, sort_folders: bool = False):
+    """Return a list of folder names in the given directory."""
+    foldernames = [name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))]
+    if sort_folders:
+        return sorted(foldernames)
+    else:
+        return foldernames
+
+
+def get_file_names(path, ending: str = None, sort_files: bool = False):
+    """Return a list of .txt file names (not folders) in the given directory."""
+    if ending:
+        filenames = [
+            name
+            for name in os.listdir(path)
+            if os.path.isfile(os.path.join(path, name)) and name.lower().endswith(ending)
+        ]
+    else:
+        filenames = [name for name in os.listdir(path) if os.path.isfile(os.path.join(path, name))]
+
+    if sort_files:
+        return sorted(filenames)
+    else:
+        return filenames
+
+
 def ensure_dir_exists(path) -> str:
     if not os.path.exists(path):
         os.makedirs(path, exist_ok=True)
@@ -437,7 +463,9 @@ def git_root():
             if ".git" in os.listdir(curr_dir):
                 return curr_dir
         except PermissionError:
-            log.warn("PermissionError while looking for a git repo: Are you running the experiment from the right folder?")
+            log.warn(
+                "PermissionError while looking for a git repo: Are you running the experiment from the right folder?"
+            )
             break
 
         parent_dir = os.path.dirname(curr_dir)

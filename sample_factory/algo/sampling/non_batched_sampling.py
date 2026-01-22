@@ -75,7 +75,11 @@ class ActorState:
 
         self.last_obs = None
         self.last_rnn_state = None
-        self.last_value = None
+        if self.cfg.double_value:
+            self.last_value_external = None
+            self.last_value_internal = None
+        else:
+            self.last_value = None
 
         self.ready = False  # whether this agent received actions from the policy and can act in the environment again
 
@@ -490,7 +494,11 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
 
                     # this is an rnn state for the next iteration in the rollout
                     actor_state.last_rnn_state = policy_outputs_dict["new_rnn_states"]
-                    actor_state.last_value = policy_outputs_dict["values"].item()
+                    if self.cfg.double_value:
+                        actor_state.last_value_external = policy_outputs_dict["values_external"].item()
+                        actor_state.last_value_internal = policy_outputs_dict["values_internal"].item()
+                    else:
+                        actor_state.last_value = policy_outputs_dict["values"].item()
 
                     actor_state.ready = True
                 elif not actor_state.ready:

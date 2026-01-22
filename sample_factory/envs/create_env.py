@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sample_factory.algo.utils.context import global_env_registry
+from sample_factory.algo.utils.env_context import global_env_registry
 from sample_factory.algo.utils.gymnasium_utils import patch_non_gymnasium_env
 from sample_factory.envs.env_wrappers import EpisodeCounterWrapper
 from sample_factory.utils.attr_dict import AttrDict
