@@ -1,15 +1,12 @@
 from typing import Callable
 
-from sample_factory.algo.learning.learner import BaseLearner, default_make_learner_func
-
-from sample_factory.utils.typing import Config, PolicyID
-from sample_factory.algo.utils.model_sharing import ParameterServer
-from sample_factory.algo.utils.env_info import EnvInfo
 from torch import Tensor
 
-
+from sample_factory.algo.learning.learner import BaseLearner, default_make_learner_func
+from sample_factory.algo.utils.env_info import EnvInfo
+from sample_factory.algo.utils.model_sharing import ParameterServer
+from sample_factory.utils.typing import Config, PolicyID
 from sample_factory.utils.utils import log
-
 
 MakeLearnerFunc = Callable[[Config, EnvInfo, Tensor, PolicyID, ParameterServer], BaseLearner]
 
@@ -22,7 +19,6 @@ class LearnerFactory:
         """
 
         self.make_learner_func: MakeLearnerFunc = default_make_learner_func
-
 
     def register_learner_factory(self, make_learner_func: MakeLearnerFunc):
         """

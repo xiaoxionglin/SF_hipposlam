@@ -1,13 +1,13 @@
-import numpy as np
-import pandas as pd
-import json
 import datetime
+import json
 import pathlib
-import torch
-import h5py
 import time
 from collections import deque
 
+import h5py
+import numpy as np
+import pandas as pd
+import torch
 
 from sample_factory.algo.sampling.batched_sampling import preprocess_actions
 from sample_factory.algo.utils.action_distributions import argmax_actions
@@ -20,24 +20,25 @@ from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.utils import experiment_dir, log
-
-from sf_working_directories.jannek.dmlab.custom_learner import BaseDistanceRecorder
 from sf_working_directories.jannek.dmlab.custom_decoder import MlpDecoderJit
+from sf_working_directories.jannek.dmlab.custom_learner import BaseDistanceRecorder
 
 # import datetime, pathlib, json, pandas as pd, torch, h5py
+
 
 def _ensure_parent(path: pathlib.Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
+
 def save_telemetry(cfg, pose_records, act_buffers, time_str: str):
-    ts        = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     telemetry = pathlib.Path(experiment_dir(cfg=cfg)) / "telemetry" / time_str
     _ensure_parent(telemetry)
     pose_path = telemetry / f"pose_{ts}.parquet"
 
     csv_path = pose_path.with_suffix(".csv")
     _ensure_parent(csv_path)
-    pddata=pd.DataFrame(pose_records)
+    pddata = pd.DataFrame(pose_records)
     pddata.to_csv(csv_path, index=False)
     log.info("Saved %d pose rows to %s", len(pose_records), csv_path)
 
@@ -47,19 +48,20 @@ def save_telemetry(cfg, pose_records, act_buffers, time_str: str):
     act_path = telemetry / f"activations_{ts}.h5"
     with h5py.File(act_path, "w") as h5:
         for layer, lst in act_buffers.items():
-            if not lst:            # nothing recorded for that layer
+            if not lst:  # nothing recorded for that layer
                 continue
-            data = torch.cat(lst, dim=0).numpy()   # (frames*agents, …)
+            data = torch.cat(lst, dim=0).numpy()  # (frames*agents, …)
             h5.create_dataset(layer, data=data, compression="gzip")
             log.info("Saved %-20s  shape=%r", layer, data.shape)
 
-def single_run(cfg, time_str: str, verbose:bool = False):
+
+def single_run(cfg, time_str: str, verbose: bool = False):
     cfg.experiment = cfg.expname
     cfg.cli_args["experiment"] = cfg.expname
     cfg = load_from_checkpoint(cfg)
     # cfg = maybe_load_from_checkpoint(cfg)
 
-    eval_env_frameskip: int = cfg.env_frameskip 
+    eval_env_frameskip: int = cfg.env_frameskip
     assert (
         cfg.env_frameskip % eval_env_frameskip == 0
     ), f"{cfg.env_frameskip=} must be divisible by {eval_env_frameskip=}"
@@ -87,34 +89,32 @@ def single_run(cfg, time_str: str, verbose:bool = False):
     actor_critic = create_actor_critic(cfg, env.observation_space, env.action_space)
     actor_critic.eval()
 
-
-
     device = torch.device("cpu" if cfg.device == "cpu" else "cuda")
     actor_critic.model_to_device(device)
 
     # learner = create_learner(cfg,env_info,)
 
-
     #################### register hook
     layers_to_log = [
-        'encoder.basic_encoder.mlp_layers.0',
+        "encoder.basic_encoder.mlp_layers.0",
         "encoder.DG_projection.linear",
         "core",
-        
         "decoder.mlp.0",
-        "decoder.mlp.2"
-    ]          # <- example; edit to taste
+        "decoder.mlp.2",
+    ]  # <- example; edit to taste
 
     # 2B. activation buffer
 
     import collections
+
     act_buffers = collections.defaultdict(list)
 
     def make_hook(layer_name):
         def _hook(_m, _inp, out):
-            if isinstance(out, (tuple, list)):      # RNN returns (output, h_n)
+            if isinstance(out, (tuple, list)):  # RNN returns (output, h_n)
                 out = out[0]
             act_buffers[layer_name].append(out.detach().cpu())
+
         return _hook
 
     # attach the hook once
@@ -127,12 +127,13 @@ def single_run(cfg, time_str: str, verbose:bool = False):
 
     ####################
 
-
     policy_id = cfg.policy_index
     # log.info(policy_id)
     name_prefix = dict(latest="checkpoint", best="best")[cfg.load_checkpoint_kind]
     # log.info(Learner.checkpoint_dir(cfg, policy_id))
-    checkpoints = BaseDistanceRecorder.get_checkpoints(BaseDistanceRecorder.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*")
+    checkpoints = BaseDistanceRecorder.get_checkpoints(
+        BaseDistanceRecorder.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*"
+    )
     checkpoint_dict = BaseDistanceRecorder.load_checkpoint(checkpoints, device)
     # actor_critic.load_state_dict(checkpoint_dict["model"])
 
@@ -140,7 +141,7 @@ def single_run(cfg, time_str: str, verbose:bool = False):
     #     actor_critic.encoder.DG_projection.linear.reset_parameters()
     #     actor_critic.encoder.DG_projection.batchnorm1d.reset_parameters()
     #     actor_critic.decoder.mlp.reset_parameters()
-    #     actor_critic.action_parameterization.reset_parameters() 
+    #     actor_critic.action_parameterization.reset_parameters()
     #     actor_critic.critic_linear.reset_parameters()
 
     episode_rewards = [deque([], maxlen=100) for _ in range(env.num_agents)]
@@ -201,26 +202,26 @@ def single_run(cfg, time_str: str, verbose:bool = False):
                 # log.info(obs['DEBUG.POS.TRANS'])
                 # log.info(terminated)
                 # save info
-                frame_idx = num_frames          # or use a wall‑clock timestamp
-                pos = obs['DEBUG.POS.TRANS']    # (B,3)
-                rot = obs['DEBUG.POS.ROT']      # (B,3) or (B,4) depending on env
+                frame_idx = num_frames  # or use a wall‑clock timestamp
+                pos = obs["DEBUG.POS.TRANS"]  # (B,3)
+                rot = obs["DEBUG.POS.ROT"]  # (B,3) or (B,4) depending on env
                 # log.debug(f'Writing Information')
                 for agent_i in range(env.num_agents):
-                    pose_records.append({
-                        "frame"     : frame_idx,
-                        "agent"     : agent_i,
-                        "x"         : float(pos[agent_i, 0]),
-                        "y"         : float(pos[agent_i, 1]),
-                        "z"         : float(pos[agent_i, 2]),
-                        "rot_x"     : float(rot[agent_i, 0]),
-                        "rot_y"     : float(rot[agent_i, 1]),
-                        "rot_z"     : float(rot[agent_i, 2]),
-                        "num_traj"  : num_traj,
-                        # keep the whole info dict as a JSON string for convenience
-                        "info"      : json.dumps(infos[agent_i], default=str),
-                    })
-
-
+                    pose_records.append(
+                        {
+                            "frame": frame_idx,
+                            "agent": agent_i,
+                            "x": float(pos[agent_i, 0]),
+                            "y": float(pos[agent_i, 1]),
+                            "z": float(pos[agent_i, 2]),
+                            "rot_x": float(rot[agent_i, 0]),
+                            "rot_y": float(rot[agent_i, 1]),
+                            "rot_z": float(rot[agent_i, 2]),
+                            "num_traj": num_traj,
+                            # keep the whole info dict as a JSON string for convenience
+                            "info": json.dumps(infos[agent_i], default=str),
+                        }
+                    )
 
                 dones = make_dones(terminated, truncated)
                 # log.info(dones)

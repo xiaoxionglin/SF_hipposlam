@@ -1,9 +1,8 @@
 from sample_factory.launcher.run_description import Experiment, ParamGrid, RunDescription
 
-
 _params = ParamGrid(
     [
-        ("seed", [1111,2222, 3333, 4444, 5555]),
+        ("seed", [1111, 2222, 3333, 4444, 5555]),
         # ("DG_name", ["batchnorm_relu"]),
         # (
         #     ("reset_critic", "reset_decoder"),
@@ -25,7 +24,6 @@ _params = ParamGrid(
         #                      "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward3DG_/08_InternalRewardSeparateReward3DG_see_99_e.r.met_mean_baseline_adjusted_D.B.int_2.8/checkpoint_p0/milestones/checkpoint_000002002_32800768.pth"]),
     ]
 )
-
 
 
 vstr = "hipposlam"
@@ -81,7 +79,7 @@ cli = (
     "--normalize_input=False "
     "--fix_encoder_when_load=True "
     "--encoder_load_path=/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth "
-    "--encoder_conv_architecture=pretrained_resnet "    
+    "--encoder_conv_architecture=pretrained_resnet "
     "--encoder_conv_mlp_layers=256 "
     "--use_rnn=True "
     "--rnn_type=gru "
@@ -113,8 +111,6 @@ cli = (
 )
 
 
-
-
 _experiments = [
     Experiment("Comparison", cli, _params.generate_params(False)),
 ]
@@ -126,7 +122,7 @@ RUN_DESCRIPTION = RunDescription(f"{vstr}", experiments=_experiments)
 # Run on Slurm: python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_isaacgym --experiment_suffix=slurm --slurm_gpus_per_job=1 --slurm_cpus_per_gpu=16 --slurm_sbatch_template=./sample_factory/launcher/slurm/sbatch_timeout.sh --pause_between=1 --slurm_print_only=False --run=sf_examples.dmlab.experiments.dmlab30
 # python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=train_dir/slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=50 --slurm_sbatch_template=train_dir/training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run --slurm_partition=genoa --slurm_timeout=0:10:00
 
-#INTERNAL
+# INTERNAL
 # python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_internal --slurm_partition=genoa --slurm_timeout=30:10:00
-#EXTERNAL
+# EXTERNAL
 # python -m sample_factory.launcher.run --backend=slurm --slurm_workdir=./slurm_grid --slurm_gpus_per_job=0 --slurm_cpus_per_gpu=40 --slurm_sbatch_template=./training_templates/training_template.sh --pause_between=1 --slurm_print_only=False --run=sf_workingdir.dmlab.experiments.distance_metric_run_external --slurm_partition=cpu --slurm_timeout=24:10:00

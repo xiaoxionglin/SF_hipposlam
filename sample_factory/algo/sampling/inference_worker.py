@@ -13,7 +13,6 @@ import torch
 from signal_slot.signal_slot import TightLoop, Timer, signal
 
 from sample_factory.algo.utils.env_context import SampleFactoryEnvContext, set_global_env_context
-from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import (
@@ -24,6 +23,7 @@ from sample_factory.algo.utils.misc import (
     advance_rollouts_signal,
     memory_stats,
 )
+from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.model_sharing import ParameterServer, make_parameter_client
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_device
@@ -41,7 +41,9 @@ AdvanceRolloutSignals = Dict[int, List[Tuple[int, PolicyID]]]
 PrepareOutputsFunc = Callable[[int, TensorDict, List], AdvanceRolloutSignals]
 
 
-def init_inference_process(sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, worker: InferenceWorker):
+def init_inference_process(
+    sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, worker: InferenceWorker
+):
     set_global_env_context(sf_context_env)
     set_global_model_context(sf_context_model)
     log.info(f"{worker.object_id}\tpid {os.getpid()}\tparent {os.getppid()}")
@@ -136,12 +138,10 @@ class InferenceWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self.is_initialized = False
 
     @signal
-    def initialized(self):
-        ...
+    def initialized(self): ...
 
     @signal
-    def report_msg(self):
-        ...
+    def report_msg(self): ...
 
     def init(self, init_model_data: Optional[InitModelData]):
         if self.is_initialized:

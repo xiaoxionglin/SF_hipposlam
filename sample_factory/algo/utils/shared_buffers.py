@@ -86,7 +86,9 @@ def policy_output_shapes(cfg: AttrDict, num_actions, num_action_distribution_par
     return policy_outputs
 
 
-def alloc_trajectory_tensors(cfg: AttrDict, env_info: EnvInfo, num_traj, rollout, rnn_size, device, share) -> TensorDict:
+def alloc_trajectory_tensors(
+    cfg: AttrDict, env_info: EnvInfo, num_traj, rollout, rnn_size, device, share
+) -> TensorDict:
     obs_space = env_info.obs_space
 
     tensors = TensorDict()

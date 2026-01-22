@@ -1,33 +1,34 @@
-import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-import numpy as np
-import math as math
-import matplotlib as mpl
-import pandas as pd
 import json
-import sys
+import math as math
 import os
 import pathlib
+import sys
 from glob import glob
+
 import h5py
-mpl.rcParams['pdf.fonttype'] = 42
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.collections import LineCollection
+
+mpl.rcParams["pdf.fonttype"] = 42
 # mpl.rcParams['font.family'] = 'serif'
 # mpl.rcParams['font.serif'] = 'Times New Roman'
-mpl.rcParams['font.size'] = 9
+mpl.rcParams["font.size"] = 9
 
 
-from sample_factory.utils.utils import experiment_dir, log, get_folder_names, get_file_names
+from sample_factory.utils.utils import experiment_dir, get_file_names, get_folder_names, log
 
 
 def _ensure_parent(path: pathlib.Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.cm as cm
-
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 def get_masked_occu(tmp):
@@ -39,6 +40,7 @@ def get_masked_occu(tmp):
     cmap_obst = plt.cm.Greys.copy()
     cmap_obst.set_bad(color=blocked_colour)  # NaN → black (obstacles)
     return masked_occu, cmap_obst
+
 
 def colored_line_between_pts(x, y, c, ax, **lc_kwargs):
     """
@@ -93,22 +95,21 @@ def colored_line_between_pts(x, y, c, ax, **lc_kwargs):
 
 
 def plot_place_fields(seq0_xya, experiment, experiment_subname, epoch_name):
-    fig,ax = plt.subplots(4,4, figsize=(8,6), dpi=150)
+    fig, ax = plt.subplots(4, 4, figsize=(8, 6), dpi=150)
     ax = ax.flatten()
-    for i in range(hippo_n_feature):#np.nonzero(SI_mlp2>0.2)[0]:
+    for i in range(hippo_n_feature):  # np.nonzero(SI_mlp2>0.2)[0]:
         ax[i].set_title(f"sequence{i}")
-        tmp=seq0_xya[:,:,i].T
+        tmp = seq0_xya[:, :, i].T
         # tmp[tmp<1e-30]=np.nan
-        line = ax[i].imshow(tmp,extent=[100,2000,100,2000],origin='lower',cmap='viridis')
+        line = ax[i].imshow(tmp, extent=[100, 2000, 100, 2000], origin="lower", cmap="viridis")
         ax[i].set_axis_off()
         fig.colorbar(line, ax=ax[i])
     base_picture_path = "/work/classic/fr_js1764-sample_factory/pictures"
     file_name = experiment + "_" + experiment_subname + "_" + epoch_name + "_place_field_unnormalized.png"
-    picture_path = pathlib.Path(base_picture_path)/ experiment / file_name
+    picture_path = pathlib.Path(base_picture_path) / experiment / file_name
     _ensure_parent(picture_path)
-    log.debug(f'Picture path: {picture_path}')
+    log.debug(f"Picture path: {picture_path}")
     plt.savefig(picture_path)
-
 
 
 # def animate_all_trajectories(
@@ -284,7 +285,6 @@ def plot_place_fields(seq0_xya, experiment, experiment_subname, epoch_name):
 #     return ani
 
 
-
 def animate_all_trajectories(
     pddata,
     occu_xy,
@@ -298,8 +298,8 @@ def animate_all_trajectories(
     outfile="all_trajectories.mp4",
     dpi=150,
     interval=20,
-    frameskip=1,          # <--- NEW: skip every n frames (1 = no skip)
-    get_masked_occu=None
+    frameskip=1,  # <--- NEW: skip every n frames (1 = no skip)
+    get_masked_occu=None,
 ):
     """
     Create one movie where each trajectory is displayed one after another
@@ -321,7 +321,7 @@ def animate_all_trajectories(
     trajectories = []
     for i in range(n_traj):
         start = i * traj_length
-        end   = start + traj_length
+        end = start + traj_length
         x = pddata["x"].to_numpy()[start:end]
         y = pddata["y"].to_numpy()[start:end]
         trajectories.append((x, y))
@@ -337,18 +337,18 @@ def animate_all_trajectories(
 
     ax.imshow(
         masked_occu,
-        origin='lower',
+        origin="lower",
         cmap=cmap_obst,
         extent=[xbound[0], xbound[1], ybound[0], ybound[1]],
         alpha=1.0,
-        zorder=0
+        zorder=0,
     )
     dummy_line = LineCollection([], linewidths=0, alpha=0)
     ax.add_collection(dummy_line)
 
     ax.set_xlim(xbound)
     ax.set_ylim(ybound)
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
     ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
     for spine in ax.spines.values():
@@ -400,7 +400,7 @@ def animate_all_trajectories(
             if linecoll is not None:
                 linecoll.remove()
                 linecoll = None
-            return (dummy_line,)     # <<< always return an Artist
+            return (dummy_line,)  # <<< always return an Artist
 
         # Extract trail segment
         start_idx = max(0, local - trail)
@@ -411,7 +411,7 @@ def animate_all_trajectories(
             if linecoll is not None:
                 linecoll.remove()
                 linecoll = None
-            return (dummy_line,)     # <<< must return artist
+            return (dummy_line,)  # <<< must return artist
 
         # Remove old line
         if linecoll is not None:
@@ -424,7 +424,8 @@ def animate_all_trajectories(
         base = np.array([0.0, 0.0, 0.0, 1.0])
 
         linecoll = colored_line_between_pts(
-            X, Y,
+            X,
+            Y,
             fade,
             ax,
             colors=[base],
@@ -440,17 +441,10 @@ def animate_all_trajectories(
 
         return (linecoll,)
 
-
     # ------------------------------------------------------------
     # Build animation
     # ------------------------------------------------------------
-    ani = animation.FuncAnimation(
-        fig,
-        update,
-        frames=total_frames,
-        interval=interval,
-        blit=True
-    )
+    ani = animation.FuncAnimation(fig, update, frames=total_frames, interval=interval, blit=True)
 
     # ------------------------------------------------------------
     # Save
@@ -460,11 +454,11 @@ def animate_all_trajectories(
     return ani
 
 
-
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib import animation, cm
 from matplotlib.collections import LineCollection
+
 
 def animate_all_trajectories_with_neurons(
     pddata,
@@ -481,7 +475,7 @@ def animate_all_trajectories_with_neurons(
     dpi=150,
     interval=20,
     frameskip=1,
-    get_masked_occu=None
+    get_masked_occu=None,
 ):
     """
     Create a movie where each trajectory is displayed one after another
@@ -532,7 +526,7 @@ def animate_all_trajectories_with_neurons(
     trajectories = []
     for i in range(n_traj):
         start = i * traj_length
-        end   = start + traj_length
+        end = start + traj_length
         x = pddata["x"].to_numpy()[start:end]
         y = pddata["y"].to_numpy()[start:end]
         trajectories.append((x, y))
@@ -545,25 +539,24 @@ def animate_all_trajectories_with_neurons(
     # ============================================================
     # 3. Prepare background occupancy map
     # ============================================================
-    tmp = occu_xy[:,:].T
+    tmp = occu_xy[:, :].T
     tmp[tmp < 1e-30] = np.nan
     masked_occu, cmap_obst = get_masked_occu(tmp)
 
     ax.imshow(
         masked_occu,
-        origin='lower',
+        origin="lower",
         cmap=cmap_obst,
         extent=[xbound[0], xbound[1], ybound[0], ybound[1]],
         alpha=1.0,
-        zorder=0
+        zorder=0,
     )
 
     ax.set_xlim(xbound)
     ax.set_ylim(ybound)
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
 
-    ax.tick_params(bottom=False, left=False,
-                   labelbottom=False, labelleft=False)
+    ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
     for spine in ax.spines.values():
         spine.set_visible(True)
@@ -575,7 +568,7 @@ def animate_all_trajectories_with_neurons(
     # ============================================================
     neuron_scat = ax.scatter([], [], s=25, c=[], cmap=cmap_name, zorder=5, alpha=0.5)
     neuron_scat.set_clim(0, sids.shape[1])
-    # color_idx = 
+    # color_idx =
 
     # ============================================================
     # 5. Prepare line collection variables
@@ -608,14 +601,12 @@ def animate_all_trajectories_with_neurons(
     # 8. Update function
     # ============================================================
     persistent_offsets = np.empty((0, 2))  # Will store all previously active neuron positions
-    persistent_colors = np.array([])       # Optional: store corresponding colors
-
-
+    persistent_colors = np.array([])  # Optional: store corresponding colors
 
     def update(frame):
         nonlocal linecoll, persistent_offsets, persistent_colors
-        imaging_neurons = np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
-        imaging_neurons = np.array([1,5,6,11,15])
+        imaging_neurons = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+        imaging_neurons = np.array([1, 5, 6, 11, 15])
 
         traj_idx = find_traj(frame)
         local = local_frame(frame)
@@ -642,7 +633,8 @@ def animate_all_trajectories_with_neurons(
             base = np.array([0.36, 0.12, 0.15, 1.0])  # white base color
 
             linecoll = colored_line_between_pts(
-                X, Y,
+                X,
+                Y,
                 fade,
                 ax,
                 colors=[base],
@@ -664,7 +656,7 @@ def animate_all_trajectories_with_neurons(
         global_frame_idx = traj_idx * traj_length + local
         # print(global_frame_idx, sids.shape[0])
         # Get currently active neurons
-        active_idx = np.where(sids[global_frame_idx:global_frame_idx+frameskip, :] > 0)[0]
+        active_idx = np.where(sids[global_frame_idx : global_frame_idx + frameskip, :] > 0)[0]
         draw_idx = []
         for i in active_idx:
             if i in imaging_neurons:
@@ -674,13 +666,10 @@ def animate_all_trajectories_with_neurons(
 
         if len(draw_idx) > 0:
             # All active neurons share the trajectory position at this frame
-            x_pos = pddata['x'].to_numpy()[global_frame_idx]
-            y_pos = pddata['y'].to_numpy()[global_frame_idx]
+            x_pos = pddata["x"].to_numpy()[global_frame_idx]
+            y_pos = pddata["y"].to_numpy()[global_frame_idx]
 
-            new_offsets = np.column_stack([
-                np.full(len(draw_idx), x_pos),
-                np.full(len(draw_idx), y_pos)
-            ])
+            new_offsets = np.column_stack([np.full(len(draw_idx), x_pos), np.full(len(draw_idx), y_pos)])
 
             # Accumulate positions and colors
             persistent_offsets = np.vstack([persistent_offsets, new_offsets])
@@ -689,7 +678,6 @@ def animate_all_trajectories_with_neurons(
         # Update scatter
         neuron_scat.set_offsets(persistent_offsets)
         neuron_scat.set_array(persistent_colors if len(persistent_colors) > 0 else np.array([]))
-
 
         # Return artists
         # artists = [neuron_scat]
@@ -703,37 +691,28 @@ def animate_all_trajectories_with_neurons(
     # ============================================================
     # 9. Build animation
     # ============================================================
-    ani = animation.FuncAnimation(
-        fig,
-        update,
-        frames=total_frames,
-        interval=interval,
-        blit=True
-    )
+    ani = animation.FuncAnimation(fig, update, frames=total_frames, interval=interval, blit=True)
 
     # ============================================================
     # 10. Save the movie
     # ============================================================
-    log.debug(f'Writing file {outfile}')
+    log.debug(f"Writing file {outfile}")
     ani.save(outfile, fps=fps, dpi=dpi, writer="ffmpeg")
-    log.debug(f'All done!')
+    log.debug(f"All done!")
 
     return ani
 
 
-
-
-
 hippo_n_feature = 16
 length = 71
-xygrain=19
-layernames=['seq0', 'seqall','mlp0', 'mlp2' ]
-displayname_dict={'seq0':'DG','seqall':'CA3','mlp0':'Decoder 1','mlp2':'Decoder 2'}
+xygrain = 19
+layernames = ["seq0", "seqall", "mlp0", "mlp2"]
+displayname_dict = {"seq0": "DG", "seqall": "CA3", "mlp0": "Decoder 1", "mlp2": "Decoder 2"}
 
 rootpath = "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam"
 
 experiment = "InternalRewardSeparateReward3DG_"
-experiment_path = pathlib.Path(rootpath) / experiment# / "telemetry"
+experiment_path = pathlib.Path(rootpath) / experiment  # / "telemetry"
 
 experiment_subnames = sorted(get_folder_names(experiment_path))
 log.debug(f"Experiment subnames for experiment {experiment}: {experiment_subnames}")
@@ -742,21 +721,15 @@ log.debug(f"Experiment subnames for experiment {experiment}: {experiment_subname
 blocked_colour = "#C7C7C7"
 
 
-
-xbound=(100,2000)
-ybound=(100,2000)
+xbound = (100, 2000)
+ybound = (100, 2000)
 
 exp_id = 2
 sub_id = 1
 
 
-
-
-
-
-
 # for i in range(len(experiment_subnames)):
-for i in range(1,2):
+for i in range(1, 2):
     i = exp_id
     log.info(i)
     telemetry_path = experiment_path / experiment_subnames[i] / "telemetry"
@@ -770,93 +743,121 @@ for i in range(1,2):
             folders_containing_data.append(str(telemetry_path / epoch_names[k]))
         # folders_containing_data = sorted(folders_containing_data)
         print(len(folders_containing_data))
-        
-
 
         ## aggregating data
-        fields_enjoys=[]
-        PFs_enjoys=[]
-        SI_enjoys=[]
-        percent_active=[]
-        percent_active_all=[]
-        pddata_enjoys=[]
-        sids_enjoys=[]
-        for analysispath in [folders_containing_data[sub_id]]:           
+        fields_enjoys = []
+        PFs_enjoys = []
+        SI_enjoys = []
+        percent_active = []
+        percent_active_all = []
+        pddata_enjoys = []
+        sids_enjoys = []
+        for analysispath in [folders_containing_data[sub_id]]:
 
-            pddata = pd.read_csv(glob(str(analysispath+"/*.csv"))[0])
-            with h5py.File(glob(str(analysispath+"/*.h5"))[0]) as h5:
+            pddata = pd.read_csv(glob(str(analysispath + "/*.csv"))[0])
+            with h5py.File(glob(str(analysispath + "/*.h5"))[0]) as h5:
                 activations = {k: h5[k][...] for k in h5}
-            pddata['rot_pi']=pddata['rot_y']*np.pi/180
+            pddata["rot_pi"] = pddata["rot_y"] * np.pi / 180
             pddata_enjoys.append(pddata)
-            # activations['core']=torch.cat(activations['core'], dim=0).numpy() 
-            def SpatialInformation(firing,occu,per_spike=False):
-                p_occu = occu/occu.flatten().sum()
-                fr_x = firing/occu
-                fr_mean = firing.flatten().sum()/occu[:].sum()
-                out = np.nansum((fr_x*p_occu*np.log2(fr_x/fr_mean)).flatten())
+
+            # activations['core']=torch.cat(activations['core'], dim=0).numpy()
+            def SpatialInformation(firing, occu, per_spike=False):
+                p_occu = occu / occu.flatten().sum()
+                fr_x = firing / occu
+                fr_mean = firing.flatten().sum() / occu[:].sum()
+                out = np.nansum((fr_x * p_occu * np.log2(fr_x / fr_mean)).flatten())
                 if per_spike:
-                    out/=fr_mean
-                return( out )
-                
+                    out /= fr_mean
+                return out
+
             ## calculate SIs
-            xbound=(100,2000)
-            ybound=(100,2000)
+            xbound = (100, 2000)
+            ybound = (100, 2000)
             grain = 19
-            occu_xya=np.histogramdd((pddata['x'],pddata['y'],pddata['rot_pi']),(np.linspace(*xbound,grain+1),np.linspace(*ybound,grain+1),np.linspace(-np.pi,np.pi,13)),density=False)[0]
+            occu_xya = np.histogramdd(
+                (pddata["x"], pddata["y"], pddata["rot_pi"]),
+                (np.linspace(*xbound, grain + 1), np.linspace(*ybound, grain + 1), np.linspace(-np.pi, np.pi, 13)),
+                density=False,
+            )[0]
 
-            tmp_act=activations
+            tmp_act = activations
 
-            grain=19
-            hla_xya=np.zeros((grain,grain,12,128))
+            grain = 19
+            hla_xya = np.zeros((grain, grain, 12, 128))
             for l in range(128):
-                hla_xya[:,:,:,l]=np.histogramdd((pddata['x'],pddata['y'],pddata['rot_pi']),(np.linspace(*xbound,grain+1),np.linspace(*ybound,grain+1),np.linspace(-np.pi,np.pi,13)),weights=tmp_act['decoder.mlp.2'][:,l]*(tmp_act['decoder.mlp.2'][:,l]>0),density=False)[0]
-            hla_xya=hla_xya[:,:,:,:]*(hla_xya[:,:,:,:]>0)
+                hla_xya[:, :, :, l] = np.histogramdd(
+                    (pddata["x"], pddata["y"], pddata["rot_pi"]),
+                    (np.linspace(*xbound, grain + 1), np.linspace(*ybound, grain + 1), np.linspace(-np.pi, np.pi, 13)),
+                    weights=tmp_act["decoder.mlp.2"][:, l] * (tmp_act["decoder.mlp.2"][:, l] > 0),
+                    density=False,
+                )[0]
+            hla_xya = hla_xya[:, :, :, :] * (hla_xya[:, :, :, :] > 0)
 
             # grain=19
-            hla0_xya=np.zeros((grain,grain,12,128))
+            hla0_xya = np.zeros((grain, grain, 12, 128))
             for l in range(128):
-                hla0_xya[:,:,:,l]=np.histogramdd((pddata['x'],pddata['y'],pddata['rot_pi']),(np.linspace(*xbound,grain+1),np.linspace(*ybound,grain+1),np.linspace(-np.pi,np.pi,13)),weights=tmp_act['decoder.mlp.0'][:,l]*(tmp_act['decoder.mlp.0'][:,l]>0),density=False)[0]
-            hla0_xya=hla0_xya[:,:,:,:]*(hla0_xya[:,:,:,:]>0)
+                hla0_xya[:, :, :, l] = np.histogramdd(
+                    (pddata["x"], pddata["y"], pddata["rot_pi"]),
+                    (np.linspace(*xbound, grain + 1), np.linspace(*ybound, grain + 1), np.linspace(-np.pi, np.pi, 13)),
+                    weights=tmp_act["decoder.mlp.0"][:, l] * (tmp_act["decoder.mlp.0"][:, l] > 0),
+                    density=False,
+                )[0]
+            hla0_xya = hla0_xya[:, :, :, :] * (hla0_xya[:, :, :, :] > 0)
 
-            if tmp_act['core'].shape[1]-13 != 16*length:
-                print('size mismatch!!!!')
+            if tmp_act["core"].shape[1] - 13 != 16 * length:
+                print("size mismatch!!!!")
                 break
-            sids=tmp_act['core'][:,:-13:length]
+            sids = tmp_act["core"][:, :-13:length]
             sids_enjoys.append(sids)
-            perc=(sids>0).mean(0)
+            perc = (sids > 0).mean(0)
             percent_active.append(perc)
-            percent_active_all.append((sids.sum(1)>0).mean())
-            
-            # grain=19
-            seq0_xya=np.zeros((grain,grain,12,16))
-            for l in range(16):
-                seq0_xya[:,:,:,l]=np.histogramdd((pddata['x'],pddata['y'],pddata['rot_pi']),(np.linspace(*xbound,grain+1),np.linspace(*ybound,grain+1),np.linspace(-np.pi,np.pi,13)),weights=sids[:,l],density=False)[0]
+            percent_active_all.append((sids.sum(1) > 0).mean())
 
             # grain=19
-            seqall_xya=np.zeros((grain,grain,12,16*length))
-            for l in range(16*length):
-                seqall_xya[:,:,:,l]=np.histogramdd((pddata['x'],pddata['y'],pddata['rot_pi']),(np.linspace(*xbound,grain+1),np.linspace(*ybound,grain+1),np.linspace(-np.pi,np.pi,13)),weights=tmp_act['core'][:,l],density=False)[0]
+            seq0_xya = np.zeros((grain, grain, 12, 16))
+            for l in range(16):
+                seq0_xya[:, :, :, l] = np.histogramdd(
+                    (pddata["x"], pddata["y"], pddata["rot_pi"]),
+                    (np.linspace(*xbound, grain + 1), np.linspace(*ybound, grain + 1), np.linspace(-np.pi, np.pi, 13)),
+                    weights=sids[:, l],
+                    density=False,
+                )[0]
+
+            # grain=19
+            seqall_xya = np.zeros((grain, grain, 12, 16 * length))
+            for l in range(16 * length):
+                seqall_xya[:, :, :, l] = np.histogramdd(
+                    (pddata["x"], pddata["y"], pddata["rot_pi"]),
+                    (np.linspace(*xbound, grain + 1), np.linspace(*ybound, grain + 1), np.linspace(-np.pi, np.pi, 13)),
+                    weights=tmp_act["core"][:, l],
+                    density=False,
+                )[0]
 
             # fields = {"seq0":seq0_xya,"seqall":seqall_xya,"occu":occu_xya}
-            fields = {"mlp0":hla0_xya,"mlp2":hla_xya,"seq0":seq0_xya,"seqall":seqall_xya,"occu":occu_xya}
+            fields = {"mlp0": hla0_xya, "mlp2": hla_xya, "seq0": seq0_xya, "seqall": seqall_xya, "occu": occu_xya}
             fields_enjoys.append(fields)
 
             SIs = dict()
             for key in fields:
-                if key !="occu":
-                    SIs[key]= np.array([SpatialInformation(fields[key][:,:,:,i],fields["occu"]) for i in range(fields[key].shape[-1])])
+                if key != "occu":
+                    SIs[key] = np.array(
+                        [
+                            SpatialInformation(fields[key][:, :, :, i], fields["occu"])
+                            for i in range(fields[key].shape[-1])
+                        ]
+                    )
             SI_enjoys.append(SIs)
             PFs = dict()
             for key in fields:
-                if key !="occu" and key !="seq0":
-                    PFs[key]= np.nansum(fields[key],-2)/np.nansum(fields["occu"][:,:,:,None],-2)
-                if key =="seq0":
-                    PFs[key]= np.nansum(fields[key],-2)
+                if key != "occu" and key != "seq0":
+                    PFs[key] = np.nansum(fields[key], -2) / np.nansum(fields["occu"][:, :, :, None], -2)
+                if key == "seq0":
+                    PFs[key] = np.nansum(fields[key], -2)
             PFs_enjoys.append(PFs)
-        
+
         base_picture_path = "/work/classic/fr_js1764-sample_factory/pictures"
         file_name = experiment + "_" + experiment_subnames[i] + "_" + epoch_names[sub_id] + "movie.mp4"
-        video_path = pathlib.Path(base_picture_path)/ experiment / file_name
+        video_path = pathlib.Path(base_picture_path) / experiment / file_name
         # t = number of frames (global time steps), n = number of neurons
         t, n = pddata_enjoys[0].shape[0], 50  # e.g., 50 neurons
 
@@ -870,10 +871,10 @@ for i in range(1,2):
             neuron_idx = np.random.randint(0, n)
             sids_test[time_idx, neuron_idx] = np.random.uniform(0.5, 1.0)
 
-        log.debug(sids_test[500:550,:])
+        log.debug(sids_test[500:550, :])
         ani = animate_all_trajectories_with_neurons(
             pddata_enjoys[0],
-            np.nansum(fields_enjoys[0]["occu"][:,:,:],-1),
+            np.nansum(fields_enjoys[0]["occu"][:, :, :], -1),
             sids_enjoys[0],
             xbound,
             ybound,
@@ -884,14 +885,11 @@ for i in range(1,2):
             outfile=video_path,
             dpi=150,
             frameskip=3,
-            get_masked_occu=get_masked_occu
+            get_masked_occu=get_masked_occu,
         )
-        log.debug(f'Animation Done')
+        log.debug(f"Animation Done")
         # plot_place_fields(PFs_enjoys[0]["seq0"], experiment, experiment_subnames[i], epoch_names[sub_id])
         # log.debug(np.where(sids_enjoys[0]>0))
-        
+
     else:
         log.warning(f"PATH DOES NOT EXIST")
-
-            
-            

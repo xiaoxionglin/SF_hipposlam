@@ -1,6 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, ParamGrid, RunDescription
 
-
 _params = ParamGrid(
     [
         # -------------------------------------------------
@@ -17,11 +16,9 @@ _params = ParamGrid(
                 ["sr_transformer", "none"],
             ),
         ),
-
         # Only relevant for concat_fourier; ignored otherwise
         ("decoder_attn_d_p", [16]),
         ("decoder_attn_fourier_max_freq", [1.0]),
-
         # Seeds
         ("seed", [1111, 2222, 3333, 4444, 5555]),
     ]
@@ -35,7 +32,7 @@ _params = ParamGrid(
 #         #     (
 
 #         #         [ 64, 1149]
-                
+
 #         #     )
 #         # ),
 #         # ("num_envs_per_worker",[2,4,8]),
@@ -54,7 +51,7 @@ _params = ParamGrid(
 #                 [ 16, 381],
 #                 [ 32, 637],
 #                 [ 64, 1149]
-                
+
 #             )
 #         ),
 #     ]

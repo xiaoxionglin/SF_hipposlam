@@ -1,17 +1,16 @@
 import math
 from dataclasses import dataclass
-from typing import Optional, Literal
+from typing import Literal, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-
-
 # ---------------------------
 # Fixed positional bases
 # ---------------------------
+
 
 def fixed_smoothed_time_basis(T: int, R: int, normalize: bool = True, device=None, dtype=None) -> Tensor:
     """
@@ -81,6 +80,7 @@ def fixed_fourier_basis(T: int, d_p: int, max_freq: float = 1.0, device=None, dt
 # RoPE (rotary) helpers
 # ---------------------------
 
+
 def rope_build_cache(T: int, d: int, base: float = 100.0, device=None, dtype=None):
     """
     Build cos/sin caches for RoPE. Returns cos, sin of shape (T, d/2).
@@ -114,8 +114,11 @@ def rope_apply_btd(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 # Transformer components
 # ---------------------------
 
+
 class CausalSelfAttention(nn.Module):
-    def __init__(self, d_model: int, n_heads: int, rope: bool = False, rope_base: float = 10000.0, dropout: float = 0.0):
+    def __init__(
+        self, d_model: int, n_heads: int, rope: bool = False, rope_base: float = 10000.0, dropout: float = 0.0
+    ):
         super().__init__()
         if d_model % n_heads != 0:
             raise ValueError("d_model must be divisible by n_heads")
@@ -156,8 +159,8 @@ class CausalSelfAttention(nn.Module):
         x: (B, T, d_model)
         """
         B, T, D = x.shape
-        qkv = self.qkv(x)                       # (B,T,3D)
-        q, k, v = qkv.chunk(3, dim=-1)          # each (B,T,D)
+        qkv = self.qkv(x)  # (B,T,3D)
+        q, k, v = qkv.chunk(3, dim=-1)  # each (B,T,D)
 
         # (B, nH, T, dH)
         q = q.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
@@ -175,13 +178,13 @@ class CausalSelfAttention(nn.Module):
             k = k_.view(B, self.n_heads, T, self.d_head)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.d_head))  # (B,nH,T,T)
-        mask = self._get_causal_mask(T, x.device)                         # (T,T)
+        mask = self._get_causal_mask(T, x.device)  # (T,T)
         att = att.masked_fill(~mask.unsqueeze(0).unsqueeze(0), float("-inf"))
         w = F.softmax(att, dim=-1)
         w = self.dropout(w)
 
-        y = w @ v                                                        # (B,nH,T,dH)
-        y = y.transpose(1, 2).contiguous().view(B, T, D)                  # (B,T,D)
+        y = w @ v  # (B,nH,T,dH)
+        y = y.transpose(1, 2).contiguous().view(B, T, D)  # (B,T,D)
         y = self.proj(y)
         return self.dropout(y)
 
@@ -210,8 +213,6 @@ class TransformerBlock(nn.Module):
 # ---------------------------
 
 PosMode = Literal["none", "sin_add", "learned_add", "concat_sin", "concat_fourier", "concat_smoothed", "rope"]
-
-
 
 
 @dataclass
@@ -247,8 +248,6 @@ class SRTransformerConfig:
     readout_attn_hidden: int = 0  # 0 => linear score; >0 => 2-layer scorer with hidden dim
 
 
-
-
 class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
     """
     Expects input of shape (B, T*d_f + bypass_size), where the T tokens are ordered
@@ -257,6 +256,7 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
     The module reshapes the first T*d_f dims into (B, T, d_f) and runs a 2-layer
     causal transformer. Readout uses token index 0 (newest).
     """
+
     def __init__(self, cfg: SRTransformerConfig):
         super().__init__()
         self.cfg = cfg
@@ -269,7 +269,9 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
             if cfg.d_model % cfg.n_heads != 0:
                 raise ValueError("d_model must be divisible by n_heads")
             if d_head % 2 != 0:
-                raise ValueError(f"RoPE requires even head dim. Got d_model={cfg.d_model}, n_heads={cfg.n_heads} => d_head={d_head}.")
+                raise ValueError(
+                    f"RoPE requires even head dim. Got d_model={cfg.d_model}, n_heads={cfg.n_heads} => d_head={d_head}."
+                )
 
         # buffers for fixed PEs
         self.register_buffer("_pe_add", torch.empty(0), persistent=False)
@@ -292,13 +294,15 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
         else:
             self.in_proj = nn.Identity() if cfg.d_f == cfg.d_model else nn.Linear(cfg.d_f, cfg.d_model, bias=True)
 
-
-        rope_flag = (self.pos_mode == "rope")
-        self.block1 = TransformerBlock(cfg.d_model, cfg.n_heads, cfg.d_ff, rope=rope_flag, rope_base=cfg.rope_base, dropout=cfg.dropout)
-        self.block2 = TransformerBlock(cfg.d_model, cfg.n_heads, cfg.d_ff, rope=rope_flag, rope_base=cfg.rope_base, dropout=cfg.dropout)
+        rope_flag = self.pos_mode == "rope"
+        self.block1 = TransformerBlock(
+            cfg.d_model, cfg.n_heads, cfg.d_ff, rope=rope_flag, rope_base=cfg.rope_base, dropout=cfg.dropout
+        )
+        self.block2 = TransformerBlock(
+            cfg.d_model, cfg.n_heads, cfg.d_ff, rope=rope_flag, rope_base=cfg.rope_base, dropout=cfg.dropout
+        )
 
         self.out = nn.Linear(cfg.d_model, cfg.out_dim, bias=True)
-
 
         # Optional token pooling for readout
         self.readout_mode = getattr(cfg, "readout_mode", "last")
@@ -317,7 +321,6 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
         else:
             self.readout_score = None
 
-
     def _ensure_pe_add(self, device, dtype):
         if self.pos_mode == "sin_add":
             if self._pe_add.numel() == 0:
@@ -330,7 +333,9 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
 
         elif self.pos_mode == "concat_fourier":
             if self._pe_concat.numel() == 0:
-                self._pe_concat = fixed_fourier_basis(self.cfg.T, self.cfg.d_p, max_freq=self.cfg.fourier_max_freq, device=device, dtype=dtype)
+                self._pe_concat = fixed_fourier_basis(
+                    self.cfg.T, self.cfg.d_p, max_freq=self.cfg.fourier_max_freq, device=device, dtype=dtype
+                )
 
         elif self.pos_mode == "concat_smoothed":
             if self._pe_concat.numel() == 0:
@@ -341,7 +346,6 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
                     device=device,
                     dtype=dtype,
                 )
-
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -383,8 +387,8 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
         elif self.pos_mode in ("concat_sin", "concat_fourier", "concat_smoothed"):
             self._ensure_pe_concat(device, dtype)
             pe = self._pe_concat.unsqueeze(0).expand(B, -1, -1)  # (B,T,d_p) or (B,T,T)
-            h = torch.cat([tokens, pe], dim=-1)                  # (B,T,d_f+d_p) or (B,T,d_f+T)
-            h = self.in_proj(h)                                  # (B,T,d_model)
+            h = torch.cat([tokens, pe], dim=-1)  # (B,T,d_f+d_p) or (B,T,d_f+T)
+            h = self.in_proj(h)  # (B,T,d_model)
 
         elif self.pos_mode == "rope":
             # RoPE is applied inside attention to Q/K, so do not add/concat here.
@@ -415,13 +419,13 @@ class TwoLayerCausalTransformerFromShiftRegisterNoPacked(nn.Module):
 
         y = self.out(readout)  # (B, out_dim)
 
-
         if self.cfg.include_bypass_in_output and bypass is not None:
             return torch.cat([y, bypass], dim=1)
         return y
 
 
 from typing import Optional
+
 import torch
 import torch.nn as nn
 
@@ -432,16 +436,17 @@ from sample_factory.utils.typing import Config
 # import your module (adjust import path)
 # from your_module import SRTransformerConfig, TwoLayerCausalTransformerFromShiftRegisterNoPacked
 
+
 class ShiftRegisterTransformerDecoder(ModelModule):
     def __init__(self, cfg: Config, decoder_input_size: int):
         super().__init__(cfg)
 
         # --- required parse sizes ---
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
 
-        T = self.R + self.L - 1  
+        T = self.R + self.L - 1
         d_f = Hippo_n_feature
 
         # bypass size can be explicit or inferred
@@ -472,13 +477,10 @@ class ShiftRegisterTransformerDecoder(ModelModule):
 
         out_dim = int(getattr(cfg, "decoder_attn_out_dim", 128))
 
-
         time_basis_normalize = bool(getattr(cfg, "decoder_attn_time_basis_normalize", True))
-
 
         readout_mode = str(getattr(cfg, "decoder_attn_readout_mode", "last"))
         readout_attn_hidden = int(getattr(cfg, "decoder_attn_readout_attn_hidden", 0))
-
 
         sr_cfg = SRTransformerConfig(
             T=T,
@@ -498,7 +500,6 @@ class ShiftRegisterTransformerDecoder(ModelModule):
             time_basis_normalize=time_basis_normalize,
             readout_mode=readout_mode,
             readout_attn_hidden=readout_attn_hidden,
-
         )
 
         self.decoder = TwoLayerCausalTransformerFromShiftRegisterNoPacked(sr_cfg)
@@ -529,11 +530,11 @@ if __name__ == "__main__":
         d_model=16,
         n_heads=2,
         d_ff=64,
-        pos_mode="rope",   # try: "none", "sin_add", "learned_add", "concat_sin", "concat_fourier", "rope"
+        pos_mode="rope",  # try: "none", "sin_add", "learned_add", "concat_sin", "concat_fourier", "rope"
         out_dim=128,
         include_bypass_in_output=True,
     )
     m = TwoLayerCausalTransformerFromShiftRegisterNoPacked(cfg)
-    x = torch.zeros(32, 64*16 + 0)
+    x = torch.zeros(32, 64 * 16 + 0)
     y = m(x)
     print(y.shape)  # (32, 128)

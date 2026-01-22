@@ -12,10 +12,10 @@ from sample_factory.algo.sampling.batched_sampling import BatchedVectorEnvRunner
 from sample_factory.algo.sampling.non_batched_sampling import NonBatchedVectorEnvRunner
 from sample_factory.algo.sampling.sampling_utils import VectorEnvRunner, rollout_worker_device
 from sample_factory.algo.utils.env_context import SampleFactoryEnvContext, set_global_env_context
-from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import advance_rollouts_signal, new_trajectories_signal
+from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.rl_utils import total_num_agents, trajectories_per_training_iteration
 from sample_factory.algo.utils.torch_utils import inference_context
 from sample_factory.cfg.configurable import Configurable
@@ -31,7 +31,9 @@ from sample_factory.utils.utils import (
 )
 
 
-def init_rollout_worker_process(sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, worker: RolloutWorker):
+def init_rollout_worker_process(
+    sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, worker: RolloutWorker
+):
     log.debug(f"Rollout worker {worker.worker_idx} starting...")
 
     set_global_env_context(sf_context_env)
@@ -131,8 +133,7 @@ class RolloutWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self.is_initialized: bool = False
 
     @signal
-    def report_msg(self):
-        ...
+    def report_msg(self): ...
 
     def init(self):
         for split_idx in range(self.num_splits):

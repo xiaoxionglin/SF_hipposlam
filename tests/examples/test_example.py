@@ -8,9 +8,9 @@ from sample_factory.algo.sampling.batched_sampling import BatchedVectorEnvRunner
 from sample_factory.algo.sampling.non_batched_sampling import NonBatchedVectorEnvRunner
 from sample_factory.algo.sampling.sampler import SerialSampler
 from sample_factory.algo.utils.env_context import reset_global_env_context
-from sample_factory.algo.utils.model_context import reset_global_model_context
 from sample_factory.algo.utils.make_env import SequentialVectorizeWrapper
 from sample_factory.algo.utils.misc import EPS, ExperimentStatus
+from sample_factory.algo.utils.model_context import reset_global_model_context
 from sample_factory.enjoy import enjoy
 from sample_factory.envs.env_utils import (
     RewardShapingInterface,

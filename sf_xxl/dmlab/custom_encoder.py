@@ -1,33 +1,34 @@
 # from asyncio.sslproto import add_flowcontrol_defaults
 from email import header
 from logging import warning
-import torch
-from torch import Tensor, device, nn
-
-import torch.nn.functional as F
-import torchvision.models as models
 
 import gymnasium as gym
 import numpy as np
+import torch
+import torch.nn.functional as F
+import torchvision.models as models
+from torch import Tensor, device, nn
 
-
+from sample_factory.model.encoder import ConvEncoder, Encoder, ResnetEncoder
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.typing import Config, ObsSpace
 from sample_factory.utils.utils import log
-
-
-
-
-from sample_factory.model.encoder import Encoder, ResnetEncoder, ConvEncoder
 from sf_working_directories.default.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
-
 from sf_working_directories.default.dmlab.dmlab_model import DmlabEncoder
 
 
-
 class DGProjectionBatchNovelty(nn.Module):
-    def __init__(self, feature_dim, pattern_limit, detection_threshold=0.1, novelty_threshold=0.4, 
-                 eps=1e-8, norm_coef=0.002, soft_gate_scale=10.0, bias=3.0):
+    def __init__(
+        self,
+        feature_dim,
+        pattern_limit,
+        detection_threshold=0.1,
+        novelty_threshold=0.4,
+        eps=1e-8,
+        norm_coef=0.002,
+        soft_gate_scale=10.0,
+        bias=3.0,
+    ):
         """
         Args:
           feature_dim (int): Dimension of the input features.
@@ -50,12 +51,12 @@ class DGProjectionBatchNovelty(nn.Module):
         self.bias = bias
 
         # Fixed buffer for stored patterns: shape (pattern_limit, feature_dim).
-        self.register_buffer('patterns', torch.zeros(pattern_limit, feature_dim))
+        self.register_buffer("patterns", torch.zeros(pattern_limit, feature_dim))
         # Boolean mask indicating which slots are active.
-        self.register_buffer('pattern_mask', torch.zeros(pattern_limit, dtype=torch.bool))
+        self.register_buffer("pattern_mask", torch.zeros(pattern_limit, dtype=torch.bool))
         # Tensors to track cumulative activation counts and sample counts per slot.
-        self.register_buffer('pattern_activation_counts', torch.zeros(pattern_limit))
-        self.register_buffer('pattern_sample_counts', torch.zeros(pattern_limit))
+        self.register_buffer("pattern_activation_counts", torch.zeros(pattern_limit))
+        self.register_buffer("pattern_sample_counts", torch.zeros(pattern_limit))
 
     def forward(self, x):
         # Normalize input samples (differentiable operations).
@@ -70,8 +71,8 @@ class DGProjectionBatchNovelty(nn.Module):
         # --- Novelty Detection ---
         if self.pattern_mask.any():
             active_patterns = self.patterns[self.pattern_mask]  # (n_active, feature_dim)
-            proj = torch.matmul(x_norm, active_patterns.t())      # (batch_size, n_active)
-            proj_span = torch.matmul(proj, active_patterns)         # (batch_size, feature_dim)
+            proj = torch.matmul(x_norm, active_patterns.t())  # (batch_size, n_active)
+            proj_span = torch.matmul(proj, active_patterns)  # (batch_size, feature_dim)
             x_null = x_norm - proj_span
         else:
             x_null = x_norm
@@ -100,13 +101,13 @@ class DGProjectionBatchNovelty(nn.Module):
         # the input to sigmoid becomes: soft_gate_scale*(0) - bias = -bias.
         # With bias=3.0, sigmoid(-3) is approximately 0.047, so near-zero.
         activations = torch.sigmoid(self.soft_gate_scale * (sim - self.detection_threshold) - self.bias)
-        
+
         # Bookkeeping: update activation counts using a hard decision for pattern with highest similarity.
         with torch.no_grad():
             # We still identify a "most activated" pattern per sample for bookkeeping.
             _, max_indices = torch.max(sim, dim=1)
             # Use a simple threshold on the computed activations to decide if a sample is active.
-            active_samples = (activations.max(dim=1)[0] > self.detection_threshold)
+            active_samples = activations.max(dim=1)[0] > self.detection_threshold
             if active_samples.any():
                 upd = torch.bincount(max_indices[active_samples], minlength=self.pattern_limit).float()
                 self.pattern_activation_counts += upd
@@ -123,10 +124,10 @@ class DGProjectionBatchNovelty(nn.Module):
 
         stored_idx = torch.arange(self.pattern_limit, device=device)
         sorted_stored_idx = stored_idx[torch.argsort(stored_norm)]
-        
+
         new_idx = torch.arange(k_new, device=new_patterns.device)
         sorted_new_idx = new_idx[torch.argsort(new_norms, descending=True)]
-        
+
         replace_count = 0
         for new_i in sorted_new_idx:
             if replace_count < self.pattern_limit:
@@ -138,9 +139,6 @@ class DGProjectionBatchNovelty(nn.Module):
                     self.pattern_mask[candidate_stored_idx] = True
                     replace_count += 1
         log.info(f"{replace_count} patterns replaced, batch size: {current_batch_size}")
-
-
-
 
 
 class DGProjection(nn.Module):
@@ -189,6 +187,7 @@ class DGProjection(nn.Module):
         # Return the corrected output as the projection result.
         return corrected
 
+
 class DGProjection_obsolete(nn.Module):
     def __init__(self, in_features: int, out_features: int, dg_lr: float = 0.001, weight_decay: float = 0.01):
         super().__init__()
@@ -235,6 +234,7 @@ class DGProjection_obsolete(nn.Module):
         # Return the corrected output as the projection result.
         return corrected
 
+
 class DGProjection_relu(nn.Module):
     def __init__(self, in_features: int, out_features: int):
         """
@@ -246,7 +246,7 @@ class DGProjection_relu(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.linear = nn.Linear(in_features, out_features, bias=True)
-        self.activation= nn.ReLU()
+        self.activation = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         logits = self.linear(x)  # Shape: [batch_size, out_features]
@@ -254,9 +254,10 @@ class DGProjection_relu(nn.Module):
         probs = self.activation(logits)
 
         return probs
-    
+
+
 class DGProjection_batchnorm_relu(nn.Module):
-    def __init__(self, in_features: int, out_features: int, intercept = 2):
+    def __init__(self, in_features: int, out_features: int, intercept=2):
         """
         Enforces that each neuron's output (after softmax) is activated (set to 1)
         only if its probability exceeds the running quantile (e.g., 98th percentile)
@@ -266,9 +267,9 @@ class DGProjection_batchnorm_relu(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.linear = nn.Linear(in_features, out_features, bias=False)
-        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False,momentum=0.1)
-        self.activation= nn.ReLU()
-        self.intercept=intercept
+        self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False, momentum=0.1)
+        self.activation = nn.ReLU()
+        self.intercept = intercept
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.linear(x)  # Shape: [batch_size, out_features]
@@ -277,6 +278,7 @@ class DGProjection_batchnorm_relu(nn.Module):
         x = self.activation(x - self.intercept)
 
         return x
+
 
 class DGProjection_batchnorm_relu_fixed(nn.Module):
     def __init__(self, in_features: int, out_features: int, intercept=2):
@@ -299,6 +301,7 @@ class DGProjection_batchnorm_relu_fixed(nn.Module):
         x = self.activation(x - self.intercept)
         return x
 
+
 class DGProjection_log_softmax(nn.Module):
     def __init__(self, in_features: int, out_features: int):
         """
@@ -310,7 +313,7 @@ class DGProjection_log_softmax(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.linear = nn.Linear(in_features, out_features, bias=True)
-        self.log_softmax= nn.LogSoftmax(dim=1)
+        self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         logits = self.linear(x)  # Shape: [batch_size, out_features]
@@ -318,6 +321,7 @@ class DGProjection_log_softmax(nn.Module):
         probs = self.log_softmax(logits)
 
         return probs
+
 
 class DGProjection_simple_softmax(nn.Module):
     def __init__(self, in_features: int, out_features: int):
@@ -362,29 +366,26 @@ class DGProjectionBatchSparsity(nn.Module):
         batch_size = logits.size(0)
         # Determine number of samples to activate per neuron (at least 1)
         k = max(1, int(self.active_percentage * batch_size))
-        
+
         # Transpose to shape [out_features, batch_size] so we can work per neuron
         logits_t = logits.transpose(0, 1)  # shape: [out_features, batch_size]
-        
+
         # For each output neuron, find the indices of the top-k samples
         _, indices = torch.topk(logits_t, k, dim=1)
-        
+
         # Create a zero mask of the same shape as logits_t
         mask = torch.zeros_like(logits_t)
         # Scatter ones into the top-k positions for each neuron
         mask.scatter_(1, indices, 1.0)
-        
+
         # Transpose the mask back to [batch_size, out_features]
         mask = mask.transpose(0, 1)
-        
+
         # Use a straight-through estimator trick:
         # In the forward pass, the output is the hard mask (exactly 1% active),
         # while in the backward pass, gradients flow as if the operation were the identity.
         output = mask + logits - logits.detach()
         return output
-
-
-
 
 
 class DGProjection_simple_top1(nn.Module):
@@ -400,18 +401,18 @@ class DGProjection_simple_top1(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Compute logits from the linear layer.
         logits = self.linear(x)
-        
+
         # Use Gumbel Softmax with the 'hard' flag set to True.
         # This returns one-hot vectors during the forward pass, but maintains gradients via the soft approximation.
         output = F.gumbel_softmax(logits, tau=self.temperature, hard=True)
         return output
-    
+
 
 class RunningActivationQuantile(nn.Module):
     def __init__(self, out_features, momentum=0.2, quantile=0.98):
         """
         Maintains a running estimate of the quantile (e.g., 98th percentile) for each neuron.
-        
+
         Args:
             out_features (int): Number of output neurons.
             momentum (float): Weighting factor for new data.
@@ -425,7 +426,7 @@ class RunningActivationQuantile(nn.Module):
     def update(self, batch_activation):
         """
         Update the running quantile using the current batch's activations.
-        
+
         Args:
             batch_activation (Tensor): Activations of shape [batch_size, out_features].
         """
@@ -455,29 +456,27 @@ class DGProjectionWithRunningQuantile(nn.Module):
         logits = self.linear(x)  # Shape: [batch_size, out_features]
         # Replace logits with softmaxed probabilities.
         probs = F.softmax(logits, dim=1)
-        
+
         # Update the running quantile using the current batch's probabilities.
         self.running_quantile.update(probs)
-        
+
         # Get the current running threshold per neuron and broadcast to match batch size.
         threshold = self.running_quantile.running_quantile.unsqueeze(0)  # Shape: [1, out_features]
-        
+
         # Create a binary mask: 1 if probability is above threshold, 0 otherwise.
         mask = (probs > threshold).float()
-        
+
         # Use a straight-through estimator: forward pass uses the hard mask,
         # but gradients flow as if the operation were the identity.
         output = mask + probs - probs.detach()
         return output
 
 
-
-
-
 ##### Actual Encoders For This Project #####
 
+
 class DepthEncoder(Encoder):
-    def __init__(self, cfg,size=10):
+    def __init__(self, cfg, size=10):
         super().__init__(cfg)
 
         input_ch = 1
@@ -490,7 +489,7 @@ class DepthEncoder(Encoder):
             raise NotImplementedError(f"Unknown resnet architecture {cfg.encoder_conv_architecture}")
 
         curr_input_channels = input_ch
-        self.downsample=nn.Upsample(size=(1,10))
+        self.downsample = nn.Upsample(size=(1, 10))
 
         self.encoder_out_size = size
 
@@ -510,53 +509,52 @@ class FixedMobileNetSmallEncoder(Encoder):
         # Load the pretrained MobileNetV3 Small weights from torchvision.
         weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None
         mobilenet = models.mobilenet_v3_small(weights=weights)
-        
+
         # Freeze all parameters of MobileNet.
         if fixed:
             for param in mobilenet.parameters():
                 param.requires_grad = False
-        
-        # Set the model to evaluation mode.
+
+            # Set the model to evaluation mode.
             mobilenet.eval()
-        
+
         # Use the feature extractor (all layers up to the classifier)
         # Option 1: If you need a single feature vector, you can use the features and avgpool.
         self.features = mobilenet.features  # Feature extraction layers.
-        self.avgpool = mobilenet.avgpool    # Global average pooling.
-        
+        self.avgpool = mobilenet.avgpool  # Global average pooling.
 
-        self.encoder_out_size=576
+        self.encoder_out_size = 576
         # Optionally, if you need to add an extra projection layer,
         # uncomment the following line and adjust dimensions as needed.
         # self.projection = nn.Linear(576, desired_dim)
 
-        self.model_to_device('cuda')
+        self.model_to_device("cuda")
 
     def forward(self, x):
         # x should be a tensor of shape [N, 3, H, W] where H,W >= 224 (or resized accordingly).
-        x = self.features(x)        # Pass through MobileNet features.
-        x = self.avgpool(x)         # Global average pooling; output shape [N, 576, 1, 1].
-        x = torch.flatten(x, 1)     # Flatten to shape [N, 576].
-        
+        x = self.features(x)  # Pass through MobileNet features.
+        x = self.avgpool(x)  # Global average pooling; output shape [N, 576, 1, 1].
+        x = torch.flatten(x, 1)  # Flatten to shape [N, 576].
+
         # If using an extra projection layer, uncomment:
         # x = self.projection(x)
-        
+
         return x
-    
+
     def get_out_size(self) -> int:
         return self.encoder_out_size
+
 
 class HipposlamEncoder(Encoder):
     def __init__(self, cfg: Config, obs_space: ObsSpace):
         super().__init__(cfg)
-
 
         if cfg.Hippo_n_feature:
             self.Hippo_n_feature = cfg.Hippo_n_feature
         else:
             self.Hippo_n_feature = 64
             log.info("hippo n feature not set, using default: {self.Hippo_n_feature}")
-        self.depth_sensor=getattr(cfg, "depth_sensor", False)
+        self.depth_sensor = getattr(cfg, "depth_sensor", False)
         # self.depth_sensor=False
         log.info(self.depth_sensor)
         if self.depth_sensor:
@@ -568,12 +566,12 @@ class HipposlamEncoder(Encoder):
             self.depth_sensor = False
 
         log.debug(f"original obs space: {obs_space['obs']}")
-        obs_cnn=obs_space["obs"]
+        obs_cnn = obs_space["obs"]
 
-        obs_cnn=gym.spaces.Box(low=0, high=255, shape=(3,cfg.res_h, cfg.res_w), dtype=np.uint8)
+        obs_cnn = gym.spaces.Box(low=0, high=255, shape=(3, cfg.res_h, cfg.res_w), dtype=np.uint8)
         self.basic_encoder = make_img_encoder(cfg, obs_cnn)
         self.encoder_out_size = self.basic_encoder.get_out_size()
-        
+
         self.with_number_instruction = cfg.with_number_instruction
         self.number_instruction_coef = getattr(cfg, "number_instruction_coef", 1)
         if self.with_number_instruction:
@@ -607,22 +605,22 @@ class HipposlamEncoder(Encoder):
 
         if cfg.DG_lr:
             self.dg_lr = getattr(cfg, "DG_lr", 0.001)
-        
-            self.DG_projection = DGProjection(self.encoder_out_size,cfg.Hippo_n_feature,self.dg_lr)
+
+            self.DG_projection = DGProjection(self.encoder_out_size, cfg.Hippo_n_feature, self.dg_lr)
         elif cfg.DG_temperature:
             self.temperature = getattr(cfg, "DG_temperature", 1)
-            self.DG_projection = DGProjection_simple_top1(self.encoder_out_size,cfg.Hippo_n_feature,self.temperature)
+            self.DG_projection = DGProjection_simple_top1(self.encoder_out_size, cfg.Hippo_n_feature, self.temperature)
         elif cfg.DG_batch_q:
-            self.DG_projection = DGProjectionWithRunningQuantile(self.encoder_out_size,cfg.Hippo_n_feature)
+            self.DG_projection = DGProjectionWithRunningQuantile(self.encoder_out_size, cfg.Hippo_n_feature)
         elif cfg.DG_softmax:
-            self.DG_projection = DGProjection_simple_softmax(self.encoder_out_size,cfg.Hippo_n_feature)
+            self.DG_projection = DGProjection_simple_softmax(self.encoder_out_size, cfg.Hippo_n_feature)
         else:
-            self.DG_projection = nn.Linear(self.encoder_out_size,cfg.Hippo_n_feature)
+            self.DG_projection = nn.Linear(self.encoder_out_size, cfg.Hippo_n_feature)
 
         if cfg.DG_name == "log_softmax":
-            self.DG_projection = DGProjection_log_softmax(self.encoder_out_size,cfg.Hippo_n_feature)
+            self.DG_projection = DGProjection_log_softmax(self.encoder_out_size, cfg.Hippo_n_feature)
         elif cfg.DG_name == "linear_relu":
-            self.DG_projection = DGProjection_relu(self.encoder_out_size,cfg.Hippo_n_feature)
+            self.DG_projection = DGProjection_relu(self.encoder_out_size, cfg.Hippo_n_feature)
         elif cfg.DG_name == "batch_novelty":
             self.dg_detect = getattr(cfg, "DG_detect", 0.1)
             if not self.dg_detect:
@@ -632,17 +630,23 @@ class HipposlamEncoder(Encoder):
             if not self.dg_novelty:
                 print("getattr doesn't behave like you think, setting dg_novelty to 0.4")
                 self.dg_novelty = 0.4
-            self.DG_projection = DGProjectionBatchNovelty(self.encoder_out_size,cfg.Hippo_n_feature,self.dg_detect,self.dg_novelty)
+            self.DG_projection = DGProjectionBatchNovelty(
+                self.encoder_out_size, cfg.Hippo_n_feature, self.dg_detect, self.dg_novelty
+            )
         elif cfg.DG_name == "batchnorm_relu":
-            intercept=getattr(cfg, "DG_BN_intercept",2)
-            self.DG_projection = DGProjection_batchnorm_relu(self.encoder_out_size,cfg.Hippo_n_feature,intercept=intercept)
+            intercept = getattr(cfg, "DG_BN_intercept", 2)
+            self.DG_projection = DGProjection_batchnorm_relu(
+                self.encoder_out_size, cfg.Hippo_n_feature, intercept=intercept
+            )
         elif cfg.DG_name == "batchnorm_relu_fixed":
-            intercept=getattr(cfg, "DG_BN_intercept",2)
-            self.DG_projection = DGProjection_batchnorm_relu_fixed(self.encoder_out_size,cfg.Hippo_n_feature,intercept=intercept)
+            intercept = getattr(cfg, "DG_BN_intercept", 2)
+            self.DG_projection = DGProjection_batchnorm_relu_fixed(
+                self.encoder_out_size, cfg.Hippo_n_feature, intercept=intercept
+            )
 
         tmp_out_size = cfg.Hippo_n_feature
 
-        if cfg.core_name.startswith("SeqDense"):#"Gate":
+        if cfg.core_name.startswith("SeqDense"):  # "Gate":
             self.n_dense_feature = getattr(cfg, "N_dense_feature", 16)
             if not self.n_dense_feature:
                 print("getattr doesn't behave like you think, setting n_dense_feature to 16")
@@ -652,17 +656,17 @@ class HipposlamEncoder(Encoder):
 
         bypass_features = 0
         bypass_features = self.encoder_out_size
-        if hasattr(cfg,'depth_sensor'):
+        if hasattr(cfg, "depth_sensor"):
             log.info(f"denpth_sensor {cfg.depth_sensor}")
             if self.depth_sensor:
                 log.info(f"denpth_sensor {self.depth_sensor}")
                 bypass_features = self.depth_encoder.get_out_size() + self.instructions_lstm_units
-            
-        self.bypass=False
-        if cfg.core_name.startswith("Bypass"):#"Gate":
-            self.bypass=True
+
+        self.bypass = False
+        if cfg.core_name.startswith("Bypass"):  # "Gate":
+            self.bypass = True
             tmp_out_size += bypass_features
-            log.info(f'using bypass, dim {bypass_features}')
+            log.info(f"using bypass, dim {bypass_features}")
 
         self.encoder_out_size = tmp_out_size
         self.cpu_device = torch.device("cpu")
@@ -670,7 +674,7 @@ class HipposlamEncoder(Encoder):
         # log.info("=================================== memory=========================")
         # log.info(torch.cuda.memory_allocated())
 
-    def model_to_device(self, device): 
+    def model_to_device(self, device):
         self.to(device)
         if self.with_number_instruction:
             return
@@ -690,15 +694,17 @@ class HipposlamEncoder(Encoder):
     def forward(self, obs_dict):
         # obs_cnn = obs_dict["obs"].copy()
         if self.depth_sensor:
-            obs_cnn = obs_dict["obs"][:,:3,:,:]
+            obs_cnn = obs_dict["obs"][:, :3, :, :]
         else:
-            obs_cnn = obs_dict["obs"][:,:,:,:]
+            obs_cnn = obs_dict["obs"][:, :, :, :]
         x = self.basic_encoder(obs_cnn)
 
         if self.with_number_instruction:
             instr = obs_dict[DMLAB_INSTRUCTIONS]
-            last_outputs = torch.nn.functional.one_hot(instr.squeeze(1)-1,num_classes=3)*self.number_instruction_coef
-            
+            last_outputs = (
+                torch.nn.functional.one_hot(instr.squeeze(1) - 1, num_classes=3) * self.number_instruction_coef
+            )
+
             # log.info(last_outputs)
 
         else:
@@ -726,23 +732,22 @@ class HipposlamEncoder(Encoder):
 
         last_outputs = last_outputs.to(x.device)  # for some reason this is very slow
 
-
         x = torch.cat((x, last_outputs), dim=1)
 
         tmp_out = self.DG_projection(x)
         # log.info(tmp_out)
         if self.depth_sensor:
-            depth_out = self.depth_encoder(obs_dict['obs'][:,-1:,:,:])
-            depth_out = depth_out.view(obs_dict['obs'].size(0),-1)
-            bypass_out = torch.cat((depth_out,last_outputs), dim=1)
+            depth_out = self.depth_encoder(obs_dict["obs"][:, -1:, :, :])
+            depth_out = depth_out.view(obs_dict["obs"].size(0), -1)
+            bypass_out = torch.cat((depth_out, last_outputs), dim=1)
         else:
             bypass_out = x
 
         if self.bypass:
-            tmp_out = torch.cat((tmp_out,bypass_out), dim=1)
-        elif hasattr(self,'dense'):
+            tmp_out = torch.cat((tmp_out, bypass_out), dim=1)
+        elif hasattr(self, "dense"):
             dense_out = self.dense(x)
-            tmp_out = torch.cat((tmp_out,dense_out), dim=1)
+            tmp_out = torch.cat((tmp_out, dense_out), dim=1)
 
         return tmp_out
 
@@ -764,13 +769,18 @@ def make_img_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
             # this loads the SS RNN trained encoder
             encoder_load_path = "/home/xiaoxiong/try0120/train_dir/Random3_resnet_DG_relu_SS_RNN/checkpoint_p2/best_000020923_170811392_reward_87.534.pth"
         devicename = cfg.device
-        if devicename=='gpu': devicename='cuda'
+        if devicename == "gpu":
+            devicename = "cuda"
         checkpoint = torch.load(encoder_load_path, map_location=devicename, weights_only=False)
 
         full_state_dict = checkpoint["model"]
 
         # Filter out only the keys for the encoder.
-        encoder_state_dict = {k.replace("encoder.basic_encoder.", ""): v for k, v in full_state_dict.items() if k.startswith("encoder.basic_encoder.")}
+        encoder_state_dict = {
+            k.replace("encoder.basic_encoder.", ""): v
+            for k, v in full_state_dict.items()
+            if k.startswith("encoder.basic_encoder.")
+        }
 
         # Now create a new encoder instance. Note that pretrained is set to False because you'll load your custom weights,
         # and fixed is True to freeze the encoder.
@@ -780,14 +790,14 @@ def make_img_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
         encoder.load_state_dict(encoder_state_dict)
 
         if cfg.fix_encoder_when_load:
-            log.info('fix encoder weights')
+            log.info("fix encoder weights")
             # Double-check that the encoder parameters are frozen.
             for param in encoder.parameters():
                 param.requires_grad = False
 
             encoder.eval()  # Make sure the encoder is in evaluation mode.
         else:
-            log.info('trainable loaded encoder')
+            log.info("trainable loaded encoder")
 
         return encoder
     elif cfg.encoder_conv_architecture.startswith("mobilenet"):
@@ -797,6 +807,6 @@ def make_img_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
 
 
 def make_hipposlam_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
-    if cfg.encoder_name=="Default":
-        return DmlabEncoder(cfg,obs_space)
+    if cfg.encoder_name == "Default":
+        return DmlabEncoder(cfg, obs_space)
     return HipposlamEncoder(cfg, obs_space)

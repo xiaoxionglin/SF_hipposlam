@@ -1,7 +1,8 @@
 from math import tanh
 
-from sample_factory.utils.utils import log
 import gymnasium as gym
+
+from sample_factory.utils.utils import log
 
 RAW_SCORE_SUMMARY_KEY_SUFFIX = "dmlab_raw_score"
 
@@ -37,6 +38,8 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
             level_name_key = f"z_{self.unwrapped.task_id:02d}_{level_name}"
             info["episode_extra_stats"][f"{level_name_key}_{RAW_SCORE_SUMMARY_KEY_SUFFIX}"] = score
             info["episode_extra_stats"][f"{level_name_key}_len"] = self.episode_length
-            info["episode_extra_stats"][f"{level_name_key}_lenweighted_score"] = (10000-self.episode_length)/10000*score
+            info["episode_extra_stats"][f"{level_name_key}_lenweighted_score"] = (
+                (10000 - self.episode_length) / 10000 * score
+            )
             # log.info(f'Episode Extra Stats: {info["episode_extra_stats"]}')
         return obs, rew, terminated, truncated, info

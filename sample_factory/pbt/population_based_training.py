@@ -1,6 +1,5 @@
 """Population-Based Training implementation, inspired by https://arxiv.org/abs/1807.01281."""
 
-
 import copy
 import json
 import math
@@ -39,6 +38,7 @@ def perturb_exponential_decay(x, _cfg, perturb_amount_min=1.01, perturb_amount_m
     new_value = 1.0 - perturbed
     new_value = max(EPS, new_value)
     return new_value
+
 
 def perturb_one_way_down(x, _cfg, perturb_amount_min=1.01, perturb_amount_max=1.1):
     # very conservative values, things like gamma should not change quickly
@@ -137,12 +137,12 @@ class PopulationBasedTraining(AlgoObserver, EventLoopObject):
 
         if cfg.DG_temperature:
             HYPERPARAMS_TO_TUNE.add("DG_temperature")
-            SPECIAL_PERTURBATION["DG_temperature"]=perturb_one_way_down
+            SPECIAL_PERTURBATION["DG_temperature"] = perturb_one_way_down
 
         if cfg.head_l1_coef:
-            log.info('using L1 penalization for head output')
+            log.info("using L1 penalization for head output")
             HYPERPARAMS_TO_TUNE.add("head_l1_coef")
-            
+
         self.last_update = [0] * self.cfg.num_policies
 
         self.policy_cfg = [dict() for _ in range(self.cfg.num_policies)]
@@ -317,19 +317,19 @@ class PopulationBasedTraining(AlgoObserver, EventLoopObject):
             self._write_dict_summaries(self.policy_reward_shaping[policy_id], writer, "rew", env_steps)
 
     def _update_policy(self, policy_id, policy_stats):
-        policy_stats_keys=policy_stats.keys()
-        policy_stats_key=''
+        policy_stats_keys = policy_stats.keys()
+        policy_stats_key = ""
         for key in policy_stats_keys:
             if key.endswith(self.cfg.pbt_target_objective):
-                log.info(f'matched: {key},{self.cfg.pbt_target_objective}')
-                policy_stats_key=key
+                log.info(f"matched: {key},{self.cfg.pbt_target_objective}")
+                policy_stats_key = key
                 break
         if not policy_stats_key:
-        # if self.cfg.pbt_target_objective not in policy_stats:
-            log.info('pbt: no matching obj in policy_stats')
+            # if self.cfg.pbt_target_objective not in policy_stats:
+            log.info("pbt: no matching obj in policy_stats")
             return
 
-        target_objectives = policy_stats[policy_stats_key]#self.cfg.pbt_target_objective]
+        target_objectives = policy_stats[policy_stats_key]  # self.cfg.pbt_target_objective]
 
         # not enough data to perform PBT yet
         for objectives in target_objectives:

@@ -12,10 +12,10 @@ from torch import Tensor
 from sample_factory.algo.learning.batcher import Batcher
 from sample_factory.algo.learning.learner import BaseLearner, create_learner
 from sample_factory.algo.utils.env_context import SampleFactoryEnvContext, set_global_env_context
-from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY
+from sample_factory.algo.utils.model_context import SampleFactoryModelContext, set_global_model_context
 from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.shared_buffers import BufferMgr
 from sample_factory.algo.utils.torch_utils import init_torch_runtime
@@ -25,7 +25,9 @@ from sample_factory.utils.typing import Config, PolicyID
 from sample_factory.utils.utils import init_file_logger, log
 
 
-def init_learner_process(sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, learner_worker: LearnerWorker):
+def init_learner_process(
+    sf_context_env: SampleFactoryEnvContext, sf_context_model: SampleFactoryModelContext, learner_worker: LearnerWorker
+):
     set_global_env_context(sf_context_env)
     set_global_model_context(sf_context_model)
     log.info(f"{learner_worker.object_id}\tpid {os.getpid()}\tparent {os.getppid()}")
@@ -46,11 +48,10 @@ def init_learner_process(sf_context_env: SampleFactoryEnvContext, sf_context_mod
     if cfg.device == "gpu":
         cuda_envvars_for_policy(learner_worker.learner.policy_id, "learning")
 
-    
     if cfg.device == "gpu":
         init_torch_runtime(cfg)
     else:
-        init_torch_runtime(cfg,4)
+        init_torch_runtime(cfg, 4)
 
 
 class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
@@ -82,32 +83,25 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         self.cache_cleanup_timer.timeout.connect(self._cleanup_cache)
 
     @signal
-    def initialized(self):
-        ...
+    def initialized(self): ...
 
     @signal
-    def model_initialized(self):
-        ...
+    def model_initialized(self): ...
 
     @signal
-    def report_msg(self):
-        ...
+    def report_msg(self): ...
 
     @signal
-    def training_batch_released(self):
-        ...
+    def training_batch_released(self): ...
 
     @signal
-    def finished_training_iteration(self):
-        ...
+    def finished_training_iteration(self): ...
 
     @signal
-    def saved_model(self):
-        ...
+    def saved_model(self): ...
 
     @signal
-    def stop(self):
-        ...
+    def stop(self): ...
 
     def save(self) -> bool:
         if self.learner.save():

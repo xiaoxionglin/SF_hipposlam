@@ -4,11 +4,9 @@ from typing import List
 import torch
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
-from sample_factory.model.model_utils import ModelModule, create_mlp, nonlinearity
 from sample_factory.model.decoder import Decoder
+from sample_factory.model.model_utils import ModelModule, create_mlp, nonlinearity
 from sample_factory.utils.typing import Config
-
-
 
 
 class MlpDecoderJit(Decoder):

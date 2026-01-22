@@ -1,12 +1,10 @@
 from sample_factory.launcher.run_description import Experiment, ParamGrid, RunDescription
 
-
 _params = ParamGrid(
     [
         ("seed", [11]),
     ]
 )
-
 
 
 vstr = "hipposlam"
@@ -62,7 +60,7 @@ cli = (
     "--normalize_input=False "
     "--fix_encoder_when_load=True "
     "--encoder_load_path=/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth "
-    "--encoder_conv_architecture=pretrained_resnet "    
+    "--encoder_conv_architecture=pretrained_resnet "
     "--encoder_conv_mlp_layers=256 "
     "--use_rnn=True "
     "--rnn_type=gru "
@@ -84,8 +82,6 @@ cli = (
     "--masked_distance_matrix=False"
     "--normalize_advantage=True"
 )
-
-
 
 
 _experiments = [

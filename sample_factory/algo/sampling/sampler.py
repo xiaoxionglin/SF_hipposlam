@@ -7,10 +7,10 @@ from signal_slot.signal_slot import BoundMethod, EventLoop, EventLoopObject, Eve
 from sample_factory.algo.sampling.inference_worker import InferenceWorker, init_inference_process
 from sample_factory.algo.sampling.rollout_worker import RolloutWorker, init_rollout_worker_process
 from sample_factory.algo.utils.env_context import sf_global_env_context
-from sample_factory.algo.utils.model_context import sf_global_model_context
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObject
 from sample_factory.algo.utils.misc import advance_rollouts_signal, new_trajectories_signal
+from sample_factory.algo.utils.model_context import sf_global_model_context
 from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.multiprocessing_utils import get_mp_ctx
 from sample_factory.algo.utils.shared_buffers import BufferMgr
@@ -37,12 +37,10 @@ class AbstractSampler(EventLoopObject, Configurable):
         self.env_info: EnvInfo = env_info
 
     @signal
-    def started(self):
-        ...
+    def started(self): ...
 
     @signal
-    def initialized(self):
-        ...
+    def initialized(self): ...
 
     def init(self) -> None:
         raise NotImplementedError()
@@ -99,12 +97,10 @@ class Sampler(AbstractSampler, ABC):
 
     # internal signals used for communication with the workers, these are not a part of the interface
     @signal
-    def _init_inference_workers(self):
-        ...
+    def _init_inference_workers(self): ...
 
     @signal
-    def _inference_workers_initialized(self):
-        ...
+    def _inference_workers_initialized(self): ...
 
     def _make_inference_worker(self, event_loop, policy_id: PolicyID, worker_idx: int, param_server: ParameterServer):
         return InferenceWorker(
@@ -267,7 +263,9 @@ class ParallelSampler(Sampler):
                     self.policy_param_server[policy_id],
                 )
                 inference_proc.event_loop.owner = inference_worker
-                inference_proc.set_init_func_args((sf_global_env_context(), sf_global_model_context(), inference_worker))
+                inference_proc.set_init_func_args(
+                    (sf_global_env_context(), sf_global_model_context(), inference_worker)
+                )
                 self.inference_workers[policy_id].append(inference_worker)
 
         for i in range(self.cfg.num_workers):
