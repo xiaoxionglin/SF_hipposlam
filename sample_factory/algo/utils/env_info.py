@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 import gymnasium as gym
 
 from sample_factory.algo.utils.action_distributions import calc_num_actions
+
 # from sample_factory.algo.utils.context import set_global_context, sf_global_context
 from sample_factory.algo.utils.env_context import set_global_env_context, sf_global_env_context
 from sample_factory.algo.utils.make_env import BatchedVecEnv, NonBatchedVecEnv, make_env_func_batched

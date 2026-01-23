@@ -322,7 +322,7 @@ class BaseLearner(Configurable):
     def _after_optimizer_step(self):
         """A hook to be called after each optimizer step."""
         self.train_step += 1
-    
+
     def _register_forward_hooks(self):
         log.info("Trying to register forward hooks, but no hooks are implemented. Continuing without forward hooks.")
         pass
@@ -480,11 +480,13 @@ class BaseLearner(Configurable):
         kl_loss *= self.cfg.kl_loss_coeff
 
         return kl_old, kl_loss
-    
+
     def _l1_loss(self, head_outputs, valids, num_invalids):
         if self.cfg.head_l1_coef:
             # only the first 64 features, assuming bypass
-            l1_loss = self.cfg.head_l1_coef * torch.norm(masked_select(head_outputs[:,:getattr(self.cfg,'Hippo_n_feature',64)], valids, num_invalids), p=1)
+            l1_loss = self.cfg.head_l1_coef * torch.norm(
+                masked_select(head_outputs[:, : getattr(self.cfg, "Hippo_n_feature", 64)], valids, num_invalids), p=1
+            )
         else:
             l1_loss = torch.zeros((), device=head_outputs.device)
         return l1_loss
@@ -552,17 +554,15 @@ class BaseLearner(Configurable):
 
         mb = buffer[indices]
         return mb
-    
 
-    
     def _forward_pass(
-            self, 
-            mb: AttrDict, 
-            recurrence: int, 
-            valids, 
-            return_outputs: tuple[bool, bool, bool] = (True, True, True),
-            head_only: bool = False
-            ):
+        self,
+        mb: AttrDict,
+        recurrence: int,
+        valids,
+        return_outputs: tuple[bool, bool, bool] = (True, True, True),
+        head_only: bool = False,
+    ):
         with torch.no_grad(), self.timing.add_time("forward_init"):
             outputs = AttrDict()
 
@@ -572,7 +572,7 @@ class BaseLearner(Configurable):
             minibatch_size: int = head_outputs.size(0)
             outputs["minibatch_size"] = minibatch_size
             if return_outputs[0]:
-                outputs['head_outputs'] = head_outputs
+                outputs["head_outputs"] = head_outputs
             if head_only:
                 return outputs
 
@@ -600,26 +600,24 @@ class BaseLearner(Configurable):
                 del core_output_seq
             else:
                 core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
-            
+
             del head_outputs
             if return_outputs[1]:
-                outputs['core_outputs'] = core_outputs
-
+                outputs["core_outputs"] = core_outputs
 
         if self.cfg.with_vtrace:
             num_trajectories = minibatch_size // recurrence
-            outputs['num_trajectories'] = num_trajectories
+            outputs["num_trajectories"] = num_trajectories
         assert core_outputs.shape[0] == minibatch_size
 
         with self.timing.add_time("tail"):
             # calculate policy tail outside of recurrent loop
             result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
-            
 
             del core_outputs
             if return_outputs[2]:
-                outputs['result'] = result
-        
+                outputs["result"] = result
+
         return outputs
 
     def _calculate_losses(
@@ -709,7 +707,7 @@ class BaseLearner(Configurable):
 
         for key, value in stats.items():
             stats[key] = to_scalar(value)
-        
+
         return stats
 
     def _prepare_and_normalize_obs(self, obs: TensorDict) -> TensorDict:
@@ -856,6 +854,7 @@ class BaseLearner(Configurable):
 
             return stats
 
+
 class DefaultLearner(BaseLearner):
     def __init__(
         self,
@@ -868,7 +867,7 @@ class DefaultLearner(BaseLearner):
         BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
         # We could put these functions in the BaseLearner and always overwrite them.. might change this later
         # For now this seems a bit cleaner
-    
+
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
     ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
@@ -883,7 +882,7 @@ class DefaultLearner(BaseLearner):
 
             valids = mb.valids
 
-        outputs = self._forward_pass(mb = mb, recurrence=recurrence, valids = valids, return_outputs=[True,False,True])
+        outputs = self._forward_pass(mb=mb, recurrence=recurrence, valids=valids, return_outputs=[True, False, True])
 
         with self.timing.add_time("post_forward"):
             action_distribution = self.actor_critic.action_distribution()
@@ -894,7 +893,6 @@ class DefaultLearner(BaseLearner):
             ratio = torch.clamp(ratio, 0.05, 20.0)
 
             values = outputs.result["values"].squeeze()
-        
 
         # these computations are not the part of the computation graph
         with torch.no_grad(), self.timing.add_time("advantages_returns"):
@@ -944,15 +942,15 @@ class DefaultLearner(BaseLearner):
 
             adv_std, adv_mean = torch.std_mean(masked_select(adv, valids, num_invalids))
             adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-7)  # normalize advantage
-            log.info(f'Advantage Shape: {adv.shape}')
+            log.info(f"Advantage Shape: {adv.shape}")
 
         with self.timing.add_time("losses"):
             # noinspection PyTypeChecker
             policy_loss = self._policy_loss(ratio, adv, clip_ratio_low, clip_ratio_high, valids, num_invalids)
             l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
-            
+
             policy_loss += l1_loss
-            
+
             exploration_loss = self.exploration_loss_func(action_distribution, valids, num_invalids)
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
@@ -972,7 +970,7 @@ class DefaultLearner(BaseLearner):
         del outputs
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
-    
+
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
     ) -> Optional[AttrDict]:
@@ -1144,14 +1142,17 @@ class DefaultLearner(BaseLearner):
             prev_epoch_actor_loss = new_epoch_actor_loss
 
         return stats_and_summaries
-    
 
 
-def default_make_learner_func(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
+def default_make_learner_func(
+    cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer
+) -> BaseLearner:
     return DefaultLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
 
 
-def create_learner(cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer) -> BaseLearner:
+def create_learner(
+    cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer
+) -> BaseLearner:
     # check if user specified custom actor/critic creation function
     from sample_factory.algo.utils.model_context import global_learner_factory
 

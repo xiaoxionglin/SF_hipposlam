@@ -20,7 +20,10 @@ from sf_working_directories.jannek.dmlab.dmlab30 import (
 )
 from sf_working_directories.jannek.dmlab.dmlab_gym import DmlabGymEnv, DmlabGymEnv_custom, dmlab_level_to_level_name
 from sf_working_directories.jannek.dmlab.dmlab_level_cache import DmlabLevelCache, DmlabLevelCaches
-from sf_working_directories.jannek.dmlab.wrappers.reward_shaping import RAW_SCORE_SUMMARY_KEY_SUFFIX, DmlabRewardShapingWrapper
+from sf_working_directories.jannek.dmlab.wrappers.reward_shaping import (
+    RAW_SCORE_SUMMARY_KEY_SUFFIX,
+    DmlabRewardShapingWrapper,
+)
 
 
 def get_dataset_path(cfg):
@@ -129,11 +132,11 @@ def make_dmlab_env_impl(
     level = task_id_to_level(task_id, spec)
     log.debug("%r level %s task id %d", env_config, level, task_id)
 
-    depth_sensor=getattr(cfg,"depth_sensor")
+    depth_sensor = getattr(cfg, "depth_sensor")
     log.info(depth_sensor)
     log.info(cfg.depth_sensor)
     # depth_sensor=False
-    log.info(f'depth_sensor  dmlab env {depth_sensor}')
+    log.info(f"depth_sensor  dmlab env {depth_sensor}")
     env = DmlabGymEnv_custom(
         task_id,
         level,
@@ -150,10 +153,10 @@ def make_dmlab_env_impl(
         dmlab_level_caches_per_policy,
         spec.extra_cfg,
         render_mode,
-        depth_sensor = depth_sensor,
-        reduced_action_set = cfg.dmlab_reduced_action_set,
-        with_number_instruction = cfg.with_number_instruction,
-        with_pos_obs = cfg.with_pos_obs
+        depth_sensor=depth_sensor,
+        reduced_action_set=cfg.dmlab_reduced_action_set,
+        with_number_instruction=cfg.with_number_instruction,
+        with_pos_obs=cfg.with_pos_obs,
     )
 
     if env_config and "env_id" in env_config:
@@ -225,9 +228,8 @@ def dmlab_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: S
     if policy_id not in new_level_returns:
         return
 
-    #debug
+    # debug
     print(f"Extra summaries called at step {env_steps} for policy {policy_id}")
-
 
     # exit if we don't have at least one episode for all levels
     if dmlab_extra_summaries.all_levels is None:
@@ -236,17 +238,19 @@ def dmlab_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: S
         dmlab_extra_summaries.all_levels = level_names
 
     all_levels = dmlab_extra_summaries.all_levels
-    flag=False
+    flag = False
     for level in all_levels:
 
-        print(level,len(new_level_returns[policy_id].get(level, [])) )
+        print(level, len(new_level_returns[policy_id].get(level, [])))
         if len(new_level_returns[policy_id].get(level, [])) < 1:
-            flag=True
-            #return
+            flag = True
+            # return
     if flag:
         return
-    #debug
-    print(f"Having at least one episode for each level! \n Extra summaries called at step {env_steps} for policy {policy_id}")
+    # debug
+    print(
+        f"Having at least one episode for each level! \n Extra summaries called at step {env_steps} for policy {policy_id}"
+    )
 
     level_mean_scores_normalized = []
     level_mean_scores_normalized_capped = []
@@ -279,9 +283,8 @@ def dmlab_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: S
     # use 000 here to put these summaries on top in tensorboard (it sorts by ASCII)
     summary_writer.add_scalar("_dmlab/000_mean_human_norm_score", mean_normalized_score, env_steps)
     summary_writer.add_scalar("_dmlab/000_capped_mean_human_norm_score", capped_mean_normalized_score, env_steps)
-    #debug
+    # debug
     print(f"Human norm score logged! \n Extra summaries called at step {env_steps} for policy {policy_id}")
-
 
     # clear the scores and start anew (this is exactly what IMPALA does)
     dmlab_extra_episodic_stats_processing.new_level_returns[policy_id] = dict()
@@ -295,7 +298,9 @@ def dmlab_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: S
     policy_avg_stats[target_objective_stat][policy_id].append(capped_mean_normalized_score)
 
 
-def hipposlam_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: int, summary_writer: SummaryWriter) -> None:
+def hipposlam_extra_summaries(
+    runner: Runner, policy_id: PolicyID, env_steps: int, summary_writer: SummaryWriter
+) -> None:
     """
     We precisely follow IMPALA repo (scalable_agent) here for the reward calculation.
 
@@ -317,9 +322,8 @@ def hipposlam_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: in
     if policy_id not in new_level_returns:
         return
 
-    #debug
+    # debug
     print(f"Extra summaries called at step {env_steps} for policy {policy_id}")
-
 
     # exit if we don't have at least one episode for all levels
     if dmlab_extra_summaries.all_levels is None:
@@ -328,17 +332,19 @@ def hipposlam_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: in
         dmlab_extra_summaries.all_levels = level_names
 
     all_levels = dmlab_extra_summaries.all_levels
-    flag=False
+    flag = False
     for level in all_levels:
 
-        print(level,len(new_level_returns[policy_id].get(level, [])) )
+        print(level, len(new_level_returns[policy_id].get(level, [])))
         if len(new_level_returns[policy_id].get(level, [])) < 1:
-            flag=True
-            #return
+            flag = True
+            # return
     if flag:
         return
-    #debug
-    print(f"Having at least one episode for each level! \n Extra summaries called at step {env_steps} for policy {policy_id}")
+    # debug
+    print(
+        f"Having at least one episode for each level! \n Extra summaries called at step {env_steps} for policy {policy_id}"
+    )
 
     level_mean_scores_normalized = []
     level_mean_scores_normalized_capped = []
@@ -371,9 +377,8 @@ def hipposlam_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: in
     # use 000 here to put these summaries on top in tensorboard (it sorts by ASCII)
     summary_writer.add_scalar("_dmlab/000_mean_human_norm_score", mean_normalized_score, env_steps)
     summary_writer.add_scalar("_dmlab/000_capped_mean_human_norm_score", capped_mean_normalized_score, env_steps)
-    #debug
+    # debug
     print(f"Human norm score logged! \n Extra summaries called at step {env_steps} for policy {policy_id}")
-
 
     # clear the scores and start anew (this is exactly what IMPALA does)
     dmlab_extra_episodic_stats_processing.new_level_returns[policy_id] = dict()
@@ -385,4 +390,3 @@ def hipposlam_extra_summaries(runner: Runner, policy_id: PolicyID, env_steps: in
         policy_avg_stats[target_objective_stat] = [deque(maxlen=1) for _ in range(cfg.num_policies)]
 
     policy_avg_stats[target_objective_stat][policy_id].append(capped_mean_normalized_score)
-

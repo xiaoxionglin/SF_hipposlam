@@ -38,4 +38,3 @@ def global_env_registry() -> Dict[str, CreateEnvFunc]:
     :rtype: EnvRegistry
     """
     return sf_global_env_context().env_registry
-

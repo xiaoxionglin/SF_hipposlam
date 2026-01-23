@@ -2,6 +2,7 @@ from abc import ABC
 from typing import List
 
 import torch
+from sf_workingdir.dmlab.custom_decoder import ShiftRegisterTransformerDecoder
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
 from sample_factory.model.model_utils import ModelModule, create_mlp, nonlinearity
@@ -32,4 +33,6 @@ class MlpDecoder(Decoder):
 
 
 def default_make_decoder_func(cfg: Config, core_input_size: int) -> Decoder:
+    if getattr(cfg, "decoder_type", "mlp") == "sr_transformer":
+        return ShiftRegisterTransformerDecoder(cfg, core_input_size)
     return MlpDecoder(cfg, core_input_size)

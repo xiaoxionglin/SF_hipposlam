@@ -132,7 +132,10 @@ class Experiment:
                 experiment_name = f"{experiment_idx:02d}_" + "_".join(experiment_name_tokens)
                 if len(experiment_name) > 100:
                     # TODO: Figure out a nice way to name the experiment with multiple different changing settings.
-                    log.warning("Experiment name is too long! (%d characters). Cutting the name of at character 100!", len(experiment_name))
+                    log.warning(
+                        "Experiment name is too long! (%d characters). Cutting the name of at character 100!",
+                        len(experiment_name),
+                    )
                     experiment_name = experiment_name[:100]
             else:
                 experiment_name = f"{experiment_idx:02d}_{self.base_name}"

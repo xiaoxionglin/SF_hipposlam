@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from torch import Tensor, nn
+
 from sample_factory.algo.utils.tensor_dict import TensorDict
 from sample_factory.model.actor_critic import (
-    ActorCritic, 
-    ActorCriticSharedWeights, 
-    ActorCriticSeparateWeights, 
-    obs_space_without_action_mask
+    ActorCritic,
+    ActorCriticSeparateWeights,
+    ActorCriticSharedWeights,
+    obs_space_without_action_mask,
 )
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 
@@ -75,7 +76,7 @@ class ActorDoubleCriticSharedWeights(ActorCritic):
         result = self.forward_tail(x, values_only, sample_actions=True, action_mask=action_mask)
         result["new_rnn_states"] = new_rnn_states
         return result
-    
+
 
 def make_hipposlam_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
     from sample_factory.algo.utils.model_context import global_model_factory

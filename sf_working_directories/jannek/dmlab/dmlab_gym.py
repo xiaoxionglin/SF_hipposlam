@@ -12,7 +12,11 @@ import numpy as np
 
 from sample_factory.utils.typing import PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, log
-from sf_working_directories.jannek.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_MAX_INSTRUCTION_LEN, DMLAB_VOCABULARY_SIZE
+from sf_working_directories.jannek.dmlab.dmlab30 import (
+    DMLAB_INSTRUCTIONS,
+    DMLAB_MAX_INSTRUCTION_LEN,
+    DMLAB_VOCABULARY_SIZE,
+)
 from sf_working_directories.jannek.dmlab.dmlab_level_cache import DmlabLevelCache
 from sf_working_directories.jannek.dmlab.dmlab_utils import string_to_hash_bucket
 
@@ -275,6 +279,7 @@ class DmlabGymEnv(gym.Env):
             log.debug("Add new level to cache! Level %s seed %r key %s", self.level_name, self.last_reset_seed, key)
             self.curr_cache.add_new_level(self.level, self.last_reset_seed, key, pk3_path)
 
+
 class DmlabGymEnv_custom(gym.Env):
     def __init__(
         self,
@@ -296,19 +301,19 @@ class DmlabGymEnv_custom(gym.Env):
         depth_sensor=True,
         reduced_action_set=False,
         with_number_instruction=True,
-        with_pos_obs=False
+        with_pos_obs=False,
     ):
-        
+
         # self.depth_sensor = depth_sensor
         self.width = res_w
         self.height = res_h
 
         # self._main_observation = 'DEBUG.CAMERA_INTERLEAVED.PLAYER_VIEW_NO_RETICLE'
         self.main_observation = "RGB_INTERLEAVED"
-        self.num_channels=3
+        self.num_channels = 3
         if depth_sensor:
             self.main_observation = "RGBD_INTERLEAVED"
-            self.num_channels=4
+            self.num_channels = 4
         self.instructions_observation = DMLAB_INSTRUCTIONS
         self.with_instructions = with_instructions and not benchmark_mode
         self.with_number_instruction = with_number_instruction
@@ -338,7 +343,7 @@ class DmlabGymEnv_custom(gym.Env):
             observation_format += [self.instructions_observation]
         self.with_pos_obs = with_pos_obs
         if self.with_pos_obs:
-            observation_format += ["DEBUG.POS.TRANS","DEBUG.POS.ROT"]
+            observation_format += ["DEBUG.POS.TRANS", "DEBUG.POS.ROT"]
 
         config = {
             "width": self.width,
@@ -383,7 +388,6 @@ class DmlabGymEnv_custom(gym.Env):
 
         self.action_space = gym.spaces.Discrete(len(self.action_set))
 
-
         self.observation_space = gym.spaces.Dict(
             obs=gym.spaces.Box(low=0, high=255, shape=(self.height, self.width, self.num_channels), dtype=np.uint8)
         )
@@ -402,13 +406,13 @@ class DmlabGymEnv_custom(gym.Env):
                 dtype=np.int32,
             )
         if self.with_pos_obs:
-            self.observation_space.spaces['pos'] = gym.spaces.Box(
+            self.observation_space.spaces["pos"] = gym.spaces.Box(
                 low=-100,
                 high=2500,
                 shape=[3],
                 dtype=np.float64,
             )
-            self.observation_space.spaces['rot'] = gym.spaces.Box(
+            self.observation_space.spaces["rot"] = gym.spaces.Box(
                 low=-1000,
                 high=1000,
                 shape=[3],
@@ -449,7 +453,7 @@ class DmlabGymEnv_custom(gym.Env):
         if instr is not None:
             if self.with_number_instruction:
                 # print(instr)
-                self.instructions[0] = int(instr) 
+                self.instructions[0] = int(instr)
             else:
                 instr_words = instr.split()
                 for i, word in enumerate(instr_words):

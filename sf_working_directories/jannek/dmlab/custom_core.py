@@ -1,20 +1,13 @@
 # from asyncio.sslproto import add_flowcontrol_defaults
 from email import header
 from logging import warning
+
 import torch
 from torch import Tensor, nn
 
-
-
+from sample_factory.model.core import ModelCore, ModelCoreIdentity, ModelCoreRNN
 from sample_factory.utils.typing import Config
 from sample_factory.utils.utils import log
-
-
-from sample_factory.model.core import ModelCore,ModelCoreIdentity,ModelCoreRNN
-
-
-
-
 
 
 class FixedRNNSequenceCore(ModelCore):
@@ -26,28 +19,30 @@ class FixedRNNSequenceCore(ModelCore):
         """
         super().__init__(cfg)
         # Use configuration or defaults.
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
 
         if self.Hippo_n_feature != input_size:
             raise Warning(f"hippo_n_feature{self.Hippo_n_feature } does not match input size {input_size}")
-        
+
         # The total register length.
-        self.expanded_length = self.R + self.L - 1  
+        self.expanded_length = self.R + self.L - 1
         # The flattened hidden state dimension.
         self.core_output_size = self.Hippo_n_feature * self.expanded_length
         self.n_feature = self.Hippo_n_feature
         self.hidden_size = self.n_feature * self.expanded_length
-        
+
         # Create a one-layer RNN with ReLU activation.
         # (We use ReLU so that if inputs and state are nonnegative, the activation is effectively identity.)
-        self.rnn = nn.RNN(input_size=self.n_feature, 
-                          hidden_size=self.hidden_size,
-                          num_layers=1, 
-                          nonlinearity='relu',
-                          batch_first=False)
-        
+        self.rnn = nn.RNN(
+            input_size=self.n_feature,
+            hidden_size=self.hidden_size,
+            num_layers=1,
+            nonlinearity="relu",
+            batch_first=False,
+        )
+
         # Create fixed weight matrices.
         # weight_ih: shape (hidden_size, input_size)
         W_ih = torch.zeros(self.hidden_size, self.n_feature)
@@ -70,7 +65,7 @@ class FixedRNNSequenceCore(ModelCore):
             self.rnn.weight_hh_l0.copy_(W_hh)
             self.rnn.bias_ih_l0.zero_()
             self.rnn.bias_hh_l0.zero_()
-        
+
         # Freeze the weights so that they are not updated during training.
         for param in self.rnn.parameters():
             param.requires_grad = False
@@ -93,13 +88,12 @@ class FixedRNNSequenceCore(ModelCore):
         else:
             head_output = head_output.unsqueeze(0)  # (1, B, input_size)
             output, new_hidden = self.rnn(head_output, h0)
-            new_hidden = new_hidden.squeeze(0)       # (B, core_output_size)
-            output = output.squeeze(0)               # (B, core_output_size)
+            new_hidden = new_hidden.squeeze(0)  # (B, core_output_size)
+            output = output.squeeze(0)  # (B, core_output_size)
             return output, new_hidden
-        
 
-from torch.nn.utils.rnn import PackedSequence
-from torch.nn.utils.rnn import pad_packed_sequence
+
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 
 
 class FixedRNNWithBypassCore(ModelCore):
@@ -107,34 +101,36 @@ class FixedRNNWithBypassCore(ModelCore):
         """
         Args:
             cfg: Configuration object with attributes Hippo_R, Hippo_L, Hippo_n_feature.
-            input_size (int): Dimensionality of the input observation. 
+            input_size (int): Dimensionality of the input observation.
                               The first Hippo_n_feature dimensions are fed into the fixed RNN,
                               and the remaining (if any) are passed through as bypass features.
         """
         super().__init__(cfg)
         # Use configuration or defaults.
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
 
         if input_size < self.Hippo_n_feature:
             raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
         log.debug("bypass size: {self.bypass_size}")
         # The total register length.
-        self.expanded_length = self.R + self.L - 1  
+        self.expanded_length = self.R + self.L - 1
         # The flattened hidden state dimension (RNN core output).
         self.core_output_size = self.Hippo_n_feature * self.expanded_length + self.bypass_size
         self.n_feature = self.Hippo_n_feature
         self.hidden_size = self.n_feature * self.expanded_length
 
         # Create a one-layer RNN with ReLU activation.
-        self.rnn = nn.RNN(input_size=self.n_feature, 
-                          hidden_size=self.hidden_size,
-                          num_layers=1, 
-                          nonlinearity='relu',
-                          batch_first=False)
-        
+        self.rnn = nn.RNN(
+            input_size=self.n_feature,
+            hidden_size=self.hidden_size,
+            num_layers=1,
+            nonlinearity="relu",
+            batch_first=False,
+        )
+
         # Create fixed weight matrices.
         # weight_ih: shape (hidden_size, n_feature)
         W_ih = torch.zeros(self.hidden_size, self.n_feature)
@@ -157,7 +153,7 @@ class FixedRNNWithBypassCore(ModelCore):
             self.rnn.weight_hh_l0.copy_(W_hh)
             self.rnn.bias_ih_l0.zero_()
             self.rnn.bias_hh_l0.zero_()
-        
+
         # Freeze RNN parameters.
         for param in self.rnn.parameters():
             param.requires_grad = False
@@ -174,33 +170,30 @@ class FixedRNNWithBypassCore(ModelCore):
         """
         # Prepare initial hidden state for RNN.
         # log.info(rnn_states.size())
-        h0 = rnn_states.unsqueeze(0)[:,:, :self.hidden_size].contiguous()
-        
-        
+        h0 = rnn_states.unsqueeze(0)[:, :, : self.hidden_size].contiguous()
+
         if isinstance(head_output, PackedSequence):
             # For PackedSequence, work on the underlying data.
             # Split into RNN and bypass parts.
-            rnn_data = head_output.data[:, :self.n_feature]
-            bypass_data = head_output.data[:, self.n_feature:] if self.bypass_size > 0 else None
+            rnn_data = head_output.data[:, : self.n_feature]
+            bypass_data = head_output.data[:, self.n_feature :] if self.bypass_size > 0 else None
 
             # Create a PackedSequence for the RNN input.
-            rnn_packed = PackedSequence(rnn_data,
-                                        head_output.batch_sizes,
-                                        head_output.sorted_indices,
-                                        head_output.unsorted_indices)
+            rnn_packed = PackedSequence(
+                rnn_data, head_output.batch_sizes, head_output.sorted_indices, head_output.unsorted_indices
+            )
             # Run the RNN.
             rnn_output_packed, new_hidden = self.rnn(rnn_packed, h0)
             new_hidden = new_hidden.squeeze(0)  # shape: (B, core_output_size)
-            
+
             # If bypass features exist, concatenate them.
             if bypass_data is not None:
                 # Concatenate along the feature dimension.
                 concatenated_data = torch.cat([rnn_output_packed.data, bypass_data], dim=1)
 
-                bypass_data_packed = PackedSequence(bypass_data,
-                                        head_output.batch_sizes,
-                                        head_output.sorted_indices,
-                                        head_output.unsorted_indices)
+                bypass_data_packed = PackedSequence(
+                    bypass_data, head_output.batch_sizes, head_output.sorted_indices, head_output.unsorted_indices
+                )
                 # Assume 'packed' is your PackedSequence and you used batch_first=True when packing.
                 padded, lengths = pad_packed_sequence(bypass_data_packed, batch_first=True)
 
@@ -224,28 +217,32 @@ class FixedRNNWithBypassCore(ModelCore):
                 concatenated_data_hidden = new_hidden.data
 
             # Build a new PackedSequence with the concatenated data.
-            concat_output = PackedSequence(concatenated_data,
-                                           rnn_output_packed.batch_sizes,
-                                           rnn_output_packed.sorted_indices,
-                                           rnn_output_packed.unsorted_indices)
-            
-            concat_hidden = PackedSequence(concatenated_data_hidden,
-                                           rnn_output_packed.batch_sizes,
-                                           rnn_output_packed.sorted_indices,
-                                           rnn_output_packed.unsorted_indices)
+            concat_output = PackedSequence(
+                concatenated_data,
+                rnn_output_packed.batch_sizes,
+                rnn_output_packed.sorted_indices,
+                rnn_output_packed.unsorted_indices,
+            )
+
+            concat_hidden = PackedSequence(
+                concatenated_data_hidden,
+                rnn_output_packed.batch_sizes,
+                rnn_output_packed.sorted_indices,
+                rnn_output_packed.unsorted_indices,
+            )
             return concat_output, concat_hidden
         else:
             # For Tensor input.
             # Split the input into RNN and bypass parts.
-            rnn_input = head_output[:, :self.n_feature]  # shape: (B, n_feature)
-            bypass_output = head_output[:, self.n_feature:] if self.bypass_size > 0 else None
-            
+            rnn_input = head_output[:, : self.n_feature]  # shape: (B, n_feature)
+            bypass_output = head_output[:, self.n_feature :] if self.bypass_size > 0 else None
+
             # Add sequence dimension for the RNN.
             rnn_input = rnn_input.unsqueeze(0)  # shape: (1, B, n_feature)
             rnn_output, new_hidden = self.rnn(rnn_input, h0)
-            new_hidden = new_hidden.squeeze(0)   # shape: (B, core_output_size)
-            rnn_output = rnn_output.squeeze(0)     # shape: (B, core_output_size)
-            
+            new_hidden = new_hidden.squeeze(0)  # shape: (B, core_output_size)
+            rnn_output = rnn_output.squeeze(0)  # shape: (B, core_output_size)
+
             # Concatenate the RNN output with bypass features.
             if bypass_output is not None:
                 concat_output = torch.cat([rnn_output, bypass_output], dim=1)
@@ -254,14 +251,8 @@ class FixedRNNWithBypassCore(ModelCore):
                 concat_output = rnn_output
 
                 concat_hidden = new_hidden
-            
+
             return concat_output, concat_hidden
-
-
-
-
-
-
 
 
 class SimpleSequenceCore(ModelCore):
@@ -290,7 +281,7 @@ class SimpleSequenceCore(ModelCore):
         else:
             self.Hippo_n_feature = 64
             log.info("hippo n feature not set, using default: {self.Hippo_n_feature}")
-        
+
         # self.linear = nn.Linear(input_size, self.Hippo_n_feature)  # Map input to 64-dimensional features.
         self.expanded_length = self.R + self.L - 1  # Total length of the shift register.
 
@@ -300,13 +291,13 @@ class SimpleSequenceCore(ModelCore):
     def forward(self, head_output, rnn_states):
         """
         Args:
-            head_output: Either a Tensor of shape (B, input_dim) from the encoder 
+            head_output: Either a Tensor of shape (B, input_dim) from the encoder
                         or a PackedSequence.
             rnn_states: Tensor of shape (B, Hippo_n_feature * expanded_length)
                         representing the flattened recurrent state.
-                        
+
         Returns:
-            Tuple (core_output, new_rnn_states), both of shape 
+            Tuple (core_output, new_rnn_states), both of shape
             (B, Hippo_n_feature * expanded_length) if the input is a single time step.
             (If a sequence is provided, the time dimension is preserved.)
         """
@@ -331,20 +322,22 @@ class SimpleSequenceCore(ModelCore):
             # If a plain tensor is provided, add a time dimension.
             # head_output = head_output.unsqueeze(0)  # now (1, B, input_dim)
             # lengths = [1]* head_output.size(0)
-            features = head_output    
-            features=features.unsqueeze(0)
+            features = head_output
+            features = features.unsqueeze(0)
 
-            batch_sizes=features.size(1)
+            batch_sizes = features.size(1)
 
         rnn_states = rnn_states.unsqueeze(0)
-        rnn_states = rnn_states.view(rnn_states.size(0), rnn_states.size(1),
-                                    self.Hippo_n_feature, self.expanded_length).contiguous()
-        output = torch.empty((features.size(0),features.size(1),self.Hippo_n_feature, self.expanded_length),device=features.device)
-
+        rnn_states = rnn_states.view(
+            rnn_states.size(0), rnn_states.size(1), self.Hippo_n_feature, self.expanded_length
+        ).contiguous()
+        output = torch.empty(
+            (features.size(0), features.size(1), self.Hippo_n_feature, self.expanded_length), device=features.device
+        )
 
         new_rnn_states = rnn_states.clone()
 
-        ### tried to fast propagate hipposeq but it wouldn't work 
+        ### tried to fast propagate hipposeq but it wouldn't work
         # for i in range(len(lengths)):
         #     # rnn_states = rnn_states[:,i,:,:].roll(shifts=lengths[i], dims=-1).contiguous()
         #     # # propagate hipposeq
@@ -355,7 +348,6 @@ class SimpleSequenceCore(ModelCore):
         #     kernel=F.pad(torch.ones(self.R,device=rnn_states.device),(0,self.R-1))
 
         #     injection=F.conv1d(features[:,i,:].permute(1,0).unsqueeze(0),kernel.unsqueeze(0).unsqueeze(0))
-
 
         #     rnn_states[:, i, :, :] = rnn_states[:, i, :, :] + injection
 
@@ -369,64 +361,51 @@ class SimpleSequenceCore(ModelCore):
                 # Reshape to 4D so we can perform our custom shift and injection.
                 # New shape: (time, B, Hippo_n_feature, expanded_length)
 
-                tmpind = sorted_indices[:batch_sizes[i]]
+                tmpind = sorted_indices[: batch_sizes[i]]
 
                 # Shift the register one step along the last dimension.
-                tmp_rnn_states = new_rnn_states[:,tmpind,:,:].roll(shifts=1, dims=-1).contiguous()
+                tmp_rnn_states = new_rnn_states[:, tmpind, :, :].roll(shifts=1, dims=-1).contiguous()
                 # Zero out the newly empty slot.
                 tmp_rnn_states[:, :, :, 0] = 0
-
 
                 # Inject the current features into the first R positions.
                 # features: (B, Hippo_n_feature) --> unsqueeze to (1, B, Hippo_n_feature, 1)
                 # then expand to (1, B, Hippo_n_feature, R)
-                injection = features[i,tmpind,:].unsqueeze(0).unsqueeze(-1).expand(1,
-                                                                        -1, -1, self.R).contiguous()
-                    
+                injection = features[i, tmpind, :].unsqueeze(0).unsqueeze(-1).expand(1, -1, -1, self.R).contiguous()
+
                 # log.info(tmp_rnn_states.size())
                 # log.info(injection.size())
                 # log.info('======size_above======')
 
+                tmp_rnn_states[:, :, :, : self.R] = tmp_rnn_states[:, :, :, : self.R] + injection
 
-                tmp_rnn_states[:, :, :, :self.R] = tmp_rnn_states[:, :, :, :self.R] + injection
-
-
-                new_rnn_states[:, tmpind, :, : ] = tmp_rnn_states[:, :, :, :]
+                new_rnn_states[:, tmpind, :, :] = tmp_rnn_states[:, :, :, :]
                 # output (time, B, Hippo_n_feature, expanded_length)
-                output[i,:,:,:]=new_rnn_states[0, :, :, :]
+                output[i, :, :, :] = new_rnn_states[0, :, :, :]
         else:
 
-
-
             # Shift the register one step along the last dimension.
-            tmp_rnn_states = new_rnn_states[:,:,:,:].roll(shifts=1, dims=-1).contiguous()
+            tmp_rnn_states = new_rnn_states[:, :, :, :].roll(shifts=1, dims=-1).contiguous()
             # Zero out the newly empty slot.
             tmp_rnn_states[:, :, :, 0] = 0
-
 
             # Inject the current features into the first R positions.
             # features: (B, Hippo_n_feature) --> unsqueeze to (1, B, Hippo_n_feature, 1)
             # then expand to (1, B, Hippo_n_feature, R)
-            injection = features[0,:].unsqueeze(-1).expand(tmp_rnn_states.size(0),
-                                                                    -1, -1, self.R).contiguous()
-            
+            injection = features[0, :].unsqueeze(-1).expand(tmp_rnn_states.size(0), -1, -1, self.R).contiguous()
 
-            tmp_rnn_states[:, :, :, :self.R] = tmp_rnn_states[:, :, :, :self.R] + injection
+            tmp_rnn_states[:, :, :, : self.R] = tmp_rnn_states[:, :, :, : self.R] + injection
 
-
-
-            new_rnn_states[:, :, :, : ] = tmp_rnn_states[:, :, :, :]
+            new_rnn_states[:, :, :, :] = tmp_rnn_states[:, :, :, :]
             # output (time, B, Hippo_n_feature, expanded_length)
-            output[0,:,:,:]=new_rnn_states[0, :, :, :]
-
-
+            output[0, :, :, :] = new_rnn_states[0, :, :, :]
 
         # Flatten new_rnn_states back to 3D: (time, B, Hippo_n_feature * expanded_length)
-        new_rnn_states = new_rnn_states.view(new_rnn_states.size(0),
-                                            new_rnn_states.size(1),
-                                            self.Hippo_n_feature * self.expanded_length).contiguous()
-        
-        output = output.view(features.size(0),features.size(1),self.Hippo_n_feature * self.expanded_length)
+        new_rnn_states = new_rnn_states.view(
+            new_rnn_states.size(0), new_rnn_states.size(1), self.Hippo_n_feature * self.expanded_length
+        ).contiguous()
+
+        output = output.view(features.size(0), features.size(1), self.Hippo_n_feature * self.expanded_length)
 
         # If we added a time dimension for a single step, remove it for output consistency.
         if not is_seq:
@@ -435,12 +414,13 @@ class SimpleSequenceCore(ModelCore):
         else:
             # log.info(new_rnn_states.size())
             new_rnn_states = new_rnn_states.squeeze(0)
-            x =nn.utils.rnn.pack_padded_sequence(output, lengths,  enforce_sorted=False)
+            x = nn.utils.rnn.pack_padded_sequence(output, lengths, enforce_sorted=False)
             # x = output  # Preserve time dimension if multiple steps provided
 
         # log.info(x.size())
 
         return x, new_rnn_states
+
 
 class SimpleSequenceWithBypassCore(ModelCore):
     def __init__(self, cfg, input_size):
@@ -451,15 +431,13 @@ class SimpleSequenceWithBypassCore(ModelCore):
                               The first Hippo_n_feature dimensions are processed through the core,
                               and the remaining (if any) are treated as bypass features.
         """
-        log.warn('USING SIMPLESEQUENCEWITHBYPASSCORE')
+        log.warn("USING SIMPLESEQUENCEWITHBYPASSCORE")
         super().__init__(cfg)
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
         if input_size < self.Hippo_n_feature:
-            raise Warning(
-                f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})"
-            )
+            raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
 
         # Total length of the shift register.
@@ -492,7 +470,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             T, B, input_size = padded.shape  # T: time steps, B: max batch size
 
             # Separate core state and bypass part from the recurrent state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # We add a time dimension (of size 1) for in-loop updates.
             new_core_state = core_state.unsqueeze(0).clone()
 
@@ -501,9 +479,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
 
             # Process each time step updating only the valid (sorted) indices.
             for t in range(T):
-                valid_idx = sorted_indices[:batch_sizes[t]]
+                valid_idx = sorted_indices[: batch_sizes[t]]
                 # Extract the current core input for valid batch indices.
-                curr_core = padded[t, valid_idx, :self.Hippo_n_feature]
+                curr_core = padded[t, valid_idx, : self.Hippo_n_feature]
                 # Update the core state for these indices:
                 # Roll the shift register by one.
                 tmp_state = new_core_state[:, valid_idx, :, :].roll(shifts=1, dims=-1)
@@ -511,7 +489,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 tmp_state[:, :, :, 0] = 0
                 # Inject the current core features into the first R positions.
                 injection = curr_core.unsqueeze(0).unsqueeze(-1).expand(1, -1, -1, self.R)
-                tmp_state[:, :, :, :self.R] += injection
+                tmp_state[:, :, :, : self.R] += injection
 
                 # progression = torch.argmax(torch.cat(((tmp_state != 0).to(dtype=torch.int), torch.ones(tmp_state.shape[:2] + (1,), dtype=torch.int)), dim=-1), dim=-1).squeeze(0)
                 # value = torch.sum(torch.abs(progression.unsqueeze(0) - progression.unsqueeze(1)).to(dtype=torch.float))
@@ -522,7 +500,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 # Save the flattened core state (for all batches) at time t.
                 out_core[t] = new_core_state[0].view(B, self.core_output_size)
             # torch.save(out_core, "./train_dir/rnn_states.pt")
-            # log.info(f'RNN states: {out_core}')  
+            # log.info(f'RNN states: {out_core}')
             # Compute the final core part of the new rnn state.
             final_core = new_core_state[0].view(B, self.core_output_size)
             # For bypass, we do not update it recurrently.
@@ -530,7 +508,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             if self.bypass_size > 0:
                 last_bypass = []
                 for i in range(B):
-                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature:].unsqueeze(0))
+                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature :].unsqueeze(0))
                 last_bypass = torch.cat(last_bypass, dim=0)  # shape: (B, bypass_size)
             else:
                 last_bypass = None
@@ -545,7 +523,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             # We can concatenate the core output computed in the loop with the bypass part from the padded sequence.
             if self.bypass_size > 0:
                 # padded_bypass has shape (T, B, bypass_size)
-                padded_bypass = padded[:, :, self.Hippo_n_feature:]
+                padded_bypass = padded[:, :, self.Hippo_n_feature :]
                 out_total = torch.cat([out_core, padded_bypass], dim=2)
             else:
                 out_total = out_core
@@ -557,13 +535,13 @@ class SimpleSequenceWithBypassCore(ModelCore):
         else:
             # Case: head_output is a plain tensor (single time step)
             B = head_output.size(0)
-            core_input = head_output[:, :self.Hippo_n_feature]
-            bypass_input = head_output[:, self.Hippo_n_feature:] if self.bypass_size > 0 else None
+            core_input = head_output[:, : self.Hippo_n_feature]
+            bypass_input = head_output[:, self.Hippo_n_feature :] if self.bypass_size > 0 else None
 
             # Reshape the core part of the rnn state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # Roll the shift register and zero the new slot.
-            if torch.nonzero(core_state).shape[0]!=0:
+            if torch.nonzero(core_state).shape[0] != 0:
                 # log.info(f'Core State: {core_state}')
                 # torch.save(core_state, "./train_dir/core_state.pt")
                 new_core_state = core_state.roll(shifts=1, dims=-1)
@@ -574,7 +552,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             new_core_state[:, :, 0] = 0
             # Inject the current core input into the first R positions.
             injection = core_input.unsqueeze(-1).expand(-1, -1, self.R)
-            new_core_state[:, :, :self.R] += injection
+            new_core_state[:, :, : self.R] += injection
             flat_core = new_core_state.view(B, self.core_output_size)
             # The new rnn state combines the updated core state with the current bypass input.
             if self.bypass_size > 0:
@@ -588,11 +566,13 @@ class SimpleSequenceWithBypassCore(ModelCore):
     def get_out_size(self) -> int:
         log.debug(f"get out size called: {self.total_output_size}")
         return self.total_output_size
-    
-def straight_through_binary(x:Tensor,identity=True):
-    x_binary=(x>0).float()
+
+
+def straight_through_binary(x: Tensor, identity=True):
+    x_binary = (x > 0).float()
     if identity:
-        return(x_binary - x.detach() + x)
+        return x_binary - x.detach() + x
+
 
 class SimpleSequenceWithBypassCore_binary(ModelCore):
     def __init__(self, cfg, input_size):
@@ -604,13 +584,11 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
                               and the remaining (if any) are treated as bypass features.
         """
         super().__init__(cfg)
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
         if input_size < self.Hippo_n_feature:
-            raise Warning(
-                f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})"
-            )
+            raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
 
         # Total length of the shift register.
@@ -620,8 +598,7 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
         # Total output dimension when bypass features are concatenated.
         self.total_output_size = self.core_output_size + self.bypass_size
 
-
-        self.refractory=getattr(cfg, "refractory", -1)
+        self.refractory = getattr(cfg, "refractory", -1)
 
     def forward(self, head_output, rnn_states):
         """
@@ -646,7 +623,7 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
             T, B, input_size = padded.shape  # T: time steps, B: max batch size
 
             # Separate core state and bypass part from the recurrent state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # We add a time dimension (of size 1) for in-loop updates.
             new_core_state = core_state.unsqueeze(0).clone()
 
@@ -655,30 +632,31 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
 
             # Process each time step updating only the valid (sorted) indices.
             for t in range(T):
-                valid_idx = sorted_indices[:batch_sizes[t]]
+                valid_idx = sorted_indices[: batch_sizes[t]]
                 # Extract the current core input for valid batch indices.
-                curr_core = padded[t, valid_idx, :self.Hippo_n_feature]
+                curr_core = padded[t, valid_idx, : self.Hippo_n_feature]
                 # Update the core state for these indices:
                 # Roll the shift register by one.
                 tmp_state = new_core_state[:, valid_idx, :, :].roll(shifts=1, dims=-1)
                 # Zero the newly available slot.
                 tmp_state[:, :, :, 0] = 0
 
+                if self.refractory != 0:
 
-                if self.refractory!=0:
-
-                    curr_core = straight_through_binary( straight_through_binary(curr_core) - tmp_state[0,:,:,:self.refractory].sum(-1)/self.R)#.values)
+                    curr_core = straight_through_binary(
+                        straight_through_binary(curr_core) - tmp_state[0, :, :, : self.refractory].sum(-1) / self.R
+                    )  # .values)
 
                 # Inject the current core features into the first R positions.
                 injection = curr_core.unsqueeze(0).unsqueeze(-1).expand(1, -1, -1, self.R)
 
-                tmp_state[:, :, :, :self.R] += injection
+                tmp_state[:, :, :, : self.R] += injection
                 # Update the new core state for valid indices.
                 new_core_state[:, valid_idx, :, :] = tmp_state
                 # Save the flattened core state (for all batches) at time t.
                 out_core[t] = new_core_state[0].view(B, self.core_output_size)
             # torch.save(out_core, "./train_dir/rnn_states.pt")
-            # log.info(f'RNN states: {out_core}')  
+            # log.info(f'RNN states: {out_core}')
             # Compute the final core part of the new rnn state.
             final_core = new_core_state[0].view(B, self.core_output_size)
             # For bypass, we do not update it recurrently.
@@ -686,7 +664,7 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
             if self.bypass_size > 0:
                 last_bypass = []
                 for i in range(B):
-                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature:].unsqueeze(0))
+                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature :].unsqueeze(0))
                 last_bypass = torch.cat(last_bypass, dim=0)  # shape: (B, bypass_size)
             else:
                 last_bypass = None
@@ -697,13 +675,13 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
             else:
                 new_rnn_state = final_core
 
-            new_rnn_state=straight_through_binary(new_rnn_state)
+            new_rnn_state = straight_through_binary(new_rnn_state)
 
             # For the output at each time step, the bypass features come directly from the current input.
             # We can concatenate the core output computed in the loop with the bypass part from the padded sequence.
             if self.bypass_size > 0:
                 # padded_bypass has shape (T, B, bypass_size)
-                padded_bypass = padded[:, :, self.Hippo_n_feature:]
+                padded_bypass = padded[:, :, self.Hippo_n_feature :]
                 out_total = torch.cat([out_core, padded_bypass], dim=2)
             else:
                 out_total = out_core
@@ -716,20 +694,22 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
         else:
             # Case: head_output is a plain tensor (single time step)
             B = head_output.size(0)
-            core_input = head_output[:, :self.Hippo_n_feature]
-            bypass_input = head_output[:, self.Hippo_n_feature:] if self.bypass_size > 0 else None
+            core_input = head_output[:, : self.Hippo_n_feature]
+            bypass_input = head_output[:, self.Hippo_n_feature :] if self.bypass_size > 0 else None
 
             # Reshape the core part of the rnn state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # Roll the shift register and zero the new slot.
             new_core_state = core_state.roll(shifts=1, dims=-1)
             new_core_state[:, :, 0] = 0
 
-            if self.refractory!=0:
-                    core_input = straight_through_binary( straight_through_binary(core_input) - new_core_state[:,:,:self.refractory].sum(-1)/self.R)
+            if self.refractory != 0:
+                core_input = straight_through_binary(
+                    straight_through_binary(core_input) - new_core_state[:, :, : self.refractory].sum(-1) / self.R
+                )
             # Inject the current core input into the first R positions.
             injection = core_input.unsqueeze(-1).expand(-1, -1, self.R)
-            new_core_state[:, :, :self.R] += injection
+            new_core_state[:, :, : self.R] += injection
             flat_core = new_core_state.view(B, self.core_output_size)
             # The new rnn state combines the updated core state with the current bypass input.
             if self.bypass_size > 0:
@@ -739,8 +719,6 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
                 out = flat_core
                 new_rnn_state = flat_core
 
-
-            
             return straight_through_binary(out), straight_through_binary(new_rnn_state)
 
     def get_out_size(self) -> int:
@@ -758,13 +736,11 @@ class SimpleSequenceWithBypassCore_outdated(ModelCore):
                               and the remaining (if any) are treated as bypass features.
         """
         super().__init__(cfg)
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
         if input_size < self.Hippo_n_feature:
-            raise Warning(
-                f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})"
-            )
+            raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
 
         # Total length of the shift register.
@@ -798,8 +774,8 @@ class SimpleSequenceWithBypassCore_outdated(ModelCore):
             T, B, input_size = padded.shape  # T: time steps, B: max batch size
 
             # Separate core state and bypass state from the recurrent state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
-            bypass_state = rnn_states[:, self.core_output_size:] if self.bypass_size > 0 else None
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            bypass_state = rnn_states[:, self.core_output_size :] if self.bypass_size > 0 else None
 
             # We'll add a time dimension for the core state to update it at every time step.
             # new_core_state has shape (1, B, Hippo_n_feature, expanded_length)
@@ -818,12 +794,12 @@ class SimpleSequenceWithBypassCore_outdated(ModelCore):
             # Process each time step.
             for t in range(T):
                 # For the current time step, only the first batch_sizes[t] entries are valid.
-                valid_idx = sorted_indices[:batch_sizes[t]]
+                valid_idx = sorted_indices[: batch_sizes[t]]
                 # Extract current core input for the valid batch indices.
-                curr_core = padded[t, valid_idx, :self.Hippo_n_feature]  # shape: (valid_count, Hippo_n_feature)
+                curr_core = padded[t, valid_idx, : self.Hippo_n_feature]  # shape: (valid_count, Hippo_n_feature)
                 # For bypass, if available, extract the corresponding features.
                 if self.bypass_size > 0:
-                    curr_bypass = padded[t, valid_idx, self.Hippo_n_feature:]  # shape: (valid_count, bypass_size)
+                    curr_bypass = padded[t, valid_idx, self.Hippo_n_feature :]  # shape: (valid_count, bypass_size)
 
                 # Update the core state for valid indices:
                 # a) roll the shift register one step to the right (along the last dimension)
@@ -833,7 +809,7 @@ class SimpleSequenceWithBypassCore_outdated(ModelCore):
                 # c) inject the current core input into the first R positions.
                 # Expand current core input so it can be added to the first R positions.
                 injection = curr_core.unsqueeze(0).unsqueeze(-1).expand(1, -1, -1, self.R)
-                tmp_core[:, :, :, :self.R] += injection
+                tmp_core[:, :, :, : self.R] += injection
                 # d) update the state.
                 new_core_state[:, valid_idx, :, :] = tmp_core
 
@@ -869,17 +845,17 @@ class SimpleSequenceWithBypassCore_outdated(ModelCore):
         else:
             # Processing a single time step (plain tensor of shape (B, input_size)).
             B = head_output.size(0)
-            core_input = head_output[:, :self.Hippo_n_feature]
-            bypass_input = head_output[:, self.Hippo_n_feature:] if self.bypass_size > 0 else None
+            core_input = head_output[:, : self.Hippo_n_feature]
+            bypass_input = head_output[:, self.Hippo_n_feature :] if self.bypass_size > 0 else None
 
             # Reshape the core part of the recurrent state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # Shift the register: roll along the last dimension and zero the new slot.
             new_core_state = core_state.roll(shifts=1, dims=-1)
             new_core_state[:, :, 0] = 0
             # Inject the current core input into the first R positions.
             injection = core_input.unsqueeze(-1).expand(-1, -1, self.R)
-            new_core_state[:, :, :self.R] += injection
+            new_core_state[:, :, : self.R] += injection
             flat_core = new_core_state.view(B, self.core_output_size)
 
             # For bypass, simply take the current bypass features.
@@ -906,16 +882,14 @@ class SimpleSequenceWithBypassCore_no_batch_ordering(ModelCore):
                               and the remaining (if any) are treated as bypass features.
         """
         super().__init__(cfg)
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
-        
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
+
         if input_size < self.Hippo_n_feature:
-            raise Warning(
-                f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})"
-            )
+            raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
-        
+
         # Total length of the shift register.
         self.expanded_length = self.R + self.L - 1
         # Core (shift register) output dimension.
@@ -945,42 +919,42 @@ class SimpleSequenceWithBypassCore_no_batch_ordering(ModelCore):
             T, B, _ = padded.shape
 
             # Separate the recurrent state for core processing.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # We will update this core_state for each time step.
             new_core_state = core_state.clone()
             outputs = []
             # Process each time step.
             for t in range(T):
                 # Split the input into core and bypass parts.
-                curr_core = padded[t, :, :self.Hippo_n_feature]  # shape: (B, Hippo_n_feature)
+                curr_core = padded[t, :, : self.Hippo_n_feature]  # shape: (B, Hippo_n_feature)
                 # Shift the core state (roll along the last dimension) and zero the new slot.
                 new_core_state = new_core_state.roll(shifts=1, dims=-1)
                 new_core_state[:, :, 0] = 0
                 # Inject current features into the first R positions.
                 injection = curr_core.unsqueeze(-1).expand(-1, -1, self.R)
-                new_core_state[:, :, :self.R] += injection
+                new_core_state[:, :, : self.R] += injection
                 # Flatten the core state.
                 flat_core = new_core_state.view(B, self.core_output_size)
                 # For bypass, if available, take the current bypass features.
                 if self.bypass_size > 0:
-                    curr_bypass = padded[t, :, self.Hippo_n_feature:]  # shape: (B, bypass_size)
+                    curr_bypass = padded[t, :, self.Hippo_n_feature :]  # shape: (B, bypass_size)
                     out_t = torch.cat([flat_core, curr_bypass], dim=1)
                 else:
                     out_t = flat_core
                 outputs.append(out_t.unsqueeze(0))
-            
+
             # Stack outputs along the time dimension.
             outputs = torch.cat(outputs, dim=0)  # shape: (T, B, total_output_size)
             # Repack the sequence.
             new_output = nn.utils.rnn.pack_padded_sequence(outputs, lengths, enforce_sorted=False)
-            
+
             # For updating rnn_states, use the final core state and the last bypass features.
             if self.bypass_size > 0:
                 # For each sequence, pick the last valid bypass input.
                 last_bypass = []
                 for i in range(B):
                     # lengths[i] is the number of time steps for sequence i.
-                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature:].unsqueeze(0))
+                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature :].unsqueeze(0))
                 last_bypass = torch.cat(last_bypass, dim=0)  # (B, bypass_size)
                 new_rnn_state = torch.cat([new_core_state.view(B, self.core_output_size), last_bypass], dim=1)
             else:
@@ -990,19 +964,19 @@ class SimpleSequenceWithBypassCore_no_batch_ordering(ModelCore):
         else:
             # head_output is a plain tensor of shape (B, input_size) for a single time step.
             B = head_output.size(0)
-            core_input = head_output[:, :self.Hippo_n_feature]
-            bypass_input = head_output[:, self.Hippo_n_feature:] if self.bypass_size > 0 else None
+            core_input = head_output[:, : self.Hippo_n_feature]
+            bypass_input = head_output[:, self.Hippo_n_feature :] if self.bypass_size > 0 else None
 
             # Reshape the core part of the recurrent state.
-            core_state = rnn_states[:, :self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+            core_state = rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             # Shift the register and zero out the new slot.
             new_core_state = core_state.roll(shifts=1, dims=-1)
             new_core_state[:, :, 0] = 0
             # Inject the current core input into the first R positions.
             injection = core_input.unsqueeze(-1).expand(-1, -1, self.R)
-            new_core_state[:, :, :self.R] += injection
+            new_core_state[:, :, : self.R] += injection
             flat_core = new_core_state.view(B, self.core_output_size)
-            
+
             if self.bypass_size > 0:
                 out = torch.cat([flat_core, bypass_input], dim=1)
                 new_rnn_state = torch.cat([flat_core, bypass_input], dim=1)
@@ -1010,9 +984,11 @@ class SimpleSequenceWithBypassCore_no_batch_ordering(ModelCore):
                 out = flat_core
                 new_rnn_state = flat_core
             return out, new_rnn_state
+
     def get_out_size(self) -> int:
         log.debug("get out size called: {self.total_output_size}")
         return self.total_output_size
+
 
 class SS_Bypass_Forget_Core(ModelCore):
     def __init__(self, cfg, input_size):
@@ -1024,37 +1000,35 @@ class SS_Bypass_Forget_Core(ModelCore):
                               and the remaining (if any) are treated as bypass features.
         """
         super().__init__(cfg)
-        self.R = getattr(cfg, 'Hippo_R', 8)
-        self.L = getattr(cfg, 'Hippo_L', 48)
-        self.Hippo_n_feature = getattr(cfg, 'Hippo_n_feature', 64)
-        
+        self.R = getattr(cfg, "Hippo_R", 8)
+        self.L = getattr(cfg, "Hippo_L", 48)
+        self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
+
         if input_size < self.Hippo_n_feature:
-            raise Warning(
-                f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})"
-            )
+            raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
-        
+
         # Total length of the shift register.
         self.expanded_length = self.R + self.L - 1
         # Core (shift register) output dimension.
         self.core_output_size = self.Hippo_n_feature * self.expanded_length
         # Previously, total output was core + bypass.
         self.total_output_size = self.core_output_size + self.bypass_size
-        
+
         # New forget gate RNN parameters.
-        self.forget_hidden_size = getattr(cfg, 'forget_hidden_size', 10)  # can be adjusted
+        self.forget_hidden_size = getattr(cfg, "forget_hidden_size", 10)  # can be adjusted
         # The overall recurrent state now includes:
         #   - core state: size = core_output_size,
         #   - bypass state: size = bypass_size,
         #   - forget gate RNN hidden state: size = forget_hidden_size.
         self.total_state_size = self.core_output_size + self.bypass_size + self.forget_hidden_size
-        
+
         # Define the forget gate RNN (to be run in parallel to the simple sequence loop).
         # Note: We use an RNN (not RNNCell) so that we can process the entire sequence at once.
         self.forget_rnn = nn.RNN(
-            input_size=self.bypass_size, 
-            hidden_size=self.forget_hidden_size, 
-            batch_first=False  # input shape (T, B, input_size)
+            input_size=self.bypass_size,
+            hidden_size=self.forget_hidden_size,
+            batch_first=False,  # input shape (T, B, input_size)
         )
         # A linear layer to reduce the RNN output to one scalar per time step.
         self.forget_linear = nn.Linear(self.forget_hidden_size, 1)
@@ -1076,13 +1050,13 @@ class SS_Bypass_Forget_Core(ModelCore):
         """
         # Extract state parts.
         # core state is stored flattened; reshape into (B, Hippo_n_feature, expanded_length)
-        core_state_flat = rnn_states[:, :self.core_output_size]
+        core_state_flat = rnn_states[:, : self.core_output_size]
         core_state = core_state_flat.view(-1, self.Hippo_n_feature, self.expanded_length)
         # Bypass state: previous bypass input.
         bypass_state = rnn_states[:, self.core_output_size : self.core_output_size + self.bypass_size]
         # Forget RNN hidden state.
-        forget_hidden = rnn_states[:, self.core_output_size + self.bypass_size:]
-        
+        forget_hidden = rnn_states[:, self.core_output_size + self.bypass_size :]
+
         if isinstance(head_output, PackedSequence):
             # Unpack the sequence: padded shape (T, B, input_size)
             padded, lengths = nn.utils.rnn.pad_packed_sequence(head_output)
@@ -1091,7 +1065,7 @@ class SS_Bypass_Forget_Core(ModelCore):
             # Precompute forget gate for all time steps from the bypass features.
             if self.bypass_size > 0:
                 # Get the bypass sequence from padded input: shape (T, B, bypass_size)
-                bypass_seq = padded[:, :, self.Hippo_n_feature:]
+                bypass_seq = padded[:, :, self.Hippo_n_feature :]
                 # Run the forget gate RNN in parallel.
                 # RNN expects hidden state shape (num_layers, B, hidden_size)
                 forget_rnn_out, forget_hidden_new = self.forget_rnn(
@@ -1114,7 +1088,7 @@ class SS_Bypass_Forget_Core(ModelCore):
             # Process each time step.
             for t in range(T):
                 curr_full = padded[t, :, :]
-                curr_core = curr_full[:, :self.Hippo_n_feature]  # (B, Hippo_n_feature)
+                curr_core = curr_full[:, : self.Hippo_n_feature]  # (B, Hippo_n_feature)
                 # Shift the core state: roll along the last dimension and zero the new slot.
                 rolled_state = new_core_state.roll(shifts=1, dims=-1)
                 rolled_state[:, :, 0] = 0
@@ -1123,12 +1097,12 @@ class SS_Bypass_Forget_Core(ModelCore):
                 rolled_state = rolled_state * current_gate
                 # Inject the current core features into the first R positions.
                 injection = curr_core.unsqueeze(-1).expand(-1, -1, self.R)
-                rolled_state[:, :, :self.R] += injection
+                rolled_state[:, :, : self.R] += injection
                 new_core_state = rolled_state
                 flat_core = new_core_state.view(B, self.core_output_size)
                 # For bypass, use current bypass input.
                 if self.bypass_size > 0:
-                    curr_bypass = curr_full[:, self.Hippo_n_feature:]
+                    curr_bypass = curr_full[:, self.Hippo_n_feature :]
                     out_t = torch.cat([flat_core, curr_bypass], dim=1)
                 else:
                     out_t = flat_core
@@ -1144,22 +1118,25 @@ class SS_Bypass_Forget_Core(ModelCore):
             if self.bypass_size > 0:
                 last_bypass = []
                 for i in range(B):
-                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature:].unsqueeze(0))
+                    last_bypass.append(padded[lengths[i] - 1, i, self.Hippo_n_feature :].unsqueeze(0))
                 last_bypass = torch.cat(last_bypass, dim=0)  # shape (B, bypass_size)
             else:
                 last_bypass = torch.zeros(B, self.bypass_size, device=padded.device)
-            new_rnn_state = torch.cat([
-                new_core_state.view(B, self.core_output_size),
-                last_bypass,
-                forget_hidden_new.squeeze(0)  # updated forget hidden state
-            ], dim=1)
+            new_rnn_state = torch.cat(
+                [
+                    new_core_state.view(B, self.core_output_size),
+                    last_bypass,
+                    forget_hidden_new.squeeze(0),  # updated forget hidden state
+                ],
+                dim=1,
+            )
             return new_output, new_rnn_state
 
         else:
             # Single time step: head_output shape (B, input_size)
             B = head_output.size(0)
-            curr_core = head_output[:, :self.Hippo_n_feature]
-            curr_bypass = head_output[:, self.Hippo_n_feature:] if self.bypass_size > 0 else None
+            curr_core = head_output[:, : self.Hippo_n_feature]
+            curr_bypass = head_output[:, self.Hippo_n_feature :] if self.bypass_size > 0 else None
 
             if self.bypass_size > 0:
                 # Process the single bypass input with the forget RNN.
@@ -1186,24 +1163,31 @@ class SS_Bypass_Forget_Core(ModelCore):
             rolled_state = rolled_state * forget_gate
             # Inject the current core input.
             injection = curr_core.unsqueeze(-1).expand(-1, -1, self.R)
-            rolled_state[:, :, :self.R] += injection
+            rolled_state[:, :, : self.R] += injection
             new_core_state = rolled_state
             flat_core = new_core_state.view(B, self.core_output_size)
-            
+
             if self.bypass_size > 0:
                 out = torch.cat([flat_core, curr_bypass], dim=1)
             else:
                 out = flat_core
-            new_rnn_state = torch.cat([
-                flat_core,
-                curr_bypass if self.bypass_size > 0 else torch.zeros(B, self.bypass_size, device=head_output.device),
-                new_forget_hidden
-            ], dim=1)
+            new_rnn_state = torch.cat(
+                [
+                    flat_core,
+                    (
+                        curr_bypass
+                        if self.bypass_size > 0
+                        else torch.zeros(B, self.bypass_size, device=head_output.device)
+                    ),
+                    new_forget_hidden,
+                ],
+                dim=1,
+            )
             return out, new_rnn_state
+
     def get_out_size(self) -> int:
         log.debug("get out size called: {self.total_output_size}")
         return self.total_output_size
-
 
 
 class NoveltyCore(ModelCore):
@@ -1222,8 +1206,8 @@ class NoveltyCore(ModelCore):
             self.novelty_thr = 0.4
             raise Warning("Novelty Threshold not set, using default: {0.4}")
         # These will be initialized on the first forward call
-        self.N = None      # Tensor of shape (B, dim, dim)
-        self.w_list = None # List of length B; each entry is a tensor of shape (dim, num_features)
+        self.N = None  # Tensor of shape (B, dim, dim)
+        self.w_list = None  # List of length B; each entry is a tensor of shape (dim, num_features)
 
     def _initialize_state(self, batch_size, device):
         # Initialize per-sample state for a new batch.
@@ -1296,11 +1280,13 @@ class NoveltyCore(ModelCore):
             else:
                 pred_i = torch.matmul(self.w_list[i].transpose(0, 1), x[i]).max()
             preds.append(pred_i)
-        
+
         # Stack predictions to a tensor of shape (B, 1)
         pred_tensor = torch.stack(preds).unsqueeze(-1)
 
         return pred_tensor, rnn_states
+
+
 # Example usage in a custom model:
 # In your custom Actor-Critic model you would register this core:
 #
@@ -1311,6 +1297,7 @@ class NoveltyCore(ModelCore):
 #   core_output, new_rnn_states = self.core(encoder_output, rnn_states)
 #
 # This demonstrates how you can incorporate your novelty operation as the core of your model.
+
 
 class ModelHipposlam(ModelCore):
     def __init__(self, cfg, input_size):
@@ -1360,21 +1347,20 @@ class ModelHipposlam(ModelCore):
         return x, new_rnn_states
 
 
-
 def make_hipposlam_core(cfg: Config, core_input_size: int) -> ModelCore:
     if cfg.core_name:
-        if cfg.core_name=='simple_sequence':
+        if cfg.core_name == "simple_sequence":
             core = SimpleSequenceCore(cfg, core_input_size)
-        elif cfg.core_name=='fixed_rnn':
+        elif cfg.core_name == "fixed_rnn":
             core = FixedRNNSequenceCore(cfg, core_input_size)
-        elif cfg.core_name=='BypassFixedRNN':
+        elif cfg.core_name == "BypassFixedRNN":
             core = FixedRNNWithBypassCore(cfg, core_input_size)
-        elif cfg.core_name=='BypassSS':
+        elif cfg.core_name == "BypassSS":
             core = SimpleSequenceWithBypassCore(cfg, core_input_size)
-        elif cfg.core_name=='BypassSS_binary':
+        elif cfg.core_name == "BypassSS_binary":
             core = SimpleSequenceWithBypassCore_binary(cfg, core_input_size)
-        elif cfg.core_name=="Default":
-            core = ModelCoreRNN(cfg,core_input_size)
+        elif cfg.core_name == "Default":
+            core = ModelCoreRNN(cfg, core_input_size)
     else:
         core = ModelCoreIdentity(cfg, core_input_size)
 

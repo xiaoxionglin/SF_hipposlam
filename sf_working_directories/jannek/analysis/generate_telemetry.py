@@ -1,20 +1,24 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import matplotlib as mpl
-import pandas as pd
-import json
-import sys
-import os
-from glob import glob
+# ---------------------------------------------------------------------------
+# logging helpers (put near the top of the file, after imports)
+# ---------------------------------------------------------------------------
 import datetime
+import json
+import os
 import pathlib
-import torch
-import h5py
+import sys
 import time
 from collections import deque
+from glob import glob
 from typing import Dict, Tuple
 
 import gymnasium as gym
+import h5py
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas
+import pandas as pd
+import torch
 from torch import Tensor
 
 from sample_factory.algo.learning.learner import BaseLearner, create_learner
@@ -37,56 +41,62 @@ from sample_factory.utils.utils import debug_log_every_n, experiment_dir, log
 from sf_working_directories.jannek.dmlab.enjoy_hipposlam import enjoy
 from sf_working_directories.jannek.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
 
-# ---------------------------------------------------------------------------
-# logging helpers (put near the top of the file, after imports)
-# ---------------------------------------------------------------------------
-import datetime, pathlib, json, pandas as pd, torch, h5py
 
 def _ensure_parent(path: pathlib.Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-mapname="openfield_map2_fixed_loc3_noreward"
-expname='21_InternalRewardSeparateReward2_see_8_e.g.coe_1_e.r.met_punish'
-train_dir="/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward2_"
+mapname = "openfield_map2_fixed_loc3_noreward"
+expname = "21_InternalRewardSeparateReward2_see_8_e.g.coe_1_e.r.met_punish"
+train_dir = "/work/classic/fr_js1764-sample_factory/workplace_training_directory/train_dir/hipposlam/InternalRewardSeparateReward2_"
 
 cli = [
-    "--algo", "APPO",
-    "--env", mapname ,         # pick any DM‑Lab level you have
-    "--experiment", expname,
-    "--encoder_load_path","/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
-    "--train_dir", train_dir, # anything writable
-    "--max_num_frames", "50000",          # short rollout for the test
-    "--num_envs", "8",
-    "--dmlab_level_cache_path","./.dmlab_cache",
-    "--load_checkpoint_kind","latest",
-    "--use_jit","False",
-    "--with_pos_obs","True",
-    "--no_render",        # <-- skip human window; avoid X11 on servers
+    "--algo",
+    "APPO",
+    "--env",
+    mapname,  # pick any DM‑Lab level you have
+    "--experiment",
+    expname,
+    "--encoder_load_path",
+    "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
+    "--train_dir",
+    train_dir,  # anything writable
+    "--max_num_frames",
+    "50000",  # short rollout for the test
+    "--num_envs",
+    "8",
+    "--dmlab_level_cache_path",
+    "./.dmlab_cache",
+    "--load_checkpoint_kind",
+    "latest",
+    "--use_jit",
+    "False",
+    "--with_pos_obs",
+    "True",
+    "--no_render",  # <-- skip human window; avoid X11 on servers
 ]
 
-cli_dict={
- 'algo': 'APPO',
- 'env': mapname,
- 'experiment': expname,
- 'encoder_load_path': '/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth',
- 'train_dir': train_dir,
- 'max_num_frames': '50000',
- 'num_envs': '8',
- 'dmlab_level_cache_path': './.dmlab_cache',
- 'load_checkpoint_kind': 'latest',
- 'no_render': True,
- 'use_jit': False,
- 'with_pos_obs': True,
+cli_dict = {
+    "algo": "APPO",
+    "env": mapname,
+    "experiment": expname,
+    "encoder_load_path": "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
+    "train_dir": train_dir,
+    "max_num_frames": "50000",
+    "num_envs": "8",
+    "dmlab_level_cache_path": "./.dmlab_cache",
+    "load_checkpoint_kind": "latest",
+    "no_render": True,
+    "use_jit": False,
+    "with_pos_obs": True,
 }
 register_dmlab_components()
 cfg = parse_dmlab_args(evaluation=True, argv=cli)
 
 # tweak whatever you like *after* parsing
 # cfg.with_pos_obs = True
-cfg.cli_args=cli_dict
+cfg.cli_args = cli_dict
 # status = enjoy(cfg)
-
 
 
 ## Single enjoy run
@@ -96,10 +106,8 @@ verbose = False
 
 cfg = load_from_checkpoint(cfg)
 
-eval_env_frameskip: int = cfg.env_frameskip 
-assert (
-    cfg.env_frameskip % eval_env_frameskip == 0
-), f"{cfg.env_frameskip=} must be divisible by {eval_env_frameskip=}"
+eval_env_frameskip: int = cfg.env_frameskip
+assert cfg.env_frameskip % eval_env_frameskip == 0, f"{cfg.env_frameskip=} must be divisible by {eval_env_frameskip=}"
 render_action_repeat: int = cfg.env_frameskip // eval_env_frameskip
 cfg.env_frameskip = cfg.eval_env_frameskip = eval_env_frameskip
 log.debug(f"Using frameskip {cfg.env_frameskip} and {render_action_repeat=} for evaluation")
@@ -112,9 +120,7 @@ cfg.num_envs = 1
 # elif cfg.no_render:
 render_mode = None
 
-env = make_env_func_batched(
-    cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode
-)
+env = make_env_func_batched(cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode)
 env_info = extract_env_info(env, cfg)
 
 if hasattr(env.unwrapped, "reset_on_init"):
@@ -125,7 +131,6 @@ actor_critic = create_actor_critic(cfg, env.observation_space, env.action_space)
 actor_critic.eval()
 
 
-
 device = torch.device("cpu" if cfg.device == "cpu" else "cuda")
 actor_critic.model_to_device(device)
 
@@ -134,25 +139,28 @@ actor_critic.model_to_device(device)
 
 #################### register hook
 layers_to_log = [
-    'encoder.basic_encoder.mlp_layers.0',
+    "encoder.basic_encoder.mlp_layers.0",
     "encoder.DG_projection.linear",
     "core",
-    
     # "decoder.mlp.0",
     # "decoder.mlp.2"
-]          # <- example; edit to taste
+]  # <- example; edit to taste
 
 # 2B. activation buffer
 
 import collections
+
 act_buffers = collections.defaultdict(list)
+
 
 def make_hook(layer_name):
     def _hook(_m, _inp, out):
-        if isinstance(out, (tuple, list)):      # RNN returns (output, h_n)
+        if isinstance(out, (tuple, list)):  # RNN returns (output, h_n)
             out = out[0]
         act_buffers[layer_name].append(out.detach().cpu())
+
     return _hook
+
 
 # attach the hook once
 for layer_to_log in layers_to_log:
@@ -179,8 +187,10 @@ num_frames = 0
 
 last_render_start = time.time()
 
+
 def max_frames_reached(frames):
     return cfg.max_num_frames is not None and frames > cfg.max_num_frames
+
 
 reward_list = []
 
@@ -231,26 +241,26 @@ with torch.no_grad():
             # log.info(obs['DEBUG.POS.TRANS'])
             # log.info(terminated)
             # save info
-            frame_idx = num_frames          # or use a wall‑clock timestamp
-            pos = obs['DEBUG.POS.TRANS']    # (B,3)
-            rot = obs['DEBUG.POS.ROT']      # (B,3) or (B,4) depending on env
+            frame_idx = num_frames  # or use a wall‑clock timestamp
+            pos = obs["DEBUG.POS.TRANS"]  # (B,3)
+            rot = obs["DEBUG.POS.ROT"]  # (B,3) or (B,4) depending on env
             # log.debug(f'Writing Information')
             for agent_i in range(env.num_agents):
-                pose_records.append({
-                    "frame"     : frame_idx,
-                    "agent"     : agent_i,
-                    "x"         : float(pos[agent_i, 0]),
-                    "y"         : float(pos[agent_i, 1]),
-                    "z"         : float(pos[agent_i, 2]),
-                    "rot_x"     : float(rot[agent_i, 0]),
-                    "rot_y"     : float(rot[agent_i, 1]),
-                    "rot_z"     : float(rot[agent_i, 2]),
-                    "num_traj"  : num_traj,
-                    # keep the whole info dict as a JSON string for convenience
-                    "info"      : json.dumps(infos[agent_i], default=str),
-                })
-
-
+                pose_records.append(
+                    {
+                        "frame": frame_idx,
+                        "agent": agent_i,
+                        "x": float(pos[agent_i, 0]),
+                        "y": float(pos[agent_i, 1]),
+                        "z": float(pos[agent_i, 2]),
+                        "rot_x": float(rot[agent_i, 0]),
+                        "rot_y": float(rot[agent_i, 1]),
+                        "rot_z": float(rot[agent_i, 2]),
+                        "num_traj": num_traj,
+                        # keep the whole info dict as a JSON string for convenience
+                        "info": json.dumps(infos[agent_i], default=str),
+                    }
+                )
 
             dones = make_dones(terminated, truncated)
             # log.info(dones)
@@ -321,9 +331,7 @@ with torch.no_grad():
                             avg_true_objective_str += ", "
                         avg_true_objective_str += f"#{agent_i}: {avg_true_obj:.3f}"
 
-                log.info(
-                    "Avg episode rewards: %s, true rewards: %s", avg_episode_rewards_str, avg_true_objective_str
-                )
+                log.info("Avg episode rewards: %s, true rewards: %s", avg_episode_rewards_str, avg_true_objective_str)
                 log.info(
                     "Avg episode reward: %.3f, avg true_objective: %.3f",
                     np.mean([np.mean(episode_rewards[i]) for i in range(env.num_agents)]),
@@ -342,14 +350,14 @@ with torch.no_grad():
 env.close()
 
 
-ts        = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 telemetry = pathlib.Path(experiment_dir(cfg=cfg)) / "telemetry"
 _ensure_parent(telemetry)
 pose_path = telemetry / f"pose_{ts}.parquet"
 
 csv_path = pose_path.with_suffix(".csv")
 _ensure_parent(csv_path)
-pddata=pd.DataFrame(pose_records)
+pddata = pd.DataFrame(pose_records)
 pddata.to_csv(csv_path, index=False)
 log.info("Saved %d pose rows to %s", len(pose_records), csv_path)
 
@@ -359,8 +367,8 @@ log.info("Saved %d pose rows to %s", len(pose_records), csv_path)
 act_path = telemetry / f"activations_{ts}.h5"
 with h5py.File(act_path, "w") as h5:
     for layer, lst in act_buffers.items():
-        if not lst:            # nothing recorded for that layer
+        if not lst:  # nothing recorded for that layer
             continue
-        data = torch.cat(lst, dim=0).numpy()   # (frames*agents, …)
+        data = torch.cat(lst, dim=0).numpy()  # (frames*agents, …)
         h5.create_dataset(layer, data=data, compression="gzip")
         log.info("Saved %-20s  shape=%r", layer, data.shape)

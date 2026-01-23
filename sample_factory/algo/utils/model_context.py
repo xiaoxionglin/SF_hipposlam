@@ -1,7 +1,7 @@
 from typing import Dict
 
-from sample_factory.model.model_factory import ModelFactory
 from sample_factory.algo.learning.learner_factory import LearnerFactory
+from sample_factory.model.model_factory import ModelFactory
 
 
 class SampleFactoryModelContext:
