@@ -26,6 +26,9 @@ chmod +x patch_deepmindlab.sh
 ## Citation
 
 This project is accepted at ICLR 2026
+
 https://openreview.net/forum?id=li1vfqDzRD
+
+
 code related to the paper is in the folder [sf_xxl](sf_xxl)
 
