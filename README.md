@@ -3,7 +3,8 @@
 
 - mamba create -n "yourname" python=3.10.12
 	- older versions also work until 3.8
-- pip install `magic dmlab wheel`
+- pip install deepmind_lab-1.0-py3-none-any.whl 
+  - the appropriate wheel depends on your environment, try [`magic dmlab wheel`](https://drive.google.com/file/d/1YEXjm06f79KY5LB4NZ0e4xce3j1dcuxf/view?usp=drive_link), or the wheel from sample factory
 - pip uninstall numpy
 - pip install dm_env
 - (fork samplefactory)
@@ -20,10 +21,14 @@ chmod +x patch_deepmindlab.sh
 ./patch_deepmindlab.sh
 ```
 
+# update for fixes
+- pkg_resources error: setuptool needs to be an older version, e.g. 65.5.0
+- torchvision: pip install torchvision
+- libosmesa
+  - on NEMO2 Cluster: `module load lib/sdl2/2.28.2-gcccore-12.3.0 vis/mesa/24.1.3-gcccore-13.3.0`
+  - with sudo: `sudo apt-get install libosmesa6  libosmesa6-dev`
 
-
-
-## Citation
+# Citation
 
 This project is accepted at ICLR 2026
 
