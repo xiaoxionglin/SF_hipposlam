@@ -2,7 +2,12 @@ from abc import ABC
 from typing import List
 
 import torch
+<<<<<<< HEAD
 # from sf_workingdir.dmlab.custom_decoder import ShiftRegisterTransformerDecoder
+=======
+from sf_xxl.dmlab.custom_decoder import ShiftRegisterTransformerDecoder
+# this is very questionable import style. Needs to only reference from sf_workingdir to the main package
+>>>>>>> a6d1b875 (local update)
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
 from sample_factory.model.model_utils import ModelModule, create_mlp, nonlinearity
