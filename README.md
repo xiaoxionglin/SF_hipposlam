@@ -11,6 +11,8 @@
 - clone samplefactory
 - cd samplefactory
 - pip install -e .\[dev,mujoco,atari,vizdoom\] -> arguments depend on which environment, we do not need any
+- pip install torchvision
+  - some functions need it, like default resnet18
 
 when encountering numpy.ndarray error, `pip uninstall numpy` and `pip install -e .` again
 
@@ -23,6 +25,9 @@ chmod +x patch_deepmindlab.sh
 
 # update for fixes
 - pkg_resources error: setuptool needs to be an older version, e.g. 65.5.0
+```
+mamba install setuptools==65.5.0
+```
 - torchvision: pip install torchvision
 - libosmesa
   - on NEMO2 Cluster: `module load lib/sdl2/2.28.2-gcccore-12.3.0 vis/mesa/24.1.3-gcccore-13.3.0`
