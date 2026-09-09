@@ -1,0 +1,30 @@
+{
+  "schema":"intrmotiv/study/v1",
+  "workflow_version":"1.5.0",
+  "study_id":"persistent_intrinsic_control_c15_r2_20260908",
+  "description":"Exact 100M-to-600M continuation of original corrected-core C15 exploration controls.",
+  "expected_runs":3,
+  "metadata":{"project":"SF_IntrMotiv_PersistentIntrinsicControl","training_steps":600000000,"parent_frames":100040704,"design_cells":1},
+  "training":{
+    "mode":"supplemental_args",
+    "batch_name":"intrmotiv_persistent_intrinsic_control_c15_r2_20260908",
+    "workspace_root":"/work/classic/fr_xl1014-train",
+    "output_root":"/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_persistent_intrinsic_control_c15_r2_20260908",
+    "run_name_template":"PIC_C15_CONTINUE_S{seed}",
+    "condition_name_template":"PIC_C15_CONTINUE",
+    "seed_arg":"--seed={seed}",
+    "common_args":[
+      "--train_for_env_steps=600000000",
+      "--load_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_corrected_core_reevaluation_20260901/CCR_C15_TOPOLOGY_UCB_DIRECT_O1_S{seed}_/00_CCR_C15_TOPOLOGY_UCB_DIRECT_O1_S{seed}/checkpoint_p0/checkpoint_000006106_100040704.pth",
+      "--wandb_project=SF_IntrMotiv_PersistentIntrinsicControl",
+      "--wandb_group=intrmotiv_persistent_intrinsic_control_c15_r2_20260908",
+      "--online_spatial_snapshot_targets=100000000,200000000,300000000,450000000,600000000",
+      "--online_spatial_snapshot_max_frames=600000000"
+    ]
+  },
+  "bases":[{"name":"C15_CONTINUE","label":"C15_CONTINUE","args":[],"metadata":{"family":"original_c15","mechanism":"frontier_direct","control":"goal","gradient":"stop"}}],
+  "factors":[],
+  "seeds":[8,99,123],
+  "analysis":{"step_tag":"train/env_steps","terminal_width":25000000,"max_workers":3,"group_by":[],"contrast_group_by":[],"replicate_by":["seed"],"window_metrics":{"coverage_auc":"policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc","dg_density":"intrmotiv/dg/density","dg_usage_entropy":"intrmotiv/dg/usage_entropy"},"cumulative_metrics":{},"contrasts":[]},
+  "telemetry":{"protocol":"dg-place-fields-v1","target_frames":[100000000,200000000,300000000,450000000,600000000],"trajectory_seed":99,"terminal_seeds":[8,123],"label_template":"{condition}__s{seed}__f{checkpoint_frames}","manifest_fields":{"family":"{base_family}","feedback":"{base_mechanism}","schedule":"{base_control}"}}
+}

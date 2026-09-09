@@ -1,0 +1,1646 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.4.1",
+  "study_id": "ca3_feedback_predictive_dg_preflight_20260907",
+  "description": "Seed-99 5M engineering preflight for causal CA3 feedback and transition-predictive DG.",
+  "expected_runs": 27,
+  "metadata": {
+    "project": "SF_IntrMotiv_CA3FeedbackPredictiveDGPreflight",
+    "training_steps": 5000000,
+    "preflight_steps": 5000000,
+    "design_cells": 27
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "intrmotiv_ca3_feedback_predictive_dg_preflight_20260907",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_ca3_feedback_predictive_dg_preflight_20260907",
+    "run_name_template": "CPDF_C15_{cell_label}_S{seed}",
+    "condition_name_template": "CPDF_C15_{cell_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+      "--algo=APPO",
+      "--gamma=0.99",
+      "--learning_rate=0.0002",
+      "--exploration_loss_coeff=0.005",
+      "--value_loss_coeff=0.3",
+      "--ppo_clip_ratio=0.25",
+      "--num_workers=32",
+      "--num_envs_per_worker=2",
+      "--worker_num_splits=2",
+      "--num_epochs=1",
+      "--rollout=64",
+      "--recurrence=64",
+      "--batch_size=2048",
+      "--num_batches_per_epoch=2",
+      "--decorrelate_experience_max_seconds=120",
+      "--max_grad_norm=0.0",
+      "--dmlab_renderer=software",
+      "--dmlab_extended_action_set=False",
+      "--dmlab_reduced_action_set=True",
+      "--dmlab_one_task_per_worker=True",
+      "--dmlab_use_level_cache=True",
+      "--dmlab_level_cache_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/dmlab_cache",
+      "--set_workers_cpu_affinity=True",
+      "--force_envs_single_thread=True",
+      "--num_policies=1",
+      "--with_pbt=False",
+      "--max_policy_lag=35",
+      "--use_record_episode_statistics=True",
+      "--keep_checkpoints=8",
+      "--save_every_sec=300",
+      "--save_milestones_sec=1800",
+      "--save_best_every_sec=300",
+      "--save_best_after=1200",
+      "--save_best_metric=z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "--env_frameskip=8",
+      "--core_name=BypassSS",
+      "--DG_name=batchnorm_relu",
+      "--Hippo_n_feature=16",
+      "--Hippo_R=8",
+      "--Hippo_L=64",
+      "--depth_sensor=True",
+      "--normalize_input=False",
+      "--encoder_conv_architecture=layer2_resnet18",
+      "--use_rnn=True",
+      "--rnn_type=gru",
+      "--rnn_size=0",
+      "--nonlinearity=relu",
+      "--actor_critic_share_weights=True",
+      "--with_wandb=True",
+      "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
+      "--wandb_dir=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb",
+      "--benchmark=False",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--device=cpu",
+      "--rec_distances=True",
+      "--distance_learning=True",
+      "--masked_distance_matrix=False",
+      "--normalize_advantage=True",
+      "--advantage_reward_source=internal",
+      "--extra_encoder_losses=True",
+      "--metric=sum",
+      "--reward_scale=0.1",
+      "--double_value=False",
+      "--reset_critic=False",
+      "--reset_decoder=False",
+      "--encoder_grad_coeff=1",
+      "--encoder_batch_loss=True",
+      "--encoder_batch_loss_temperature=0.5",
+      "--encoder_multi_activation_loss=True",
+      "--encoder_unused_sequence_loss=False",
+      "--extra_decoder_loss=False",
+      "--encoder_population_usage_loss=False",
+      "--encoder_density_loss_coeff=0.0",
+      "--encoder_collision_loss_coeff=0.0",
+      "--encoder_reward_method=encourage",
+      "--dg_global_punishment_coeff=0.0",
+      "--dg_global_punishment_temperature=0.5",
+      "--dg_row_repulsion_coeff=0.0",
+      "--dg_ca3_temporal_exclusion_coeff=0.0",
+      "--dg_path_scatter_coeff=0.0",
+      "--iterative_update=False",
+      "--ca3_predictor_shadow=False",
+      "--exploration_coverage_telemetry=True",
+      "--exploration_coverage_grid_size=100",
+      "--DG_BN_intercept=2.43",
+      "--dg_batchnorm_semantics=legacy_batch",
+      "--hrl_controllable_graph=True",
+      "--hrl_graph_memory=policy_buffer",
+      "--hrl_persistent_fast_weights=False",
+      "--hrl_fast_weight_half_life_options=5000",
+      "--hrl_target_timing=immediate",
+      "--hrl_worker_reward_mode=hit_distance",
+      "--hrl_target_hit_reward=1.0",
+      "--hrl_distance_bonus_coeff=0.1",
+      "--hrl_min_target_visits=1",
+      "--hrl_edge_confidence_threshold=0.5",
+      "--hrl_edge_reliability_threshold=0.5",
+      "--hrl_edge_exploration=False",
+      "--hrl_manager_mode=frontier_direct",
+      "--hrl_exploration_mode=False",
+      "--hrl_manager_exploration_probability=0.0",
+      "--hrl_exploration_horizon=64",
+      "--hrl_empirical_her=False",
+      "--hrl_empirical_her_horizon=64",
+      "--hrl_empirical_her_coeff=0.0",
+      "--hrl_timeout_margin_ratio=0.20",
+      "--hrl_timeout_margin_steps=2",
+      "--hrl_bootstrap_horizon=64",
+      "--hrl_passive_edge_confidence_threshold=2",
+      "--hrl_passive_min_displacement=2",
+      "--hrl_passive_max_path_length=64",
+      "--hrl_frontier_uncertainty_weight=1.0",
+      "--hrl_action_path_integration=False",
+      "--hrl_motion_policy_input=False",
+      "--hrl_landmark_geometry=none",
+      "--hrl_behavior_mode_condition=False",
+      "--hrl_exploration_policy=shared",
+      "--encoder_reward_recipient=arrival",
+      "--encoder_reward_require_local_predecessor=True",
+      "--hrl_control_outcome=first_distinct",
+      "--ppo_dg_gradient=joint",
+      "--hrl_goal_conditioning=target_id_film",
+      "--dg_recruitment_reset_goal_adapter=False",
+      "--hrl_direct_target_selection=least_tested",
+      "--dg_orthogonal_recruitment=False",
+      "--dg_orthogonal_recruitment_max_per_rollout=0",
+      "--dg_transition_prediction_hidden_size=128",
+      "--dg_transition_prediction_coeff=0.1",
+      "--train_for_env_steps=5000000",
+      "--wandb_project=SF_IntrMotiv_CA3FeedbackPredictiveDGPreflight",
+      "--wandb_group=intrmotiv_ca3_feedback_predictive_dg_preflight_20260907"
+    ]
+  },
+  "bases": [
+    {
+      "name": "C15",
+      "label": "C15",
+      "args": [],
+      "metadata": {
+        "family": "c15_arr_first_joint_film_legacy_bn_balanced_direct"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "name": "cell",
+      "levels": [
+        {
+          "value": "base",
+          "label": "BASE",
+          "args": [
+            "--dg_context_feedback=none",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "none",
+            "history": "none",
+            "gradient": "none",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "predictor_passive",
+          "label": "P_PASS",
+          "args": [
+            "--dg_context_feedback=none",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "none",
+            "history": "none",
+            "gradient": "none",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "predictor_goal",
+          "label": "P_GOAL",
+          "args": [
+            "--dg_context_feedback=none",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "none",
+            "history": "none",
+            "gradient": "none",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "gate_ca3_direct_none",
+          "label": "GATE_CA3_DIR",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3",
+            "gradient": "direct",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "gate_ca3_direct_passive",
+          "label": "GATE_CA3_DIR_PASS",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3",
+            "gradient": "direct",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "gate_ca3_direct_goal",
+          "label": "GATE_CA3_DIR_GOAL",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3",
+            "gradient": "direct",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "gate_ca3_bptt_none",
+          "label": "GATE_CA3_BPTT",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3",
+            "gradient": "bptt",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "gate_ca3_bptt_passive",
+          "label": "GATE_CA3_BPTT_PASS",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3",
+            "gradient": "bptt",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "gate_ca3_bptt_goal",
+          "label": "GATE_CA3_BPTT_GOAL",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3",
+            "gradient": "bptt",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "gate_ca3_action_direct_none",
+          "label": "GATE_ACT_DIR",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3_action",
+            "gradient": "direct",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "gate_ca3_action_direct_passive",
+          "label": "GATE_ACT_DIR_PASS",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3_action",
+            "gradient": "direct",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "gate_ca3_action_direct_goal",
+          "label": "GATE_ACT_DIR_GOAL",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3_action",
+            "gradient": "direct",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "gate_ca3_action_bptt_none",
+          "label": "GATE_ACT_BPTT",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3_action",
+            "gradient": "bptt",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "gate_ca3_action_bptt_passive",
+          "label": "GATE_ACT_BPTT_PASS",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3_action",
+            "gradient": "bptt",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "gate_ca3_action_bptt_goal",
+          "label": "GATE_ACT_BPTT_GOAL",
+          "args": [
+            "--dg_context_feedback=gate",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "gate",
+            "history": "ca3_action",
+            "gradient": "bptt",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "additive_ca3_direct_none",
+          "label": "ADD_CA3_DIR",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3",
+            "gradient": "direct",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "additive_ca3_direct_passive",
+          "label": "ADD_CA3_DIR_PASS",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3",
+            "gradient": "direct",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "additive_ca3_direct_goal",
+          "label": "ADD_CA3_DIR_GOAL",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3",
+            "gradient": "direct",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "additive_ca3_bptt_none",
+          "label": "ADD_CA3_BPTT",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3",
+            "gradient": "bptt",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "additive_ca3_bptt_passive",
+          "label": "ADD_CA3_BPTT_PASS",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3",
+            "gradient": "bptt",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "additive_ca3_bptt_goal",
+          "label": "ADD_CA3_BPTT_GOAL",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3",
+            "gradient": "bptt",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "additive_ca3_action_direct_none",
+          "label": "ADD_ACT_DIR",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3_action",
+            "gradient": "direct",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "additive_ca3_action_direct_passive",
+          "label": "ADD_ACT_DIR_PASS",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3_action",
+            "gradient": "direct",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "additive_ca3_action_direct_goal",
+          "label": "ADD_ACT_DIR_GOAL",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=direct",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3_action",
+            "gradient": "direct",
+            "predictor": "goal"
+          }
+        },
+        {
+          "value": "additive_ca3_action_bptt_none",
+          "label": "ADD_ACT_BPTT",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=none"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3_action",
+            "gradient": "bptt",
+            "predictor": "none"
+          }
+        },
+        {
+          "value": "additive_ca3_action_bptt_passive",
+          "label": "ADD_ACT_BPTT_PASS",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=passive"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3_action",
+            "gradient": "bptt",
+            "predictor": "passive"
+          }
+        },
+        {
+          "value": "additive_ca3_action_bptt_goal",
+          "label": "ADD_ACT_BPTT_GOAL",
+          "args": [
+            "--dg_context_feedback=additive",
+            "--dg_context_history=ca3_action",
+            "--dg_context_gradient=bptt",
+            "--dg_transition_prediction=goal"
+          ],
+          "metadata": {
+            "feedback": "additive",
+            "history": "ca3_action",
+            "gradient": "bptt",
+            "predictor": "goal"
+          }
+        }
+      ]
+    }
+  ],
+  "seeds": [
+    99
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 1000000,
+    "synchronized_steps": [
+      5000000
+    ],
+    "max_workers": 4,
+    "group_by": [
+      "cell_feedback",
+      "cell_history",
+      "cell_gradient",
+      "cell_predictor"
+    ],
+    "contrast_group_by": [],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "coverage_auc": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "dg_density": "intrmotiv/dg/density",
+      "dg_silent_fraction": "intrmotiv/dg/silent_unit_fraction",
+      "dg_usage_entropy": "intrmotiv/dg/usage_entropy",
+      "encoder_credit_replay_match": "intrmotiv/encoder/credit/replay_match",
+      "behavior_replay_mismatch": "intrmotiv/hrl/behavior_replay_mismatch",
+      "target_action_sensitivity": "intrmotiv/hrl/goal_condition/action_sensitivity",
+      "target_action_probability_tv": "intrmotiv/hrl/goal_condition/action_probability_tv",
+      "control_correct_count": "intrmotiv/hrl/control/correct_count",
+      "control_wrong_count": "intrmotiv/hrl/control/wrong_count",
+      "control_timeout_count": "intrmotiv/hrl/control/timeout_count",
+      "control_completed_count": "intrmotiv/hrl/control/completed_count",
+      "control_command_entropy": "intrmotiv/hrl/control/normalized_command_entropy",
+      "control_observed_pair_coverage": "intrmotiv/hrl/control/observed_pair_coverage",
+      "first_outcome_commanded_numerator": "intrmotiv/hrl/control/commanded_numerator",
+      "first_outcome_commanded_event_count": "intrmotiv/hrl/control/commanded_event_count",
+      "first_outcome_shuffled_numerator": "intrmotiv/hrl/control/shuffled_numerator",
+      "first_outcome_shuffled_event_count": "intrmotiv/hrl/control/shuffled_event_count",
+      "ppo_to_dg_gradient_norm": "intrmotiv/dg/gradient/ppo_norm",
+      "encoder_to_dg_gradient_norm": "intrmotiv/dg/gradient/encoder_norm",
+      "ppo_encoder_dg_gradient_ratio": "intrmotiv/dg/gradient/ppo_encoder_ratio",
+      "ppo_encoder_dg_gradient_cosine": "intrmotiv/dg/gradient/cosine",
+      "ppo_encoder_dg_row_conflict_fraction": "intrmotiv/dg/gradient/row_conflict_fraction",
+      "context_created_fraction": "intrmotiv/dg/context/created_fraction",
+      "context_suppressed_fraction": "intrmotiv/dg/context/suppressed_fraction",
+      "context_unchanged_fraction": "intrmotiv/dg/context/unchanged_fraction",
+      "context_modulation_abs_mean": "intrmotiv/dg/context/modulation_abs_mean",
+      "context_modulation_saturation_fraction": "intrmotiv/dg/context/modulation_saturation_fraction",
+      "context_adapter_gradient_norm": "intrmotiv/dg/context/adapter_gradient_norm",
+      "prediction_loss": "intrmotiv/dg/prediction/loss",
+      "prediction_main_loss": "intrmotiv/dg/prediction/main_loss",
+      "prediction_control_loss": "intrmotiv/dg/prediction/control_loss",
+      "prediction_validation_main_ce": "intrmotiv/dg/prediction/validation_main_ce",
+      "prediction_validation_control_ce": "intrmotiv/dg/prediction/validation_control_ce",
+      "prediction_validation_state_gain": "intrmotiv/dg/prediction/validation_state_gain",
+      "prediction_validation_accuracy": "intrmotiv/dg/prediction/validation_accuracy",
+      "prediction_validation_count": "intrmotiv/dg/prediction/validation_count",
+      "prediction_scheduled_count": "intrmotiv/dg/prediction/scheduled_count",
+      "prediction_applied_count": "intrmotiv/dg/prediction/applied_count",
+      "prediction_boundary_drop_count": "intrmotiv/dg/prediction/boundary_drop_count",
+      "prediction_replay_match": "intrmotiv/dg/prediction/replay_match"
+    },
+    "cumulative_metrics": {},
+    "contrasts": [
+      {
+        "name": "PASSIVE_minus_NONE_BASE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "predictor_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "base"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_BASE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "predictor_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "base"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_GATE_CA3_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_GATE_CA3_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_GATE_CA3_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_GATE_CA3_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_GATE_CA3_ACTION_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_GATE_CA3_ACTION_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_GATE_CA3_ACTION_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_GATE_CA3_ACTION_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_ADDITIVE_CA3_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_ADDITIVE_CA3_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_ADDITIVE_CA3_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_ADDITIVE_CA3_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_ADDITIVE_CA3_ACTION_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_ADDITIVE_CA3_ACTION_DIRECT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PASSIVE_minus_NONE_ADDITIVE_CA3_ACTION_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "GOAL_minus_NONE_ADDITIVE_CA3_ACTION_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_GATE_CA3_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_GATE_CA3_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_GATE_CA3_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_GATE_ACT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_GATE_ACT_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_GATE_ACT_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_ADD_CA3_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_ADD_CA3_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_ADD_CA3_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_ADD_ACT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_ADD_ACT_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "BPTT_minus_DIRECT_ADD_ACT_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_action_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_GATE_DIR_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_direct_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_GATE_DIR_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_GATE_DIR_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_GATE_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_GATE_BPTT_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_GATE_BPTT_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_ADD_DIR_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_ADD_DIR_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_ADD_DIR_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_ADD_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_ADD_BPTT_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_bptt_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ACTION_minus_CA3_ADD_BPTT_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "additive_ca3_bptt_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_CA3_DIR_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_direct_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_CA3_DIR_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_CA3_DIR_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_CA3_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_CA3_BPTT_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_CA3_BPTT_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_bptt_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_ACT_DIR_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_ACT_DIR_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_ACT_DIR_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_direct_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_direct_goal"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_ACT_BPTT_NONE",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_none"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_none"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_ACT_BPTT_PASS",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_passive"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_passive"
+            }
+          }
+        ]
+      },
+      {
+        "name": "ADD_minus_GATE_ACT_BPTT_GOAL",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "cell": "additive_ca3_action_bptt_goal"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "cell": "gate_ca3_action_bptt_goal"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "telemetry": {
+    "protocol": "dg-place-fields-v1",
+    "target_frames": [
+      5000000,
+      25000000,
+      50000000,
+      75000000
+    ],
+    "trajectory_seed": 99,
+    "terminal_seeds": [
+      8,
+      123
+    ],
+    "label_template": "{condition}__s{seed}__f{checkpoint_frames}",
+    "manifest_fields": {
+      "family": "{base_family}",
+      "feedback": "{cell_feedback}",
+      "context": "{cell_history}",
+      "gradient": "{cell_gradient}",
+      "predictor": "{cell_predictor}",
+      "schedule": "first_distinct",
+      "goal_conditioning": "target_id_film"
+    },
+    "spatial_outcomes": [
+      "mono_field_fraction",
+      "components_30pct",
+      "components_50pct",
+      "components_70pct",
+      "dominant_component_mass",
+      "spatial_information",
+      "active_only_map_cosine",
+      "graph_concentration",
+      "grounded_controllability",
+      "target_action_sensitivity"
+    ],
+    "intervention": {
+      "protocol": "target-control-intervention-v1",
+      "target_frames": [
+        75000000
+      ],
+      "freeze_policy": true,
+      "freeze_dg": true,
+      "freeze_graph": true,
+      "exclusive_source_only": true,
+      "balanced_observed_alternative_targets": true,
+      "balanced_local_successor_targets": false,
+      "attempts_per_ordered_pair": 5,
+      "decision_cap": 100000,
+      "terminate_on_first_distinct_exclusive_outcome": true,
+      "record_source_command_outcome": true,
+      "record_orientation_bins": true,
+      "record_elapsed_path_endpoint": true,
+      "source_context_matched_shuffle": true
+    }
+  }
+}

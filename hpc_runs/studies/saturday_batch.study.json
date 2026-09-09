@@ -1,0 +1,1182 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.4.1",
+  "study_id": "saturday_batch_20260905",
+  "description": "Saturday batch: fresh fully crossed C15 legacy-BatchNorm study of ARR/SRC encoder credit, MON/DIRO/PREDO retirement, and LEG/FILM goal conditioning.",
+  "expected_runs": 36,
+  "metadata": {
+    "project": "SF_IntrMotiv_SaturdayBatch",
+    "training_steps": 75000000,
+    "preflight_steps": 1000000
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "intrmotiv_saturday_batch_20260905",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_saturday_batch_20260905",
+    "run_name_template": "SAT_C15_{encoder_credit_label}_{retirement_label}_{goal_conditioning_label}_S{seed}",
+    "condition_name_template": "SAT_C15_{encoder_credit_label}_{retirement_label}_{goal_conditioning_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+      "--train_for_env_steps=75000000",
+      "--algo=APPO",
+      "--gamma=0.99",
+      "--learning_rate=0.0002",
+      "--exploration_loss_coeff=0.005",
+      "--value_loss_coeff=0.3",
+      "--ppo_clip_ratio=0.25",
+      "--num_workers=32",
+      "--num_envs_per_worker=2",
+      "--worker_num_splits=2",
+      "--num_epochs=1",
+      "--rollout=64",
+      "--recurrence=64",
+      "--batch_size=2048",
+      "--num_batches_per_epoch=2",
+      "--decorrelate_experience_max_seconds=120",
+      "--max_grad_norm=0.0",
+      "--dmlab_renderer=software",
+      "--dmlab_extended_action_set=False",
+      "--dmlab_reduced_action_set=True",
+      "--dmlab_one_task_per_worker=True",
+      "--dmlab_use_level_cache=True",
+      "--dmlab_level_cache_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/dmlab_cache",
+      "--set_workers_cpu_affinity=True",
+      "--force_envs_single_thread=True",
+      "--num_policies=1",
+      "--with_pbt=False",
+      "--max_policy_lag=35",
+      "--use_record_episode_statistics=True",
+      "--keep_checkpoints=8",
+      "--save_every_sec=300",
+      "--save_milestones_sec=1800",
+      "--save_best_every_sec=300",
+      "--save_best_after=1200",
+      "--save_best_metric=z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "--env_frameskip=8",
+      "--core_name=BypassSS",
+      "--DG_name=batchnorm_relu",
+      "--Hippo_n_feature=16",
+      "--Hippo_R=8",
+      "--Hippo_L=64",
+      "--depth_sensor=True",
+      "--normalize_input=False",
+      "--encoder_conv_architecture=layer2_resnet18",
+      "--use_rnn=True",
+      "--rnn_type=gru",
+      "--rnn_size=0",
+      "--nonlinearity=relu",
+      "--actor_critic_share_weights=True",
+      "--with_wandb=True",
+      "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
+      "--wandb_project=SF_IntrMotiv_SaturdayBatch",
+      "--wandb_group=intrmotiv_saturday_batch_20260905",
+      "--wandb_dir=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb",
+      "--benchmark=False",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--device=cpu",
+      "--rec_distances=True",
+      "--distance_learning=True",
+      "--masked_distance_matrix=False",
+      "--normalize_advantage=True",
+      "--advantage_reward_source=internal",
+      "--extra_encoder_losses=True",
+      "--metric=sum",
+      "--reward_scale=0.1",
+      "--double_value=False",
+      "--reset_critic=False",
+      "--reset_decoder=False",
+      "--encoder_grad_coeff=1",
+      "--encoder_batch_loss=True",
+      "--encoder_batch_loss_temperature=0.5",
+      "--encoder_multi_activation_loss=True",
+      "--encoder_unused_sequence_loss=False",
+      "--extra_decoder_loss=False",
+      "--encoder_population_usage_loss=False",
+      "--encoder_density_loss_coeff=0.0",
+      "--encoder_collision_loss_coeff=0.0",
+      "--encoder_reward_method=encourage",
+      "--dg_global_punishment_coeff=0.0",
+      "--dg_global_punishment_temperature=0.5",
+      "--dg_row_repulsion_coeff=0.0",
+      "--dg_ca3_temporal_exclusion_coeff=0.0",
+      "--dg_path_scatter_coeff=0.0",
+      "--iterative_update=False",
+      "--ca3_predictor_shadow=False",
+      "--exploration_coverage_telemetry=True",
+      "--exploration_coverage_grid_size=100",
+      "--DG_BN_intercept=2.43",
+      "--dg_orthogonal_recruitment=True",
+      "--dg_orthogonal_recruitment_mode=graph",
+      "--dg_orthogonal_recruitment_margin=0.5",
+      "--dg_orthogonal_recruitment_residual_eps=1e-6",
+      "--dg_recruitment_connectivity_threshold=0.25",
+      "--dg_recruitment_redundancy_max_steps=4",
+      "--dg_recruitment_passive_half_life_events=5000",
+      "--dg_recruitment_attempt_threshold=0.5",
+      "--dg_recruitment_pred_min_context_attempts=4.0",
+      "--dg_recruitment_pred_half_life_options=5000",
+      "--dg_batchnorm_semantics=legacy_batch",
+      "--hrl_controllable_graph=True",
+      "--hrl_graph_memory=policy_buffer",
+      "--hrl_persistent_fast_weights=False",
+      "--hrl_fast_weight_half_life_options=5000",
+      "--hrl_target_timing=immediate",
+      "--hrl_worker_reward_mode=hit_distance",
+      "--hrl_target_hit_reward=1.0",
+      "--hrl_distance_bonus_coeff=0.1",
+      "--hrl_min_target_visits=1",
+      "--hrl_edge_confidence_threshold=0.5",
+      "--hrl_edge_reliability_threshold=0.5",
+      "--hrl_edge_exploration=False",
+      "--hrl_manager_mode=frontier_direct",
+      "--hrl_exploration_mode=False",
+      "--hrl_manager_exploration_probability=0.0",
+      "--hrl_exploration_horizon=64",
+      "--hrl_empirical_her=False",
+      "--hrl_empirical_her_horizon=64",
+      "--hrl_empirical_her_coeff=0.0",
+      "--hrl_timeout_margin_ratio=0.20",
+      "--hrl_timeout_margin_steps=2",
+      "--hrl_bootstrap_horizon=64",
+      "--hrl_passive_edge_confidence_threshold=2",
+      "--hrl_passive_min_displacement=2",
+      "--hrl_passive_max_path_length=64",
+      "--hrl_frontier_uncertainty_weight=1.0",
+      "--hrl_action_path_integration=False",
+      "--hrl_motion_policy_input=False",
+      "--hrl_landmark_geometry=none",
+      "--hrl_behavior_mode_condition=False",
+      "--hrl_exploration_policy=shared"
+    ]
+  },
+  "bases": [
+    {
+      "name": "C15",
+      "label": "C15",
+      "args": [],
+      "metadata": {
+        "family": "c15_ucb_direct_immediate_legacy_bn"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "name": "encoder_credit",
+      "levels": [
+        {
+          "value": "arrival",
+          "label": "ARR",
+          "args": [
+            "--encoder_reward_recipient=arrival",
+            "--encoder_reward_require_local_predecessor=True"
+          ]
+        },
+        {
+          "value": "source",
+          "label": "SRC",
+          "args": [
+            "--encoder_reward_recipient=source",
+            "--encoder_reward_require_local_predecessor=True"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "retirement",
+      "levels": [
+        {
+          "value": "monitor",
+          "label": "MON",
+          "args": [
+            "--dg_recruitment_victim_rule=monitor",
+            "--dg_recruitment_endpoint_gate=open",
+            "--dg_orthogonal_recruitment_max_per_rollout=0"
+          ]
+        },
+        {
+          "value": "dir_open",
+          "label": "DIRO",
+          "args": [
+            "--dg_recruitment_victim_rule=directional",
+            "--dg_recruitment_endpoint_gate=open",
+            "--dg_orthogonal_recruitment_max_per_rollout=1"
+          ]
+        },
+        {
+          "value": "pred_open",
+          "label": "PREDO",
+          "args": [
+            "--dg_recruitment_victim_rule=predictive",
+            "--dg_recruitment_endpoint_gate=open",
+            "--dg_orthogonal_recruitment_max_per_rollout=1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "goal_conditioning",
+      "levels": [
+        {
+          "value": "legacy",
+          "label": "LEG",
+          "args": [
+            "--hrl_goal_conditioning=legacy",
+            "--dg_recruitment_reset_goal_adapter=False"
+          ]
+        },
+        {
+          "value": "target_id_film",
+          "label": "FILM",
+          "args": [
+            "--hrl_goal_conditioning=target_id_film",
+            "--dg_recruitment_reset_goal_adapter=True"
+          ]
+        }
+      ]
+    }
+  ],
+  "seeds": [
+    8,
+    99,
+    123
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 5000000,
+    "synchronized_steps": [
+      25000000,
+      50000000,
+      75000000
+    ],
+    "max_workers": 4,
+    "group_by": [
+      "encoder_credit",
+      "retirement",
+      "goal_conditioning"
+    ],
+    "contrast_group_by": [],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "coverage_auc": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "dg_density": "intrmotiv/dg/density",
+      "dg_silent_fraction": "intrmotiv/dg/silent_unit_fraction",
+      "dg_usage_entropy": "intrmotiv/dg/usage_entropy",
+      "encoder_total_events": "intrmotiv/encoder/credit/total_events",
+      "encoder_matchable_events": "intrmotiv/encoder/credit/matchable_events",
+      "encoder_credited_events": "intrmotiv/encoder/credit/credited_events",
+      "encoder_boundary_drops": "intrmotiv/encoder/credit/boundary_dropped_events",
+      "encoder_alignment_failures": "intrmotiv/encoder/credit/alignment_failures",
+      "encoder_collisions": "intrmotiv/encoder/credit/collisions",
+      "encoder_reward_mass": "intrmotiv/encoder/credit/reward_mass",
+      "encoder_source_lag": "intrmotiv/encoder/credit/source_lag_mean",
+      "arrival_credit_loss": "intrmotiv/encoder/credit/arrival_loss",
+      "source_credit_loss": "intrmotiv/encoder/credit/source_loss",
+      "candidate_endpoints": "intrmotiv/dg/recruitment/candidate_count",
+      "silent_endpoints": "intrmotiv/dg/recruitment/silent_endpoint_count",
+      "active_endpoints": "intrmotiv/dg/recruitment/active_endpoint_count",
+      "eligible_victim_endpoints": "intrmotiv/dg/recruitment/eligible_victim_endpoint_count",
+      "residual_pass": "intrmotiv/dg/recruitment/residual_pass_count",
+      "activity_blocked": "intrmotiv/dg/recruitment/activity_blocked_count",
+      "replacement_conversion": "intrmotiv/dg/recruitment/replacement_conversion",
+      "victim_active_fraction": "intrmotiv/dg/recruitment/victim_active_fraction",
+      "repeat_assignments": "intrmotiv/dg/recruitment/repeat_assignments_per_rollout",
+      "bad_source_assignments": "intrmotiv/dg/recruitment/bad_source_assignments_per_rollout",
+      "duplicate_assignments": "intrmotiv/dg/recruitment/redundant_assignments_per_rollout",
+      "predictive_assignments": "intrmotiv/dg/recruitment/predictive_assignments_per_rollout",
+      "attempt_coverage": "intrmotiv/dg/recruitment/attempt_coverage_fraction",
+      "fully_tested_count": "intrmotiv/dg/recruitment/fully_tested_count",
+      "zero_outdegree_count": "intrmotiv/dg/recruitment/zero_outdegree_count",
+      "predictive_context_support": "intrmotiv/dg/recruitment/predictive_supported_context_count",
+      "predictive_context_coverage": "intrmotiv/dg/recruitment/predictive_context_coverage_fraction",
+      "predictive_decay": "intrmotiv/dg/recruitment/predictive_decayed_attempt_mass",
+      "predictive_gap": "intrmotiv/dg/recruitment/predictive_reliability_gap",
+      "largest_scc": "intrmotiv/hrl/reliable/largest_scc",
+      "reachable_pair_fraction": "intrmotiv/hrl/reliable/reachable_pair_fraction",
+      "top3_incoming_share": "intrmotiv/hrl/reliable/top3_incoming_confidence_share",
+      "target_action_sensitivity": "intrmotiv/hrl/goal_condition/action_sensitivity",
+      "option_success_fraction": "intrmotiv/hrl/option_success_fraction",
+      "target_hit_numerator": "intrmotiv/hrl/target_hit_numerator",
+      "target_hit_event_count": "intrmotiv/hrl/target_hit_event_count",
+      "shuffled_hit_numerator": "intrmotiv/hrl/shuffled_hit_numerator",
+      "shuffled_hit_event_count": "intrmotiv/hrl/shuffled_hit_event_count",
+      "behavior_replay_mismatch": "intrmotiv/hrl/behavior_replay_mismatch",
+      "target_action_probability_tv": "intrmotiv/hrl/goal_condition/action_probability_tv",
+      "goal_adapter_resets": "intrmotiv/dg/recruitment/goal_adapter_resets_per_rollout",
+      "encoder_credit_scheduled_count": "intrmotiv/encoder/credit/scheduled_count",
+      "encoder_credit_applied_count": "intrmotiv/encoder/credit/applied_count",
+      "encoder_credit_scheduled_mass": "intrmotiv/encoder/credit/scheduled_reward_mass",
+      "encoder_credit_applied_mass": "intrmotiv/encoder/credit/applied_reward_mass",
+      "encoder_credit_replay_match": "intrmotiv/encoder/credit/replay_match",
+      "dg_forward_count": "intrmotiv/dg/update_contract/forward_count",
+      "dg_running_stats_update_count": "intrmotiv/dg/update_contract/running_stats_update_count",
+      "stale_generation_rejected_count": "intrmotiv/replay/stale_generation_rejected_count",
+      "stale_generation_rejected_fraction": "intrmotiv/replay/stale_generation_rejected_fraction",
+      "dg_weight_generation": "intrmotiv/dg/update_contract/weight_generation",
+      "dg_statistics_generation": "intrmotiv/dg/update_contract/statistics_generation",
+      "dg_publication_generation_mismatch": "intrmotiv/dg/update_contract/publication_generation_mismatch",
+      "generation_dropped_rollouts_total": "intrmotiv/replay/dropped_rollouts_total",
+      "generation_dropped_decisions_total": "intrmotiv/replay/dropped_decisions_total",
+      "generation_deferred_updates_total": "intrmotiv/replay/deferred_updates_total"
+    },
+    "cumulative_metrics": {
+      "recruitment_total": "intrmotiv/dg/recruitment/total",
+      "repeat_total": "intrmotiv/dg/recruitment/repeat_total",
+      "tiny_residual_total": "intrmotiv/dg/recruitment/tiny_residual_total",
+      "goal_adapter_reset_total": "intrmotiv/dg/recruitment/goal_adapter_reset_total"
+    },
+    "contrasts": [
+      {
+        "name": "SRC_minus_ARR_monitor_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "SRC_minus_ARR_monitor_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "SRC_minus_ARR_dir_open_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "SRC_minus_ARR_dir_open_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "SRC_minus_ARR_pred_open_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "SRC_minus_ARR_pred_open_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "dir_open_minus_MON_arrival_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "pred_open_minus_MON_arrival_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "dir_open_minus_MON_arrival_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "pred_open_minus_MON_arrival_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "dir_open_minus_MON_source_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "pred_open_minus_MON_source_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "dir_open_minus_MON_source_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "pred_open_minus_MON_source_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PREDO_minus_DIRO_arrival_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PREDO_minus_DIRO_arrival_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PREDO_minus_DIRO_source_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "PREDO_minus_DIRO_source_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FILM_minus_LEG_arrival_monitor",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FILM_minus_LEG_arrival_dir_open",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FILM_minus_LEG_arrival_pred_open",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FILM_minus_LEG_source_monitor",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FILM_minus_LEG_source_dir_open",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "FILM_minus_LEG_source_pred_open",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "credit_x_dir_open_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "credit_x_dir_open_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "credit_x_pred_open_legacy",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "credit_x_pred_open_target_id_film",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          }
+        ]
+      },
+      {
+        "name": "goal_x_dir_open_arrival",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "goal_x_pred_open_arrival",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "arrival",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "goal_x_dir_open_source",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "dir_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      },
+      {
+        "name": "goal_x_pred_open_source",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "pred_open",
+              "goal_conditioning": "legacy"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "target_id_film"
+            }
+          },
+          {
+            "weight": 1,
+            "where": {
+              "encoder_credit": "source",
+              "retirement": "monitor",
+              "goal_conditioning": "legacy"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "telemetry": {
+    "protocol": "dg-place-fields-v1",
+    "target_frames": [
+      5000000,
+      25000000,
+      50000000,
+      75000000
+    ],
+    "trajectory_seed": 99,
+    "terminal_seeds": [
+      8,
+      123
+    ],
+    "label_template": "{condition}__s{seed}__f{checkpoint_frames}",
+    "manifest_fields": {
+      "family": "{base_family}",
+      "encoder_credit": "{encoder_credit}",
+      "retirement": "{retirement}",
+      "goal_conditioning": "{goal_conditioning}",
+      "normalization": "legacy_batch"
+    },
+    "spatial_outcomes": [
+      "mono_field_fraction",
+      "components_30pct",
+      "components_50pct",
+      "components_70pct",
+      "dominant_component_mass",
+      "spatial_information",
+      "active_only_map_cosine",
+      "graph_confidence_field_spread_correlation"
+    ],
+    "intervention": {
+      "protocol": "target-control-intervention-v1",
+      "target_frames": [
+        75000000
+      ],
+      "freeze_policy": true,
+      "freeze_graph": true,
+      "exclusive_source_only": true,
+      "alternative_targets": 15,
+      "attempts_per_ordered_pair": 5,
+      "decision_cap": 100000,
+      "record_orientation_bins": true,
+      "source_context_matched_shuffle": true,
+      "counterfactual_action_sensitivity": true
+    }
+  }
+}

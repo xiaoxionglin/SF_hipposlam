@@ -1,0 +1,193 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.0.0",
+  "study_id": "graph_stabilized_recruitment_20260903",
+  "description": "Graph-stabilized orthogonal recruitment factorial study over corrected-core backbones, redundancy thresholds, half-lives, and three paired seeds.",
+  "expected_runs": 36,
+  "metadata": {
+    "schedule": "sim",
+    "feedback": "encourage"
+  },
+  "training": {
+    "mode": "supplemental_args",
+    "batch_name": "intrmotiv_graph_stabilized_recruitment_20260903",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_graph_stabilized_recruitment_20260903",
+    "run_name_template": "GSR_{base}_D{redundancy_max_steps_label}_H{half_life_events_label}_S{seed}",
+    "condition_name_template": "GSR_{base}_D{redundancy_max_steps_label}_H{half_life_events_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--dg_orthogonal_recruitment_mode=graph",
+      "--dg_recruitment_connectivity_threshold=0.25"
+    ]
+  },
+  "bases": [
+    {
+      "name": "C05",
+      "metadata": {
+        "family": "direct_hrl"
+      }
+    },
+    {
+      "name": "C13",
+      "metadata": {
+        "family": "direct_hrl"
+      }
+    },
+    {
+      "name": "C15",
+      "metadata": {
+        "family": "topology"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "name": "redundancy_max_steps",
+      "levels": [
+        {
+          "value": 4,
+          "label": "4",
+          "args": [
+            "--dg_recruitment_redundancy_max_steps=4"
+          ]
+        },
+        {
+          "value": 8,
+          "label": "8",
+          "args": [
+            "--dg_recruitment_redundancy_max_steps=8"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "half_life_events",
+      "levels": [
+        {
+          "value": 5000,
+          "label": "5K",
+          "args": [
+            "--dg_recruitment_passive_half_life_events=5000",
+            "--hrl_fast_weight_half_life_options=5000"
+          ]
+        },
+        {
+          "value": 10000,
+          "label": "10K",
+          "args": [
+            "--dg_recruitment_passive_half_life_events=10000",
+            "--hrl_fast_weight_half_life_options=10000"
+          ]
+        }
+      ]
+    }
+  ],
+  "seeds": [
+    8,
+    99,
+    123
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 10000000,
+    "group_by": [
+      "base",
+      "redundancy_max_steps",
+      "half_life_events"
+    ],
+    "contrast_group_by": [
+      "base"
+    ],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "coverage_auc": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "unique_cells": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_unique_cells",
+      "coverage_entropy": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_entropy",
+      "dg_density": "intrmotiv/dg/density",
+      "dg_silent_fraction": "intrmotiv/dg/silent_unit_fraction",
+      "dg_usage_entropy": "intrmotiv/dg/usage_entropy",
+      "dg_behavior_event_fraction": "intrmotiv/dg/behavior_dominant_event_fraction",
+      "target_hit_lift": "intrmotiv/hrl/target_hit_lift",
+      "action_sensitivity": "intrmotiv/hrl/goal_condition/action_sensitivity",
+      "option_success_fraction": "intrmotiv/hrl/option_success_fraction",
+      "known_edge_fraction": "intrmotiv/hrl/known_edge_fraction",
+      "node_coverage_fraction": "intrmotiv/hrl/node_coverage_fraction",
+      "connected_fraction": "intrmotiv/dg/recruitment/connected_fraction",
+      "isolated_fraction": "intrmotiv/dg/recruitment/isolated_fraction",
+      "redundant_pair_count": "intrmotiv/dg/recruitment/redundant_pair_count",
+      "eligible_vertex_count": "intrmotiv/dg/recruitment/eligible_vertex_count",
+      "birth_protected_count": "intrmotiv/dg/recruitment/birth_protected_count",
+      "isolated_assignments_per_rollout": "intrmotiv/dg/recruitment/isolated_assignments_per_rollout",
+      "redundant_assignments_per_rollout": "intrmotiv/dg/recruitment/redundant_assignments_per_rollout",
+      "repeat_assignments_per_rollout": "intrmotiv/dg/recruitment/repeat_assignments_per_rollout",
+      "passive_graph_density": "intrmotiv/dg/recruitment/passive_graph_density",
+      "passive_updates_per_rollout": "intrmotiv/dg/recruitment/passive_updates_per_rollout",
+      "passive_stale_per_rollout": "intrmotiv/dg/recruitment/passive_stale_per_rollout",
+      "passive_over_gap_per_rollout": "intrmotiv/dg/recruitment/passive_over_gap_per_rollout",
+      "exploration_selection_fraction": "intrmotiv/hrl/exploration/selection_fraction",
+      "forced_exploration_fraction": "intrmotiv/hrl/exploration/forced_selection_fraction",
+      "frontier_selection_rate": "intrmotiv/hrl/frontier/selection_rate",
+      "frontier_yield": "intrmotiv/hrl/frontier/yield",
+      "frontier_reached_fraction": "intrmotiv/hrl/frontier/reached_fraction"
+    },
+    "cumulative_metrics": {
+      "recruitment_total": "intrmotiv/dg/recruitment/total",
+      "repeat_total": "intrmotiv/dg/recruitment/repeat_total",
+      "tiny_residual_total": "intrmotiv/dg/recruitment/tiny_residual_total"
+    },
+    "contrasts": [
+      {
+        "name": "D8_minus_D4",
+        "terms": [
+          {"weight": 0.5, "where": {"redundancy_max_steps": 8, "half_life_events": 5000}},
+          {"weight": -0.5, "where": {"redundancy_max_steps": 4, "half_life_events": 5000}},
+          {"weight": 0.5, "where": {"redundancy_max_steps": 8, "half_life_events": 10000}},
+          {"weight": -0.5, "where": {"redundancy_max_steps": 4, "half_life_events": 10000}}
+        ]
+      },
+      {
+        "name": "H10k_minus_H5k",
+        "terms": [
+          {"weight": 0.5, "where": {"redundancy_max_steps": 4, "half_life_events": 10000}},
+          {"weight": -0.5, "where": {"redundancy_max_steps": 4, "half_life_events": 5000}},
+          {"weight": 0.5, "where": {"redundancy_max_steps": 8, "half_life_events": 10000}},
+          {"weight": -0.5, "where": {"redundancy_max_steps": 8, "half_life_events": 5000}}
+        ]
+      },
+      {
+        "name": "interaction",
+        "terms": [
+          {"weight": 1.0, "where": {"redundancy_max_steps": 8, "half_life_events": 10000}},
+          {"weight": -1.0, "where": {"redundancy_max_steps": 4, "half_life_events": 10000}},
+          {"weight": -1.0, "where": {"redundancy_max_steps": 8, "half_life_events": 5000}},
+          {"weight": 1.0, "where": {"redundancy_max_steps": 4, "half_life_events": 5000}}
+        ]
+      }
+    ]
+  },
+  "telemetry": {
+    "protocol": "dg-place-fields-v1",
+    "target_frames": [
+      5000000,
+      25000000,
+      50000000,
+      75000000,
+      100000000
+    ],
+    "trajectory_seed": 99,
+    "terminal_seeds": [
+      8,
+      123
+    ],
+    "label_template": "{condition}__s{seed}__f{checkpoint_frames}",
+    "manifest_fields": {
+      "family": "{base_family}",
+      "schedule": "sim",
+      "feedback": "encourage",
+      "half_life": "{half_life_events}"
+    }
+  }
+}
