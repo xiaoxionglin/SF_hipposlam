@@ -1,5 +1,10 @@
 # Prediction and planning student starter
 
+For flag-enabled training, start with the
+[integrated DG world model](sf_xxl/dmlab/WORLD_MODEL.md): append
+`--dg_world_model=true` to the existing HippoSLAM training command. The predictor
+trains alongside PPO and can be edited directly under `sf_xxl/dmlab/`.
+
 The [IntrMotiv prediction starter](exports/intrmotiv_prediction_starter/README.md)
 contains reusable predictor components, a runnable example, focused tests, and
 a Sample Factory integration guide for the action-input / world-model project.
