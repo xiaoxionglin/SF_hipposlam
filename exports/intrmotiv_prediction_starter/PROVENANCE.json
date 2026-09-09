@@ -1,0 +1,36 @@
+{
+  "source": "NEMO2 SF_hipposlam/sf_working_directories/IntrMotiv",
+  "inspected_date": "2026-09-10",
+  "repository_head": "636be3a5",
+  "working_tree_dirty": true,
+  "note": "Per-file hashes identify the inspected content; HEAD alone does not. This is a selected component extraction, not a repository release.",
+  "source_sha256": {
+    "dmlab/ca3_memory.py": "cb5ea1059eb124a1f92baca91ad79be87c67268942e926fab30575665d3e4a94",
+    "dmlab/contextual_dg.py": "6f8ca9107c6302efee6ebddf00cc3c7f85c88023525bcc83904d756181fb5f44",
+    "dmlab/custom_core.py": "55d75d008d5a3926a24c6994fd46be744c8412ef2949729ad62e5054f5edaa82",
+    "dmlab/custom_encoder.py": "3363e4167d333d8f6fe38dcf6196e94f3b64bb78a19fbb85f001afab1d6ed3f5",
+    "dmlab/custom_learner.py": "1e215485571ad8f5bc555b7399fb6b8ca71bfef3d4a7bbc8559efcafed3dbe05",
+    "dmlab/custom_params.py": "14ab520456b3418b74eac3981ee0744aef32d93c9bf80963b7e7b91c6d22ccdd",
+    "dmlab/dmlab_gym.py": "a75665a83046fcec7011d7744cc5fe148005be2ebbaa08da65108dcaf0e9e743",
+    "tests/test_ca3_memory.py": "6793776ffd36bc164e9d345e1be1756bad8fff8e33858e076543d06662b6e005",
+    "tests/test_contextual_dg.py": "b24c09ec8aa495caca91849fdd4e1c145153d2843bae8839703203d57bc59fe5",
+    "tests/test_core_logic_repairs.py": "dddac13201eb6e2d170129398a98e2f887a69b0dcedd14cedc9857cc8aeb2882",
+    "tests/test_hrl_controllable_graph.py": "5143334a7bdba845ef8c8e129594604e467bfe3a1a0bccd1a03640972cf87b12",
+    "tests/test_update_contract.py": "1944a9ded9811608602bd8d589458dcf9475dd9e4472c9050696234bcee0d243"
+  },
+  "verbatim": [
+    "intrmotiv_transfer/contextual_dg.py"
+  ],
+  "extracted_verbatim": {
+    "intrmotiv_transfer/shadow.py": "dmlab/custom_core.py:CA3TargetPredictor"
+  },
+  "adapted_tests": {
+    "tests/test_upstream_predictors.py": "tests/test_contextual_dg.py: standalone tests before _core_cfg; imports changed and trailing blank lines removed"
+  },
+  "new_adapters": [
+    "intrmotiv_transfer/state.py",
+    "intrmotiv_transfer/labels.py",
+    "intrmotiv_transfer/losses.py"
+  ],
+  "scope": "No graph manager, intrinsic rewards, Sample Factory fork, world-model planning algorithm, or student repository modifications."
+}

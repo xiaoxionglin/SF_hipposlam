@@ -1,3 +1,10 @@
+# Prediction and planning student starter
+
+The [IntrMotiv prediction starter](exports/intrmotiv_prediction_starter/README.md)
+contains reusable predictor components, a runnable example, focused tests, and
+a Sample Factory integration guide for the action-input / world-model project.
+It is also available as a [standalone ZIP](exports/intrmotiv_prediction_starter_v0.1.0.zip).
+
 # quick start
 
 
@@ -41,4 +48,3 @@ https://openreview.net/forum?id=li1vfqDzRD
 
 
 code related to the paper is in the folder [sf_xxl](sf_xxl)
-
