@@ -2610,7 +2610,7 @@ Run Tensorboard to monitor any running or finished experiments:</p>
 </code></pre></div>
 <h2 id="monitoring-multiple-experiments">Monitoring multiple experiments<a class="headerlink" href="#monitoring-multiple-experiments" title="Permanent link">&para;</a></h2>
 <p>Additionally, we provide a helper script that has nice command line interface to monitor select experiment folders using wildcards:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>sample_factory.utils.tb<span class="w"> </span>--dir<span class="o">=</span>./train_dir<span class="w"> </span><span class="s1">&#39;*name_mask*&#39;</span><span class="w"> </span><span class="s1">&#39;*another*mask*&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>sample_factory.utils.tb<span class="w"> </span>--dir<span class="o">=</span>./train_dir<span class="w"> </span><span class="s1">'*name_mask*'</span><span class="w"> </span><span class="s1">'*another*mask*'</span>
 </code></pre></div>
 <p>Here <code>--dir</code> parameter is the root directory with experiments, and the script will recursively search for experiment folders that match the masks.</p>
 <h2 id="monitoring-experiments-started-by-the-launcher">Monitoring experiments started by the Launcher<a class="headerlink" href="#monitoring-experiments-started-by-the-launcher" title="Permanent link">&para;</a></h2>

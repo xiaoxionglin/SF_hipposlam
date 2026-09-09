@@ -2635,10 +2635,10 @@
 <p><a href="https://envpool.readthedocs.io/en/latest/">EnvPool</a> is a C++-based batched environment pool with pybind11 and thread pool. It has high performance (~1M raw FPS with Atari games, ~3M raw FPS with Mujoco simulator).</p>
 <p>We provide examples for envpool for Atari and Mujoco environments. The default parameters provide reasonable training speed, but can be tuning based on your machine configuration to achieve higher throughput.</p>
 <p>To train a model with envpool in the <code>BreakoutNoFrameskip-v4</code> environment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python -m sf_examples.envpool.atari.train_envpool_atari --algo=APPO --env=atari_breakout --experiment=&quot;Experiment Name&quot;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python -m sf_examples.envpool.atari.train_envpool_atari --algo=APPO --env=atari_breakout --experiment="Experiment Name"
 </code></pre></div>
 <p>To visualize the training results, use the <code>enjoy_envpool_atari</code> script:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python -m sf_examples.envpool.atari.enjoy_envpool_atari --algo=APPO --env=atari_breakout --experiment=&quot;Experiment Name&quot;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python -m sf_examples.envpool.atari.enjoy_envpool_atari --algo=APPO --env=atari_breakout --experiment="Experiment Name"
 </code></pre></div>
 <p>Multiple experiments can be run in parallel with the launcher module. <code>atari_envs</code> is an example launcher script that runs atari envs with 4 seeds. </p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python -m sample_factory.launcher.run --run=sf_examples.envpool.atari.experiments.atari_envs --backend=processes --max_parallel=8  --pause_between=1 --experiments_per_gpu=10000 --num_gpus=1
