@@ -610,7 +610,7 @@ class BaseLearner(Configurable):
         assert core_outputs.shape[0] == minibatch_size
 
         # Optional model-specific replay context. The default path is a no-op;
-        # IntrMotiv uses this to restore the target selected during sampling.
+        # custom learners can use it to restore conditions selected during sampling.
         replay_override = getattr(self, "_override_core_outputs_for_replay", None)
         if replay_override is not None:
             core_outputs = replay_override(core_outputs, mb)

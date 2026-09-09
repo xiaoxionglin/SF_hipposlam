@@ -193,7 +193,7 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
             unique_cells, entropy, coverage_auc = self._coverage_stats(
                 self.window_cells, self.window_auc_sum, self.window_steps
             )
-            info["intrmotiv_periodic_stats"] = {
+            info["periodic_stats"] = {
                 "intrmotiv/exploration/window/return": float(self.window_return),
                 "intrmotiv/exploration/window/length_frames": float(self.window_frames),
                 "intrmotiv/exploration/window/length_policy_steps": float(self.window_steps),
@@ -205,7 +205,7 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
                 pose_bins, pose_entropy, pose_auc = self._coverage_stats(
                     self.window_pose_cells, self.window_pose_auc_sum, self.window_pose_steps
                 )
-                info["intrmotiv_periodic_stats"].update(
+                info["periodic_stats"].update(
                     {
                         "intrmotiv/exploration/window/pose_unique_bins": pose_bins,
                         "intrmotiv/exploration/window/pose_entropy": pose_entropy,
@@ -249,7 +249,7 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
                     info["episode_extra_stats"][f"{level_name_key}_pose_entropy"] = pose_entropy
                     info["episode_extra_stats"][f"{level_name_key}_pose_auc"] = pose_auc
             if self.action_path_integration and len(self.actual_positions) == len(self.command_positions):
-                periodic = info.setdefault("intrmotiv_periodic_stats", {})
+                periodic = info.setdefault("periodic_stats", {})
                 periodic["intrmotiv/path/telemetry_error"] = similarity_trajectory_error(
                     self.command_positions, self.actual_positions
                 )

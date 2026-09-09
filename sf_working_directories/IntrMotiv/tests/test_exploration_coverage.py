@@ -105,10 +105,10 @@ def test_nonterminal_exploration_window_does_not_reset_environment_state():
     env.reset()
     _, _, terminated, _, first = env.step(0)
     assert not terminated
-    assert "intrmotiv_periodic_stats" not in first
+    assert "periodic_stats" not in first
     _, _, terminated, _, second = env.step(0)
     assert not terminated
-    stats = second["intrmotiv_periodic_stats"]
+    stats = second["periodic_stats"]
     assert stats["intrmotiv/exploration/window/length_policy_steps"] == 2.0
     assert stats["intrmotiv/exploration/window/length_frames"] == 16.0
     assert stats["intrmotiv/exploration/window/coverage_unique_cells"] == 2.0

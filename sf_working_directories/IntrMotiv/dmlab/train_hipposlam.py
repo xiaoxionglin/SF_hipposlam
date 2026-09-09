@@ -96,6 +96,13 @@ def initialize_level_cache(cfg: Config, mp_ctx: BaseContext) -> Optional[DmlabLe
 
 
 def maybe_overwrite_rnn_size(cfg):
+    cfg.extra_policy_output_shapes = (
+        (("dg_activity", [int(cfg.Hippo_n_feature)]),)
+        if getattr(cfg, "online_spatial_telemetry", False)
+        else ()
+    )
+    cfg.wandb_step_metric_namespaces = ("intrmotiv",)
+
     if getattr(cfg, "extra_decoder_loss", False):
         raise ValueError(
             "extra_decoder_loss is disabled: its historical objective had the wrong sign and must be repaired "

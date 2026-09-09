@@ -225,7 +225,7 @@ class BatchedVectorEnvRunner(VectorEnvRunner):
         # observable through the existing episodic-statistics channel.
         if isinstance(infos, (list, tuple)):
             for info in infos:
-                periodic = info.pop("intrmotiv_periodic_stats", None)
+                periodic = info.pop("periodic_stats", None)
                 if periodic is not None:
                     reports.append({EPISODIC: periodic, POLICY_ID_KEY: self.policy_id})
         if num_dones <= 0:

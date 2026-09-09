@@ -46,6 +46,12 @@ legacy. Obsidian vault synchronization does not commit this model repository.
 The September 9, 2026 baseline is on
 `codex/intrmotiv-nemo2-baseline-20260909` in
 `https://github.com/xiaoxionglin/SF_hipposlam`.
+The reviewed integration branch intended to become the next `master` is
+`codex/intrmotiv-integration-20260909`. It retains the complete IntrMotiv
+runtime and canonical study workflow while excluding unrelated Jannek changes,
+duplicate top-level IntrMotiv tests, and a hardcoded legacy Slurm template.
+Shared Sample Factory extensions use generic opt-in contracts; IntrMotiv sets
+those contracts in `maybe_overwrite_rnn_size`.
 
 Before a new study or implementation change, inspect `git status --short --branch`
 and `git log -5 --oneline` here. Commit each coherent, validated change with
@@ -63,15 +69,15 @@ copies remain on disk but are ignored. The small, documented archive under
 `hpc_runs/source_snapshots/` is retained as historical study provenance; it is
 not the current runtime.
 
-The September baseline passed 415 CPU tests (29 deprecation warnings) with:
+The cleaned integration branch passed 333 IntrMotiv, workflow, and launcher
+tests (23 deprecation warnings) with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   /home/fr/fr_xl1014/.conda/envs/SFgit/bin/python -m pytest -q \
   --import-mode=importlib -p no:cacheprovider \
   sf_working_directories/IntrMotiv/tests hpc_runs/test*.py \
-  tests/test_launcher.py tests/test_hrl_controllable_graph.py \
-  tests/test_target_control_interventions.py tests/test_topological_frontier.py
+  tests/test_launcher.py
 ```
 
 Use the importlib mode because the test directories contain repeated module
@@ -98,7 +104,7 @@ publish_dir=$(mktemp -d /tmp/intrmotiv-publish.XXXXXX)
 git init --bare "$publish_dir"
 git -C "$publish_dir" fetch git@github.com:xiaoxionglin/SF_hipposlam.git \
   refs/heads/master:refs/heads/master
-branch=codex/intrmotiv-nemo2-baseline-20260909
+branch=codex/intrmotiv-integration-20260909
 git -C "$publish_dir" fetch \
   nemo2:/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam \
   "refs/heads/$branch:refs/heads/$branch"

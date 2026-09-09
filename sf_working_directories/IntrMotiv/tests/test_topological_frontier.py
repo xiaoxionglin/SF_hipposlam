@@ -293,7 +293,7 @@ def test_terminal_path_telemetry_skips_a_stale_position():
     _, _, _, _, info = wrapped.step(0)
     assert len(wrapped.command_positions) == 2
     assert len(wrapped.actual_positions) == 1
-    assert "intrmotiv_periodic_stats" not in info
+    assert "periodic_stats" not in info
 
 
 def test_previous_action_observation_uses_reset_sentinel_then_executed_action():

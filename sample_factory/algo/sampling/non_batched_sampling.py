@@ -557,7 +557,7 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
             actor_state.last_obs = new_obs[agent_i]
             actor_state.update_rnn_state(terminated[agent_i] | truncated[agent_i])
 
-            periodic = infos[agent_i].pop("intrmotiv_periodic_stats", None)
+            periodic = infos[agent_i].pop("periodic_stats", None)
             if periodic is not None:
                 episodic_stats.append({EPISODIC: periodic, POLICY_ID_KEY: actor_state.curr_policy_id})
 

@@ -123,10 +123,16 @@ def test_actor_exports_exact_behavior_time_thresholded_dg_activity():
 
 
 def test_policy_output_contract_adds_dg_only_when_enabled():
-    enabled = SimpleNamespace(double_value=False, online_spatial_telemetry=True, Hippo_n_feature=16)
-    disabled = SimpleNamespace(double_value=False, online_spatial_telemetry=False, Hippo_n_feature=16)
+    enabled = SimpleNamespace(double_value=False, extra_policy_output_shapes=(("dg_activity", [16]),))
+    disabled = SimpleNamespace(double_value=False, extra_policy_output_shapes=())
     assert ("dg_activity", [16]) in policy_output_shapes(enabled, 1, 3)
     assert all(name != "dg_activity" for name, _ in policy_output_shapes(disabled, 1, 3))
+
+
+def test_policy_output_shapes_default_to_standard_value_head():
+    outputs = policy_output_shapes(SimpleNamespace(), 2, 4)
+    assert ("values", []) in outputs
+    assert all(name not in {"values_external", "values_internal"} for name, _ in outputs)
 
 
 def _cfg(root: Path, experiment: str = "batch/run"):

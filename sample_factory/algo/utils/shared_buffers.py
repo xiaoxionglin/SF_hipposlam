@@ -66,7 +66,7 @@ def action_info(env_info: EnvInfo) -> Tuple[int, int]:
 
 def policy_output_shapes(cfg: AttrDict, num_actions, num_action_distribution_parameters) -> List[Tuple[str, List]]:
     # policy outputs, this matches the expected output of the actor-critic
-    if cfg.double_value:
+    if getattr(cfg, "double_value", False):
         policy_outputs = [
             ("actions", [num_actions]),
             ("action_logits", [num_action_distribution_parameters]),
@@ -83,8 +83,7 @@ def policy_output_shapes(cfg: AttrDict, num_actions, num_action_distribution_par
             ("values", []),
             ("policy_version", []),
         ]
-    if getattr(cfg, "online_spatial_telemetry", False):
-        policy_outputs.append(("dg_activity", [int(cfg.Hippo_n_feature)]))
+    policy_outputs.extend(getattr(cfg, "extra_policy_output_shapes", ()))
     return policy_outputs
 
 
