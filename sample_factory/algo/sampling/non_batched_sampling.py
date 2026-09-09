@@ -115,8 +115,8 @@ class ActorState:
         """Called when the new policy is sampled for this actor."""
         self.curr_policy_id = new_policy_id
 
-        # policy change can only happen at the episode boundary so no need to reset rnn state (but I guess does not hurt)
-        self.reset_rnn_state()
+        # A persistent state belongs to the policy parameters that produced it.
+        self.reset_rnn_state(preserve_persistent=False)
 
         self._env_set_curr_policy()
 
@@ -137,8 +137,16 @@ class ActorState:
 
         self.curr_traj_buffer[rollout_step] = data
 
-    def reset_rnn_state(self):
-        self.last_rnn_state[:] = 0.0
+    def reset_rnn_state(self, preserve_persistent: bool = True):
+        persistent_size = 0
+        if preserve_persistent:
+            persistent_size = min(
+                max(0, int(getattr(self.cfg, "rnn_persistent_state_size", 0))), self.last_rnn_state.shape[-1]
+            )
+        if persistent_size == 0:
+            self.last_rnn_state[:] = 0.0
+        else:
+            self.last_rnn_state[:-persistent_size] = 0.0
 
     def curr_actions(self) -> np.ndarray | List | Any:
         """
@@ -548,6 +556,10 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
 
             actor_state.last_obs = new_obs[agent_i]
             actor_state.update_rnn_state(terminated[agent_i] | truncated[agent_i])
+
+            periodic = infos[agent_i].pop("intrmotiv_periodic_stats", None)
+            if periodic is not None:
+                episodic_stats.append({EPISODIC: periodic, POLICY_ID_KEY: actor_state.curr_policy_id})
 
             if episode_report:
                 episodic_stats.append(episode_report)

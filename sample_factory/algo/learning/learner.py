@@ -587,6 +587,7 @@ class BaseLearner(Configurable):
                     done_or_invalid,
                     mb.rnn_states,
                     recurrence,
+                    getattr(self.cfg, "rnn_persistent_state_size", 0),
                 )
             else:
                 rnn_states = mb.rnn_states[::recurrence]
@@ -602,13 +603,21 @@ class BaseLearner(Configurable):
                 core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
 
             del head_outputs
-            if return_outputs[1]:
-                outputs["core_outputs"] = core_outputs
 
         if self.cfg.with_vtrace:
             num_trajectories = minibatch_size // recurrence
             outputs["num_trajectories"] = num_trajectories
         assert core_outputs.shape[0] == minibatch_size
+
+        # Optional model-specific replay context. The default path is a no-op;
+        # IntrMotiv uses this to restore the target selected during sampling.
+        replay_override = getattr(self, "_override_core_outputs_for_replay", None)
+        if replay_override is not None:
+            core_outputs = replay_override(core_outputs, mb)
+        if return_outputs[1]:
+            # Diagnostics and auxiliary objectives must see the same replay
+            # condition that was passed into the policy/value tail.
+            outputs["core_outputs"] = core_outputs
 
         with self.timing.add_time("tail"):
             # calculate policy tail outside of recurrent loop

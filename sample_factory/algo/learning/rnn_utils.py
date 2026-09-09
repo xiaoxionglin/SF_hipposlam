@@ -111,7 +111,7 @@ def _build_pack_info_from_dones(
     return rollout_starts_orig, is_new_episode, select_inds, batch_sizes, sorted_indices
 
 
-def build_rnn_inputs(x, dones_cpu, rnn_states, T: int):
+def build_rnn_inputs(x, dones_cpu, rnn_states, T: int, persistent_state_size: int = 0):
     """
     Create a PackedSequence input for an RNN such that each
     set of steps that are part of the same episode are all part of
@@ -149,9 +149,19 @@ def build_rnn_inputs(x, dones_cpu, rnn_states, T: int):
     # we ensure no information transfer across episode boundaries.
     rnn_states = rnn_states.index_select(0, rollout_starts)
     is_same_episode = (1 - is_new_episode.view(-1, 1)).index_select(0, rollout_starts)
-    rnn_states = rnn_states * is_same_episode
+    rnn_states = reset_rnn_states_on_episode_boundary(rnn_states, is_same_episode, persistent_state_size)
 
     return x_seq, rnn_states, inverted_select_inds
+
+
+def reset_rnn_states_on_episode_boundary(rnn_states, is_same_episode, persistent_state_size: int = 0):
+    """Zero terminal-reset state while retaining an opt-in persistent suffix."""
+    persistent_state_size = min(max(0, int(persistent_state_size)), rnn_states.size(-1))
+    if persistent_state_size == 0:
+        return rnn_states * is_same_episode
+    reset_mask = is_same_episode.expand_as(rnn_states).clone()
+    reset_mask[:, -persistent_state_size:] = 1.0
+    return rnn_states * reset_mask
 
 
 def build_core_out_from_seq(x_seq: PackedSequence, inverted_select_inds):
