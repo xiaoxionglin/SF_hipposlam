@@ -83,3 +83,29 @@ and the documented source-archive SHA-256. Direct inspection on NEMO2 avoided
 a broad export of untracked files; `rg` was unavailable there, so use Python or
 `grep` for remote inspections. No runtime algorithm was changed while organizing
 this baseline.
+
+### Publishing when NEMO2 lacks GitHub credentials
+
+The initial baseline push over NEMO2 HTTPS failed with `could not read Username`.
+The desktop's existing GitHub SSH access worked. Keep NEMO2 authoritative: use
+a temporary bare Git repository on the desktop to fetch the already reviewed
+NEMO2 branch and push it with desktop SSH. This does not involve the legacy
+desktop model working tree or transfer untracked NEMO2 files.
+
+```bash
+# Run on the desktop; choose a fresh temporary directory.
+publish_dir=$(mktemp -d /tmp/intrmotiv-publish.XXXXXX)
+git init --bare "$publish_dir"
+git -C "$publish_dir" fetch git@github.com:xiaoxionglin/SF_hipposlam.git \
+  refs/heads/master:refs/heads/master
+branch=codex/intrmotiv-nemo2-baseline-20260909
+git -C "$publish_dir" fetch \
+  nemo2:/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam \
+  "refs/heads/$branch:refs/heads/$branch"
+git -C "$publish_dir" push git@github.com:xiaoxionglin/SF_hipposlam.git \
+  "refs/heads/$branch:refs/heads/$branch"
+```
+
+For future branches, replace `branch` with the reviewed NEMO2 branch. After
+publishing, fetch that branch from origin on NEMO2, set its upstream, and compare
+HEAD to the remote branch SHA. Never copy tokens or private keys between hosts.
