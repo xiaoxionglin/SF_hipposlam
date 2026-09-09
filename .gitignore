@@ -106,11 +106,15 @@ venv.bak/
 
 _vizdoom.ini
 train_dir/
+# The source checkout may expose workspace storage through compatibility
+# symlinks. Ignore both the directories and the symlink objects themselves.
+train_dir
 train_dir_old/**
 trained_policies/**
 !trained_policies/*.md
 .vis/
 wandb/
+wandb
 **/wandb/
 
 
@@ -166,3 +170,10 @@ slurm_grid
 .obsidian
 private/
 python -m hipposlam_sf.dmlab.txt
+
+# Generated NEMO2 outputs and loose recovery copies (keep source_snapshots).
+/slurm-*.out
+/slurm_intrmotiv_*/
+/hpc_runs/source_backups/
+*.bak_conflict_*
+/sf_working_directories/IntrMotiv/analysis/batch1_stats/

@@ -34,6 +34,16 @@ def num_agents_per_worker(cfg: Config, env_info: EnvInfo) -> int:
 
 
 def prepare_and_normalize_obs(model: Module, obs: TensorDict | Dict[str, Tensor]) -> TensorDict | Dict[str, Tensor]:
+    privileged_keys = frozenset(getattr(model, "privileged_obs_keys", ()))
+    if privileged_keys:
+        # Keep privileged monitoring channels in rollout storage while proving
+        # they are absent before device conversion, normalization, and every
+        # encoder/policy invocation.
+        visible_obs = ((key, value) for key, value in obs.items() if key not in privileged_keys)
+        # TensorDict implements recursive tensor slicing (e.g. ``obs[:, -1]``)
+        # that specialized learners rely on for bootstrap values.  Filtering a
+        # TensorDict into a plain dict silently breaks that contract.
+        obs = TensorDict(visible_obs) if isinstance(obs, TensorDict) else dict(visible_obs)
     for key, x in obs.items():
         obs[key] = ensure_torch_tensor(x).to(model.device_for_input_tensor(key))
     normalized_obs = model.normalize_obs(obs)

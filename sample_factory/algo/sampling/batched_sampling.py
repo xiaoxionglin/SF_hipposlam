@@ -220,6 +220,14 @@ class BatchedVectorEnvRunner(VectorEnvRunner):
         self.curr_episode_len += self.env_info.frameskip if self.cfg.summaries_use_frameskip else 1
 
         reports = []
+        # Environments can emit opt-in fixed windows without declaring done.
+        # This preserves RNN and episode state while making long-running tasks
+        # observable through the existing episodic-statistics channel.
+        if isinstance(infos, (list, tuple)):
+            for info in infos:
+                periodic = info.pop("intrmotiv_periodic_stats", None)
+                if periodic is not None:
+                    reports.append({EPISODIC: periodic, POLICY_ID_KEY: self.policy_id})
         if num_dones <= 0:
             return reports
 
@@ -329,10 +337,20 @@ class BatchedVectorEnvRunner(VectorEnvRunner):
                 policy_id=self.policy_id_buffer,
             )
 
-            # reset next-step hidden states to zero if we encountered an episode boundary
-            # not sure if this is the best practice, but this is what everybody seems to be doing
+            # Reset next-step hidden states at episode boundaries. A small number
+            # of models carry a configured persistent suffix; the default is zero
+            # and therefore preserves the original all-state reset behavior.
             not_done = (1.0 - self.curr_step["dones"].float()).unsqueeze(-1)
-            self.last_rnn_state = self.policy_output_tensors["new_rnn_states"] * not_done
+            new_rnn_state = self.policy_output_tensors["new_rnn_states"]
+            persistent_size = min(
+                max(0, int(getattr(self.cfg, "rnn_persistent_state_size", 0))), new_rnn_state.size(-1)
+            )
+            if persistent_size == 0:
+                self.last_rnn_state = new_rnn_state * not_done
+            else:
+                reset_mask = not_done.expand_as(new_rnn_state).clone()
+                reset_mask[:, -persistent_size:] = 1.0
+                self.last_rnn_state = new_rnn_state * reset_mask
 
             with timing.add_time("process_env_step"):
                 stats = self._process_env_step(rewards_cpu, dones, infos)

@@ -83,6 +83,8 @@ def policy_output_shapes(cfg: AttrDict, num_actions, num_action_distribution_par
             ("values", []),
             ("policy_version", []),
         ]
+    if getattr(cfg, "online_spatial_telemetry", False):
+        policy_outputs.append(("dg_activity", [int(cfg.Hippo_n_feature)]))
     return policy_outputs
 
 

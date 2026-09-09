@@ -1,9 +1,11 @@
+import json
 import logging
 import shutil
 from os.path import join, split
 
 import numpy as np
 
+import sample_factory.launcher.run_slurm as slurm_launcher
 from sample_factory.launcher.run import launcher_argparser
 from sample_factory.launcher.run_description import Experiment, ParamGrid, ParamList, RunDescription
 from sample_factory.launcher.run_processes import run
@@ -43,6 +45,67 @@ class TestParams:
 
 
 class TestLauncher:
+    def test_slurm_print_only_metadata_and_template_fields(self, tmp_path):
+        template = tmp_path / "template.sh"
+        template.write_text(
+            "#!/bin/bash\n# name=$NAME cpu=$CPU memory=$MEMORY timeout=$TIMEOUT\n$CMD\n",
+            encoding="utf-8",
+        )
+        workdir = tmp_path / "slurm"
+        train_dir = tmp_path / "train"
+        args_list = [
+            "--backend=slurm",
+            f"--train_dir={train_dir}",
+            f"--slurm_workdir={workdir}",
+            f"--slurm_log_dir={workdir / 'logs'}",
+            f"--slurm_sbatch_template={template}",
+            "--slurm_gpus_per_job=0",
+            "--slurm_cpus_per_job=40",
+            "--slurm_memory=80G",
+            "--slurm_timeout=12:30:00",
+            "--slurm_print_only=True",
+        ]
+        args = launcher_argparser(args_list).parse_args(args_list)
+        description = RunDescription("batch", [Experiment("exp", "echo train", [{}])])
+
+        assert slurm_launcher.run_slurm(description, args) == 0
+        assert not train_dir.exists()
+        generated = (workdir / "sbatch_00_exp.sh").read_text(encoding="utf-8")
+        assert "name=00_exp cpu=40 memory=80G timeout=12:30:00" in generated
+        assert "echo train --experiment=00_exp" in generated
+        assert (workdir / "jobs.tsv").exists()
+        assert (workdir / "scancel.sh").exists()
+        metadata = json.loads((workdir / "submission.json").read_text(encoding="utf-8"))
+        assert metadata["run_name"] == "batch"
+        assert metadata["jobs"] == [{"job_id": "", "status": "generated", "experiment": "00_exp"}]
+
+    def test_slurm_submission_failure_is_recorded(self, tmp_path, monkeypatch):
+        template = tmp_path / "template.sh"
+        template.write_text("#!/bin/bash\n$CMD\n", encoding="utf-8")
+        workdir = tmp_path / "slurm"
+        args_list = [
+            "--backend=slurm",
+            f"--train_dir={tmp_path / 'train'}",
+            f"--slurm_workdir={workdir}",
+            f"--slurm_sbatch_template={template}",
+            "--slurm_gpus_per_job=0",
+            "--pause_between=0",
+        ]
+        args = launcher_argparser(args_list).parse_args(args_list)
+        description = RunDescription("batch", [Experiment("exp", "echo train", [{}])])
+
+        def fake_run(command, **_kwargs):
+            if command[0] == "git":
+                return slurm_launcher.subprocess.CompletedProcess(command, 0, "test\n", "")
+            return slurm_launcher.subprocess.CompletedProcess(command, 1, "", "scheduler rejected job")
+
+        monkeypatch.setattr(slurm_launcher.subprocess, "run", fake_run)
+        assert slurm_launcher.run_slurm(description, args) == 1
+        jobs = (workdir / "jobs.tsv").read_text(encoding="utf-8")
+        assert "submission_failed" in jobs
+        assert "scheduler rejected job" in jobs
+        assert "# No jobs were submitted." in (workdir / "scancel.sh").read_text(encoding="utf-8")
+
     def test_experiment(self):
         params = ParamGrid([("p1", [3.14, 2.71]), ("p2", ["a", "b", "c"])])
         cmd = "python super_rl.py"

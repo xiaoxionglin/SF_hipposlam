@@ -66,7 +66,9 @@ def main():
     if launcher_cfg.backend == "processes":
         run(run_description, launcher_cfg)
     elif launcher_cfg.backend == "slurm":
-        run_slurm(run_description, launcher_cfg)
+        status = run_slurm(run_description, launcher_cfg)
+        if status != 0:
+            return ExperimentStatus.FAILURE
     elif launcher_cfg.backend == "ngc":
         run_ngc(run_description, launcher_cfg)
 
