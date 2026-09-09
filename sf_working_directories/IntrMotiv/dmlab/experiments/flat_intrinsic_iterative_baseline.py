@@ -1,0 +1,117 @@
+from sample_factory.launcher.run_description import Experiment, RunDescription
+
+
+BATCH_NAME = "intrmotiv_flat_iterative_baseline_nopbt_20260820"
+SEEDS = [8, 99, 123]
+ENCODER_REWARD_METHODS = ["punish", "encourage", "mean"]
+ITERATIVE_MODES = [("sim", False), ("iter", True)]
+
+BASE_CLI = (
+    "--env=openfield_map2_fixed_loc3_fixedlength_noreward "
+    "--train_for_env_steps=100000000 "
+    "--algo=APPO "
+    "--gamma=0.99 "
+    "--learning_rate=0.0002 "
+    "--exploration_loss_coeff=0.005 "
+    "--value_loss_coeff=0.3 "
+    "--ppo_clip_ratio=0.25 "
+    "--num_workers=32 "
+    "--num_envs_per_worker=2 "
+    "--worker_num_splits=2 "
+    "--num_epochs=1 "
+    "--rollout=64 "
+    "--recurrence=64 "
+    "--batch_size=2048 "
+    "--num_batches_per_epoch=2 "
+    "--decorrelate_experience_max_seconds=120 "
+    "--max_grad_norm=0.0 "
+    "--dmlab_renderer=software "
+    "--dmlab_extended_action_set=False "
+    "--dmlab_reduced_action_set=True "
+    "--dmlab_one_task_per_worker=True "
+    "--dmlab_use_level_cache=True "
+    "--set_workers_cpu_affinity=True "
+    "--force_envs_single_thread=True "
+    "--num_policies=1 "
+    "--with_pbt=False "
+    "--max_policy_lag=35 "
+    "--use_record_episode_statistics=True "
+    "--keep_checkpoints=8 "
+    "--save_every_sec=300 "
+    "--save_milestones_sec=1800 "
+    "--save_best_every_sec=300 "
+    "--save_best_after=1200 "
+    "--save_best_metric=distance_metric "
+    "--decoder_mlp_layers 128 128 "
+    "--env_frameskip=8 "
+    "--core_name=BypassSS "
+    "--DG_name=batchnorm_relu "
+    "--Hippo_n_feature=16 "
+    "--Hippo_L=64 "
+    "--DG_BN_intercept=2.43 "
+    "--depth_sensor=True "
+    "--normalize_input=False "
+    "--encoder_conv_architecture=layer2_resnet18 "
+    "--use_rnn=True "
+    "--rnn_type=gru "
+    "--rnn_size=0 "
+    "--nonlinearity=relu "
+    "--with_wandb=True "
+    "--wandb_user=xiaoxionglin-bernstein-center-freiburg "
+    "--wandb_project=SF_IntrMotiv_FlatBaseline_Iterative "
+    f"--wandb_group={BATCH_NAME} "
+    "--wandb_tags flat_baseline iterative_update nopbt fixed_length "
+    "--benchmark=False "
+    "--with_number_instruction=True "
+    "--number_instruction_coef=9 "
+    "--device=cpu "
+    "--rec_distances=True "
+    "--distance_learning=True "
+    "--masked_distance_matrix=False "
+    "--normalize_advantage=True "
+    "--advantage_reward_source=internal "
+    "--extra_encoder_losses=True "
+    "--metric=sum "
+    "--reward_scale=0.1 "
+    "--double_value=False "
+    "--reset_critic=False "
+    "--reset_decoder=False "
+    "--encoder_grad_coeff=1 "
+    "--encoder_batch_loss=True "
+    "--encoder_multi_activation_loss=False "
+    "--encoder_unused_sequence_loss=False "
+    "--extra_decoder_loss=False "
+    "--encoder_population_usage_loss=False "
+    "--encoder_density_loss_coeff=0.0 "
+    "--encoder_collision_loss_coeff=0.0 "
+    "--hrl_controllable_graph=False "
+    "--ca3_predictor_shadow=False "
+    "--exploration_coverage_telemetry=True "
+    "--exploration_coverage_grid_size=100 "
+)
+
+
+def experiment(seed: int, encoder_method: str, mode_tag: str, iterative: bool) -> Experiment:
+    name = f"FB_F16_L64_T243_ER{encoder_method}_{mode_tag}_S{seed}"
+    cli = (
+        BASE_CLI
+        + f"--seed={seed} "
+        + f"--encoder_reward_method={encoder_method} "
+        + f"--iterative_update={iterative} "
+        + "--iterative_initial_encoder_steps=128 "
+        + "--iterative_decoder_steps=512 "
+        + "--iterative_encoder_steps=128 "
+        + "--iterative_start_phase=decoder "
+    )
+    return Experiment(name, cli, [{}])
+
+
+RUN_DESCRIPTION = RunDescription(
+    BATCH_NAME,
+    experiments=[
+        experiment(seed, encoder_method, mode_tag, iterative)
+        for seed in SEEDS
+        for encoder_method in ENCODER_REWARD_METHODS
+        for mode_tag, iterative in ITERATIVE_MODES
+    ],
+)
