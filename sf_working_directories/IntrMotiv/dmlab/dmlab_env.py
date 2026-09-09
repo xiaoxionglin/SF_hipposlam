@@ -10,7 +10,7 @@ from sample_factory.algo.utils.misc import EPISODIC
 from sample_factory.envs.env_wrappers import PixelFormatChwWrapper, RecordingWrapper
 from sample_factory.utils.typing import PolicyID
 from sample_factory.utils.utils import log, static_vars
-from sf_working_directories.jannek.dmlab.dmlab30 import (
+from sf_working_directories.IntrMotiv.dmlab.dmlab30 import (
     DMLAB30_LEVELS,
     DMLAB30_LEVELS_THAT_USE_LEVEL_CACHE,
     HUMAN_SCORES,
@@ -18,9 +18,9 @@ from sf_working_directories.jannek.dmlab.dmlab30 import (
     RANDOM_SCORES,
     dmlab30_level_name_to_level,
 )
-from sf_working_directories.jannek.dmlab.dmlab_gym import DmlabGymEnv, DmlabGymEnv_custom, dmlab_level_to_level_name
-from sf_working_directories.jannek.dmlab.dmlab_level_cache import DmlabLevelCache, DmlabLevelCaches
-from sf_working_directories.jannek.dmlab.wrappers.reward_shaping import (
+from sf_working_directories.IntrMotiv.dmlab.dmlab_gym import DmlabGymEnv, DmlabGymEnv_custom, dmlab_level_to_level_name
+from sf_working_directories.IntrMotiv.dmlab.dmlab_level_cache import DmlabLevelCache, DmlabLevelCaches
+from sf_working_directories.IntrMotiv.dmlab.wrappers.reward_shaping import (
     RAW_SCORE_SUMMARY_KEY_SUFFIX,
     DmlabRewardShapingWrapper,
 )
@@ -43,6 +43,15 @@ DMLAB_ENVS = [
     DmLabSpec("openfield_map2_fixed_loc2", "hippodunk/openfield_map2_fixed_loc2"),
     DmLabSpec("openfield_map2_fixed_loc3", "openfield_map2_fixed_loc3"),
     DmLabSpec("openfield_map2_fixed_loc3_noreward", "openfield_map2_fixed_loc3_noreward"),
+    DmLabSpec(
+        "openfield_map2_fixed_loc3_fixedlength_noreward",
+        "openfield_map2_fixed_loc3_fixedlength_noreward",
+    ),
+    DmLabSpec(
+        "openfield_map2_fixed_loc3_longepisode_noreward",
+        "openfield_map2_fixed_loc3_fixedlength_noreward",
+        extra_cfg={"episodeLengthSeconds": "36000"},
+    ),
     DmLabSpec("dmlab_benchmark", "contributed/dmlab30/rooms_collect_good_objects_train"),
     # train a single agent for all 30 DMLab tasks
     DmLabSpec("dmlab_30", [dmlab30_level_name_to_level(lvl) for lvl in DMLAB30_LEVELS]),
@@ -157,6 +166,12 @@ def make_dmlab_env_impl(
         reduced_action_set=cfg.dmlab_reduced_action_set,
         with_number_instruction=cfg.with_number_instruction,
         with_pos_obs=cfg.with_pos_obs,
+        with_pos_telemetry=cfg.exploration_coverage_telemetry,
+        with_online_spatial_telemetry=getattr(cfg, "online_spatial_telemetry", True),
+        action_path_integration=(
+            getattr(cfg, "hrl_action_path_integration", False)
+            or getattr(cfg, "dg_context_history", "ca3") == "ca3_action"
+        ),
     )
 
     if env_config and "env_id" in env_config:
@@ -168,7 +183,14 @@ def make_dmlab_env_impl(
     if cfg.pixel_format == "CHW":
         env = PixelFormatChwWrapper(env)
 
-    env = DmlabRewardShapingWrapper(env)
+    env = DmlabRewardShapingWrapper(
+        env,
+        coverage_telemetry=cfg.exploration_coverage_telemetry,
+        coverage_grid_size=cfg.exploration_coverage_grid_size,
+        coverage_heading_bin_degrees=getattr(cfg, "exploration_heading_bin_degrees", 15.0),
+        exploration_window_steps=getattr(cfg, "exploration_window_steps", 0),
+        action_path_integration=getattr(cfg, "hrl_action_path_integration", False),
+    )
     return env
 
 
