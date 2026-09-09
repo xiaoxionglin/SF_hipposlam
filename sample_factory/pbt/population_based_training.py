@@ -132,14 +132,14 @@ class PopulationBasedTraining(AlgoObserver, EventLoopObject):
         if cfg.pbt_optimize_gamma:
             HYPERPARAMS_TO_TUNE.add("gamma")
 
-        if cfg.DG_lr:
+        if getattr(cfg, "DG_lr", None):
             HYPERPARAMS_TO_TUNE.add("DG_lr")
 
-        if cfg.DG_temperature:
+        if getattr(cfg, "DG_temperature", None):
             HYPERPARAMS_TO_TUNE.add("DG_temperature")
             SPECIAL_PERTURBATION["DG_temperature"] = perturb_one_way_down
 
-        if cfg.head_l1_coef:
+        if getattr(cfg, "head_l1_coef", 0.0):
             log.info("using L1 penalization for head output")
             HYPERPARAMS_TO_TUNE.add("head_l1_coef")
 

@@ -22,7 +22,7 @@ _nethack_deps = [
 ]
 _envpool_deps = ["envpool"]
 _pettingzoo_deps = ["pettingzoo[classic]"]
-_onnx_deps = ["onnx", "onnxruntime"]
+_onnx_deps = ["onnx", "onnxruntime", "onnxscript"]
 
 _docs_deps = [
     "mkdocs-material",

@@ -4,89 +4,36 @@ on:
   push:
     branches:
     - master
-    - sf2
   pull_request:
     branches:
     - master
-    - sf2
 
 jobs:
-  run-tests-ubuntu:
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.9', '3.10', '3.11']
-        os: ['ubuntu-latest']
-    runs-on: ${{ matrix.os }}
+  run-tests:
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python
-      uses: actions/setup-python@v3
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
-    - name: Add conda to system path
+        python-version: "3.10"
+        cache: pip
+    - name: Install project and test dependencies
       run: |
-        # $CONDA is an environment variable pointing to the root of the miniconda directory
-        echo $CONDA/bin >> $GITHUB_PATH
-    - name: Install conda env & dependencies
+        python -m pip install --upgrade pip
+        python -m pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+        python -m pip install -e '.[onnx]' pytest==7.4.4
+    - name: Run compatibility pre-checks
+      run: python -m pytest -q tests/test_precheck.py tests/algo/test_pbt.py
+    - name: Run portable Sample Factory tests
       run: |
-       conda install python=${{ matrix.python-version }}
-       pip install -e '.[atari, mujoco, envpool, pettingzoo, onnx]'
-       conda list
-    - name: Install test dependencies
-      run: |
-        pip install pytest
-    - name: Run Pre-check
-      uses: nick-fields/retry@v2
-      with:
-        timeout_minutes: 10
-        max_attempts: 5
-        command: pytest -s tests/test_precheck.py & pytest -s tests/algo/test_pbt.py
-    - name: Run tests
-      run: |
-        # run all tests
-        pytest -s -k "not torch_tensor_share"
-
-  run-tests-mac:
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.9', '3.10', '3.11']
-        os: ['macos-latest']
-    runs-on: ${{ matrix.os }}
-    steps:
-    - uses: actions/checkout@v3
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v2
-      with:
-        auto-update-conda: true
-        python-version: ${{ matrix.python-version }}
-        activate-environment: myenv
-        auto-activate-base: true
-        miniconda-version: "latest"  # Ensure Miniconda is downloaded and installed
-    - name: Set up Python
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Add conda to system path
-      run: |
-        # $CONDA is an environment variable pointing to the root of the miniconda directory
-        echo $CONDA/bin >> $GITHUB_PATH
-    - name: Install conda env & dependencies
-      run: |
-       conda install python=${{ matrix.python-version }}
-       pip install -e '.[atari, mujoco, pettingzoo, onnx]'
-       conda list
-    - name: Install test dependencies
-      run: |
-        pip install pytest
-    - name: Run Pre-check
-      uses: nick-fields/retry@v2
-      with:
-        timeout_minutes: 10
-        max_attempts: 5
-        command: pytest -s tests/test_precheck.py & pytest -s tests/algo/test_pbt.py
-    - name: Run tests
-      run: |
-        # run all tests
-        pytest -s -k "not torch_tensor_share"
+        python -m pytest -q \
+          tests/algo \
+          tests/envs/tuple_action_envs \
+          tests/examples \
+          tests/test_launcher.py \
+          tests/test_utils.py \
+          --ignore=tests/algo/test_model.py \
+          --ignore=tests/algo/test_pbt.py \
+          -k "not torch_tensor_share"
+    - name: Run declarative IntrMotiv workflow tests
+      run: python -m pytest -q hpc_runs/test_*.py

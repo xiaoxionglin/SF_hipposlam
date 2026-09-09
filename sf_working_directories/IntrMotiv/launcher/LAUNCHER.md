@@ -70,6 +70,14 @@ isort cover all Python source. Flake8 excludes the inherited
 `sf_xxl/` trees; maintain new shared, `hpc_runs/`, and IntrMotiv code without
 adding further broad exclusions.
 
+GitHub's core test and coverage workflows mirror the NEMO2 runtime with Ubuntu
+and Python 3.10. They install the base package plus ONNX support and run tests
+that do not require licensed ROMs, proprietary simulators, GPUs, or a display.
+Simulator integration remains covered by the NEMO2 suite below, where the
+production environment and DeepMind Lab build are available. Keep dependency
+installation separate from these simulator requirements so hosted package or
+runner changes do not masquerade as model-code failures.
+
 Keep model source, tests, declarative studies, evaluation scripts, and launcher
 code in Git. Keep checkpoints, rollouts, caches, logs, and generated submission
 folders in the allocated workspace. Loose source backups and conflict-recovery

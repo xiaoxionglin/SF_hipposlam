@@ -10,37 +10,30 @@ on:
 
 jobs:
   run-coverage:
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [3.9]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python
-      uses: actions/setup-python@v3
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
-    - name: Add conda to system path
+        python-version: "3.10"
+        cache: pip
+    - name: Install project and coverage dependencies
       run: |
-        # $CONDA is an environment variable pointing to the root of the miniconda directory
-        echo $CONDA/bin >> $GITHUB_PATH
-    - name: Install conda env & dependencies
+        python -m pip install --upgrade pip
+        python -m pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+        python -m pip install -e '.[onnx]' pytest==7.4.4 pytest-cov
+    - name: Generate Sample Factory coverage report
       run: |
-        conda install python=${{ matrix.python-version }}
-        pip install -e '.[atari, mujoco, envpool, pettingzoo, onnx]'
-        conda list
-    - name: Install codecov dependencies
-      run: |
-        pip install pytest
-        pip install pytest-cov
-    - name: Generate coverage report
-      run: |
-        pytest --cov=./ --cov-config=./.core-coveragerc --cov-report=xml -v
-        ls -al
+        python -m pytest --cov=sample_factory --cov-config=.core-coveragerc --cov-report=xml -q \
+          tests/algo \
+          tests/envs/tuple_action_envs \
+          tests/examples \
+          tests/test_launcher.py \
+          tests/test_utils.py \
+          --ignore=tests/algo/test_model.py \
+          -k "not torch_tensor_share"
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v5
       with:
-        files: /home/runner/work/sample-factory/sample-factory/coverage.xml
+        files: coverage.xml
         verbose: true

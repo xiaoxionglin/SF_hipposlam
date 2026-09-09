@@ -1,60 +1,12 @@
-# from typing import Dict
+"""Compatibility aliases for the model-context API.
 
-# from sample_factory.model.model_factory import ModelFactory
-# from sample_factory.algo.learning.learner_factory import LearnerFactory
-# from sample_factory.utils.typing import CreateEnvFunc
+Older examples and tests imported these helpers from ``context``. Model
+registration moved to ``model_context``; keep the old imports working while
+callers migrate.
+"""
 
+from sample_factory.algo.utils.model_context import global_model_factory, reset_global_model_context
 
-# class SampleFactoryContext:
-#     def __init__(self):
-#         self.env_registry = dict()
-#         self.model_factory = ModelFactory()
-#         self.learner_factory = LearnerFactory()
+reset_global_context = reset_global_model_context
 
-
-# GLOBAL_CONTEXT = None
-
-
-# def sf_global_context() -> SampleFactoryContext:
-#     global GLOBAL_CONTEXT
-#     if GLOBAL_CONTEXT is None:
-#         GLOBAL_CONTEXT = SampleFactoryContext()
-#     return GLOBAL_CONTEXT
-
-
-# def set_global_context(ctx: SampleFactoryContext):
-#     global GLOBAL_CONTEXT
-#     GLOBAL_CONTEXT = ctx
-
-
-# def reset_global_context():
-#     """
-#     Most useful in tests, call this after any part of the global context has been modified
-#     by a test in any way.
-#     """
-#     global GLOBAL_CONTEXT
-#     GLOBAL_CONTEXT = SampleFactoryContext()
-
-
-# def global_env_registry() -> Dict[str, CreateEnvFunc]:
-#     """
-#     :return: global env registry
-#     :rtype: EnvRegistry
-#     """
-#     return sf_global_context().env_registry
-
-
-# def global_model_factory() -> ModelFactory:
-#     """
-#     :return: global model factory
-#     :rtype: ModelFactory
-#     """
-#     return sf_global_context().model_factory
-
-
-# def global_learner_factory() -> LearnerFactory:
-#     """
-#     :return: global learner factory
-#     :rtype: LearnerFactory
-#     """
-#     return sf_global_context().learner_factory
+__all__ = ["global_model_factory", "reset_global_context"]
