@@ -102,6 +102,7 @@ def maybe_overwrite_rnn_size(cfg):
         else ()
     )
     cfg.wandb_step_metric_namespaces = ("intrmotiv",)
+    cfg.head_l1_size = int(cfg.Hippo_n_feature)
 
     if getattr(cfg, "extra_decoder_loss", False):
         raise ValueError(

@@ -482,10 +482,11 @@ class BaseLearner(Configurable):
         return kl_old, kl_loss
 
     def _l1_loss(self, head_outputs, valids, num_invalids):
-        if self.cfg.head_l1_coef:
-            # only the first 64 features, assuming bypass
-            l1_loss = self.cfg.head_l1_coef * torch.norm(
-                masked_select(head_outputs[:, : getattr(self.cfg, "Hippo_n_feature", 64)], valids, num_invalids), p=1
+        coefficient = getattr(self.cfg, "head_l1_coef", 0.0)
+        if coefficient:
+            feature_count = min(int(getattr(self.cfg, "head_l1_size", head_outputs.shape[-1])), head_outputs.shape[-1])
+            l1_loss = coefficient * torch.norm(
+                masked_select(head_outputs[:, :feature_count], valids, num_invalids), p=1
             )
         else:
             l1_loss = torch.zeros((), device=head_outputs.device)
