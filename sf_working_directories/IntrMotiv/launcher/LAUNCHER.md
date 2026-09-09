@@ -62,6 +62,14 @@ matches `git ls-remote origin refs/heads/$(git branch --show-current)` after
 pushing. Do not assume vault sync or a clean tracked-file diff captures new files:
 always inspect untracked paths too.
 
+Before pushing Python changes, run `pre-commit run --all-files`. The GitHub
+workflow deliberately checks the complete tree on every push, so running only
+against staged files can miss an existing repository-wide failure. Black and
+isort cover all Python source. Flake8 excludes the inherited
+`sf_working_directories/default/`, `sf_working_directories/jannek/`, and
+`sf_xxl/` trees; maintain new shared, `hpc_runs/`, and IntrMotiv code without
+adding further broad exclusions.
+
 Keep model source, tests, declarative studies, evaluation scripts, and launcher
 code in Git. Keep checkpoints, rollouts, caches, logs, and generated submission
 folders in the allocated workspace. Loose source backups and conflict-recovery
