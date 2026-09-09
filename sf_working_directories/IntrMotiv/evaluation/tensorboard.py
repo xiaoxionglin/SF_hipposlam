@@ -110,9 +110,7 @@ def parse_event_file(path: Path, batch_name: str, target_env_steps: int) -> dict
 
 def load_batches(batch_roots: list[Path], target_env_steps: int, workers: int = 1) -> list[dict[str, object]]:
     jobs = [
-        (event_file, root.name, target_env_steps)
-        for root in batch_roots
-        for event_file in discover_event_files(root)
+        (event_file, root.name, target_env_steps) for root in batch_roots for event_file in discover_event_files(root)
     ]
     if workers <= 1 or len(jobs) <= 1:
         return [parse_event_file(*job) for job in jobs]

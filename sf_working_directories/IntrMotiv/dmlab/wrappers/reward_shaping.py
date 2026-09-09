@@ -128,9 +128,7 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
             midpoint = self.command_heading + 0.5 * yaw
             self.command_x += forward * cos(midpoint) - strafe * sin(midpoint)
             self.command_y += forward * sin(midpoint) + strafe * cos(midpoint)
-            self.command_heading = np.arctan2(
-                sin(self.command_heading + yaw), cos(self.command_heading + yaw)
-            )
+            self.command_heading = np.arctan2(sin(self.command_heading + yaw), cos(self.command_heading + yaw))
             self.command_path_length += path_length
             self.command_positions.append((self.command_x, self.command_y))
         obs, rew, terminated, truncated, info = self.env.step(action)
@@ -164,9 +162,7 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
             self.coverage_steps += 1
             self.coverage_auc_sum += len(self.coverage_cells)
             if heading_valid:
-                heading_bin = int(
-                    np.floor((float(pose[2]) % 360.0) / self.coverage_heading_bin_degrees)
-                )
+                heading_bin = int(np.floor((float(pose[2]) % 360.0) / self.coverage_heading_bin_degrees))
                 pose_cell = (*cell, heading_bin)
                 self.pose_cells[pose_cell] = self.pose_cells.get(pose_cell, 0) + 1
                 self.pose_steps += 1

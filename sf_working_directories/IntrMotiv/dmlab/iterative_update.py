@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-
 SIMULTANEOUS = "simultaneous"
 DECODER = "decoder"
 ENCODER = "encoder"

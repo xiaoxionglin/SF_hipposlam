@@ -32,16 +32,16 @@ def rows() -> list[dict[str, object]]:
     for run in STUDY.expand_runs():
         # This historical manifest carries supplemental flags only. New complete
         # studies should use training.mode=sample_factory and the shared adapter.
-        result.append({
-            "name": run.name,
-            "batch": run.batch_name,
-            "backbone": run.base,
-            "seed": run.seed,
-            "args": [arg for arg in run.args if not arg.startswith("--seed=")],
-            "context_controls": [
-                f"original_{run.base}_seed{control_seed}" for control_seed in SEEDS
-            ],
-        })
+        result.append(
+            {
+                "name": run.name,
+                "batch": run.batch_name,
+                "backbone": run.base,
+                "seed": run.seed,
+                "args": [arg for arg in run.args if not arg.startswith("--seed=")],
+                "context_controls": [f"original_{run.base}_seed{control_seed}" for control_seed in SEEDS],
+            }
+        )
     return result
 
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import math
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from statistics import fmean
 from typing import Any, Iterable, Mapping
@@ -64,9 +64,7 @@ def collect_online_records(
         summary_dir = run_dir / ".summary" / "0"
         if not summary_dir.is_dir():
             raise SpecError(f"missing TensorBoard summary directory: {summary_dir}")
-        accumulator = EventAccumulator(
-            str(summary_dir), size_guidance={"scalars": scalar_size_guidance}
-        )
+        accumulator = EventAccumulator(str(summary_dir), size_guidance={"scalars": scalar_size_guidance})
         accumulator.Reload()
         available = set(accumulator.Tags().get("scalars", []))
         if step_tag not in available:
@@ -94,16 +92,12 @@ def collect_online_records(
             if tag not in available:
                 row[metric], row[f"{metric}__n"] = math.nan, 0
             else:
-                row[metric], row[f"{metric}__n"] = mean_in_window(
-                    accumulator.Scalars(tag), low, high
-                )
+                row[metric], row[f"{metric}__n"] = mean_in_window(accumulator.Scalars(tag), low, high)
         for metric, tag in cumulative_metrics.items():
             if tag not in available:
                 row[metric], row[f"{metric}__step"] = math.nan, 0
             else:
-                row[metric], row[f"{metric}__step"] = latest_at_or_before(
-                    accumulator.Scalars(tag), high
-                )
+                row[metric], row[f"{metric}__step"] = latest_at_or_before(accumulator.Scalars(tag), high)
         return row
 
     runs = study.expand_runs()

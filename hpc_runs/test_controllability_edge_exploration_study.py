@@ -1,10 +1,9 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.analysis import linear_contrasts
 from hpc_runs.intrmotiv_study.telemetry import build_intervention_manifest
-
 
 SPEC = Path(__file__).with_name("studies") / "controllability_edge_exploration.study.json"
 
@@ -79,12 +78,14 @@ class ControllabilityStudyTests(unittest.TestCase):
             if run.seed != 99:
                 targets = [75_000_000]
             for target in targets:
-                rows.append({
-                    "condition": run.condition,
-                    "seed": str(run.seed),
-                    "target_frames": str(target),
-                    "checkpoint": f"/work/checkpoint_{target}.pth",
-                })
+                rows.append(
+                    {
+                        "condition": run.condition,
+                        "seed": str(run.seed),
+                        "target_frames": str(target),
+                        "checkpoint": f"/work/checkpoint_{target}.pth",
+                    }
+                )
         selected = build_intervention_manifest(self.study, rows)
         self.assertEqual(len(selected), 48)
         self.assertEqual({row["target_frames"] for row in selected}, {"75000000"})

@@ -13,7 +13,6 @@ from statistics import mean, pstdev
 
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-
 DEFAULT_TAGS = (
     "train/intrinsic_reward_mean",
     "train/reward_for_advantage_mean",
@@ -86,10 +85,7 @@ def population_rows(
         }
         common_step = min(max_steps.values(), default=0)
         for tag in tags:
-            values = [
-                latest_before(policies[policy].get(tag, []), common_step)
-                for policy in sorted(policies)
-            ]
+            values = [latest_before(policies[policy].get(tag, []), common_step) for policy in sorted(policies)]
             values = [value for value in values if value is not None and math.isfinite(value)]
             if values:
                 latest_rows.append(
@@ -105,10 +101,7 @@ def population_rows(
 
         for step in range(step_interval, common_step + 1, step_interval):
             for tag in tags:
-                values = [
-                    latest_before(policies[policy].get(tag, []), step)
-                    for policy in sorted(policies)
-                ]
+                values = [latest_before(policies[policy].get(tag, []), step) for policy in sorted(policies)]
                 values = [value for value in values if value is not None and math.isfinite(value)]
                 if values:
                     curve_rows.append(

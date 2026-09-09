@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from pathlib import Path, PurePosixPath
 import shlex
+from pathlib import Path, PurePosixPath
 
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.spec import SpecError
@@ -34,7 +34,7 @@ def audit_preflight(study, jobs_tsv: Path, require_submitted: bool = False) -> d
         prefix = "00_PF_"
         if not experiment.startswith(prefix):
             raise SpecError(f"unexpected preflight experiment {experiment!r}")
-        run_name = experiment[len(prefix):]
+        run_name = experiment[len(prefix) :]
         if run_name not in expected or run_name in observed:
             raise SpecError(f"unexpected or duplicate preflight run {run_name!r}")
         tokens = shlex.split(row.get("command", ""))

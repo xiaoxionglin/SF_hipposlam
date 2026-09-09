@@ -6,15 +6,15 @@ import re
 from dataclasses import dataclass
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import (
     BATCH_NAME as CORRECTED_CORE_BATCH_NAME,
-    PROJECT,
-    CELLS as CORRECTED_CORE_CELLS,
-    Cell as CorrectedCoreCell,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import CELLS as CORRECTED_CORE_CELLS
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import PROJECT
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import Cell as CorrectedCoreCell
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import (
     make_experiment as make_corrected_core_experiment,
 )
-
 
 BATCH_NAME = "intrmotiv_target_control_her_20260902"
 SEEDS = (8, 99, 123)
@@ -71,11 +71,7 @@ def make_experiment(
         group_suffix=group_suffix,
     )
     group = f"{BATCH_NAME}_{group_suffix}" if group_suffix else BATCH_NAME
-    source_group = (
-        f"{CORRECTED_CORE_BATCH_NAME}_{group_suffix}"
-        if group_suffix
-        else CORRECTED_CORE_BATCH_NAME
-    )
+    source_group = f"{CORRECTED_CORE_BATCH_NAME}_{group_suffix}" if group_suffix else CORRECTED_CORE_BATCH_NAME
     command = source.cmd.replace(f"--wandb_group={source_group}", f"--wandb_group={group}")
     if command == source.cmd:
         raise ValueError("Could not replace corrected-core W&B group")
@@ -91,4 +87,3 @@ RUN_DESCRIPTION = RunDescription(
     BATCH_NAME,
     experiments=[make_experiment(cell, seed) for cell in CELLS for seed in SEEDS],
 )
-

@@ -60,13 +60,23 @@ def test_first_distinct_completion_stops_on_wrong_outcome_but_ignores_source_and
 def test_context_matched_shuffle_uses_hit_mask_and_summary_rates():
     rows = [
         {
-            "source": 0, "target": 1, "source_x_bin": 1, "source_y_bin": 2,
-            "source_orientation_bin": 3, "hit_mask": 1 << 2, "success": 1,
+            "source": 0,
+            "target": 1,
+            "source_x_bin": 1,
+            "source_y_bin": 2,
+            "source_orientation_bin": 3,
+            "hit_mask": 1 << 2,
+            "success": 1,
             "counterfactual_action_sensitivity": 0.2,
         },
         {
-            "source": 0, "target": 2, "source_x_bin": 1, "source_y_bin": 2,
-            "source_orientation_bin": 4, "hit_mask": 0, "success": 0,
+            "source": 0,
+            "target": 2,
+            "source_x_bin": 1,
+            "source_y_bin": 2,
+            "source_orientation_bin": 4,
+            "hit_mask": 0,
+            "success": 0,
             "counterfactual_action_sensitivity": 0.4,
         },
     ]

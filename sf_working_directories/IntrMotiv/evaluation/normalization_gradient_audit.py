@@ -100,33 +100,21 @@ def audit(
         updated_weight = F.normalize(initial_weight - float(learning_rate) * gradient, dim=1)
         with torch.no_grad():
             if mode == "running_current":
-                updated_logits = _normalized_logits(
-                    features, updated_weight, mode, running_mean, running_var, eps
-                )
+                updated_logits = _normalized_logits(features, updated_weight, mode, running_mean, running_var, eps)
             else:
-                updated_logits = _normalized_logits(
-                    features, updated_weight, mode, running_mean, running_var, eps
-                )
+                updated_logits = _normalized_logits(features, updated_weight, mode, running_mean, running_var, eps)
             updated_active = updated_logits > intercept
             row_mean = gradient.mean(dim=0)
             feature_mean = features.mean(dim=0)
-            row_to_feature_mean = [
-                _cosine(row, feature_mean) for row in gradient
-            ]
+            row_to_feature_mean = [_cosine(row, feature_mean) for row in gradient]
         results[mode] = {
             "loss": float(loss.detach()),
             "active_fraction": float((logits.detach() > intercept).float().mean()),
-            "active_mask_agreement_with_legacy": float(
-                ((logits.detach() > intercept) == credit_mask).float().mean()
-            ),
+            "active_mask_agreement_with_legacy": float(((logits.detach() > intercept) == credit_mask).float().mean()),
             "gradient_norm": float(gradient.norm()),
             "gradient_row_pair_cosine_mean": _row_cosine_mean(gradient),
-            "gradient_mean_row_to_feature_mean_cosine": float(
-                torch.tensor(row_to_feature_mean).mean()
-            ),
-            "gradient_abs_row_to_feature_mean_cosine": float(
-                torch.tensor(row_to_feature_mean).abs().mean()
-            ),
+            "gradient_mean_row_to_feature_mean_cosine": float(torch.tensor(row_to_feature_mean).mean()),
+            "gradient_abs_row_to_feature_mean_cosine": float(torch.tensor(row_to_feature_mean).abs().mean()),
             "gradient_common_direction_norm": float(row_mean.norm()),
             "one_step_active_mask_change_fraction": float(
                 (updated_active != (logits.detach() > intercept)).float().mean()
@@ -136,18 +124,14 @@ def audit(
     legacy_logits = logits_by_mode["legacy_batch"]
     legacy_gradient = gradients["legacy_batch"]
     for mode, values in results.items():
-        values["forward_max_abs_difference_from_legacy"] = float(
-            (logits_by_mode[mode] - legacy_logits).abs().max()
-        )
+        values["forward_max_abs_difference_from_legacy"] = float((logits_by_mode[mode] - legacy_logits).abs().max())
         values["gradient_cosine_with_legacy"] = _cosine(gradients[mode], legacy_gradient)
 
     return {
         "feature_count": int(features.size(0)),
         "feature_dimension": int(features.size(1)),
         "feature_mean_norm": float(features.mean(dim=0).norm()),
-        "feature_centered_rms": float(
-            (features - features.mean(dim=0, keepdim=True)).square().mean().sqrt()
-        ),
+        "feature_centered_rms": float((features - features.mean(dim=0, keepdim=True)).square().mean().sqrt()),
         "reference_credit_event_count": int(credit_mask.sum()),
         "intercept": intercept,
         "learning_rate": float(learning_rate),

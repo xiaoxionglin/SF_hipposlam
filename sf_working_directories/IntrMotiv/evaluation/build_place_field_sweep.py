@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 TARGET_FRAMES = (5_000_000, 25_000_000, 50_000_000, 75_000_000, 100_000_000)
 FRAME_RE = re.compile(r"_(\d+)\.pth$")
 
@@ -32,7 +31,16 @@ def flat_conditions() -> list[Condition]:
         for schedule in ("sim", "iter"):
             stem = f"FB_F16_L64_T243_ER{feedback}_{schedule}_S99"
             conditions.append(
-                Condition(f"flat_{feedback}_{schedule}", batch, f"{stem}_", f"00_{stem}", "fixed_flat", schedule, feedback, "none")
+                Condition(
+                    f"flat_{feedback}_{schedule}",
+                    batch,
+                    f"{stem}_",
+                    f"00_{stem}",
+                    "fixed_flat",
+                    schedule,
+                    feedback,
+                    "none",
+                )
             )
     return conditions
 
@@ -44,7 +52,16 @@ def persistence_conditions() -> list[Condition]:
         for schedule in ("sim", "iter"):
             stem = f"GHRL_F16_L64_T243_HL{half_life}_{schedule}_S99"
             conditions.append(
-                Condition(f"global_hrl_hl{half_life}_{schedule}", batch, f"{stem}_", f"00_{stem}", "global_hrl", schedule, "encourage", str(half_life))
+                Condition(
+                    f"global_hrl_hl{half_life}_{schedule}",
+                    batch,
+                    f"{stem}_",
+                    f"00_{stem}",
+                    "global_hrl",
+                    schedule,
+                    "encourage",
+                    str(half_life),
+                )
             )
     # The long/per-stream half-life factor was inert in this batch. Retain its
     # middle setting once per update schedule to compare memory scope, not an
@@ -52,11 +69,24 @@ def persistence_conditions() -> list[Condition]:
     for schedule in ("sim", "iter"):
         stem = f"LHRL_F16_L64_T243_HL10000_{schedule}_S99"
         conditions.append(
-            Condition(f"stream_long_{schedule}", batch, f"{stem}_", f"00_{stem}", "stream_long_hrl", schedule, "encourage", "10000_inert"))
+            Condition(
+                f"stream_long_{schedule}",
+                batch,
+                f"{stem}_",
+                f"00_{stem}",
+                "stream_long_hrl",
+                schedule,
+                "encourage",
+                "10000_inert",
+            )
+        )
     for schedule in ("sim", "iter"):
         stem = f"FLATLONG_F16_L64_T243_{schedule}_S99"
         conditions.append(
-            Condition(f"flat_long_{schedule}", batch, f"{stem}_", f"00_{stem}", "long_flat", schedule, "encourage", "none"))
+            Condition(
+                f"flat_long_{schedule}", batch, f"{stem}_", f"00_{stem}", "long_flat", schedule, "encourage", "none"
+            )
+        )
     return conditions
 
 

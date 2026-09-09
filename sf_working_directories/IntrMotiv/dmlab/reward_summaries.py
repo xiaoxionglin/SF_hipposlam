@@ -2,7 +2,6 @@ from collections import deque
 
 from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, TRAIN_STATS
 
-
 # IntrMotiv metrics are deliberately kept outside Sample Factory's generic
 # train/ namespace. The callback removes these keys before the built-in
 # handler runs, leaving train/ for PPO and framework diagnostics only.

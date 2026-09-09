@@ -13,11 +13,11 @@ from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_output_shapes
 from sample_factory.algo.utils.tensor_dict import TensorDict
 from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import IntrMotivActorCriticSharedWeights
-from sf_working_directories.IntrMotiv.dmlab.custom_params import add_hipposlam_env_args
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
-from sf_working_directories.IntrMotiv.dmlab.online_spatial_telemetry import TrainingSpatialTelemetry
-from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import PolicyControllableGraph
+from sf_working_directories.IntrMotiv.dmlab.custom_params import add_hipposlam_env_args
 from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import PassiveRecruitmentGraph
+from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import PolicyControllableGraph
+from sf_working_directories.IntrMotiv.dmlab.online_spatial_telemetry import TrainingSpatialTelemetry
 from sf_working_directories.IntrMotiv.dmlab.reward_summaries import INTRMOTIV_SUMMARY_TAGS
 
 
@@ -60,10 +60,13 @@ class _PrivacyModel(nn.Module):
 
 def _privacy_pass(pose):
     model = _PrivacyModel()
-    normalized = prepare_and_normalize_obs(model, {
-        "obs": torch.tensor(((1.0, 2.0, 3.0),)),
-        "telemetry_pose": torch.tensor((pose,), dtype=torch.float32),
-    })
+    normalized = prepare_and_normalize_obs(
+        model,
+        {
+            "obs": torch.tensor(((1.0, 2.0, 3.0),)),
+            "telemetry_pose": torch.tensor((pose,), dtype=torch.float32),
+        },
+    )
     outputs = model.outputs(normalized)
     sum(value.sum() for value in outputs).backward()
     return model.seen_keys, tuple(value.detach().clone() for value in outputs), model.weight.grad.detach().clone()
@@ -80,10 +83,15 @@ def test_pose_changes_cannot_change_encoder_dg_logits_reward_or_gradients():
 
 def test_privileged_filter_preserves_tensordict_bootstrap_slicing():
     model = _PrivacyModel()
-    normalized = prepare_and_normalize_obs(model, TensorDict({
-        "obs": torch.ones((2, 3, 3), dtype=torch.float32),
-        "telemetry_pose": torch.zeros((2, 3, 3), dtype=torch.float32),
-    }))
+    normalized = prepare_and_normalize_obs(
+        model,
+        TensorDict(
+            {
+                "obs": torch.ones((2, 3, 3), dtype=torch.float32),
+                "telemetry_pose": torch.zeros((2, 3, 3), dtype=torch.float32),
+            }
+        ),
+    )
 
     assert isinstance(normalized, TensorDict)
     assert tuple(normalized[:, -1]["obs"].shape) == (2, 3)
@@ -171,9 +179,11 @@ def _fill_window(telemetry):
 def test_batch_capture_aligns_pose_dg_actions_and_policy_lag_exactly(tmp_path):
     telemetry = TrainingSpatialTelemetry(_cfg(tmp_path), SimpleNamespace(frameskip=4), 0, 0)
     buff = {
-        "obs": {"telemetry_pose": torch.tensor((
-            ((100.0, 101.0, 1.0), (200.0, 201.0, 2.0), (300.0, 301.0, 3.0), (999.0, 999.0, 9.0)),
-        ))},
+        "obs": {
+            "telemetry_pose": torch.tensor(
+                (((100.0, 101.0, 1.0), (200.0, 201.0, 2.0), (300.0, 301.0, 3.0), (999.0, 999.0, 9.0)),)
+            )
+        },
         "dg_activity": torch.tensor((((1.0, 0.0), (0.0, 2.0), (3.0, 0.0)),)),
         "actions": torch.tensor(((4, 5, 6),)),
         "dones": torch.tensor(((False, False, True),)),
@@ -214,16 +224,18 @@ def test_lazy_capture_survives_distance_learner_constructor_bypass(tmp_path):
     learner.policy_id = 0
     learner.env_steps = 0
     learner.train_step = 10
-    buff = TensorDict({
-        "obs": TensorDict({"telemetry_pose": torch.tensor((
-            ((100.0, 101.0, 1.0), (200.0, 201.0, 2.0), (300.0, 301.0, 3.0)),
-        ))}),
-        "dg_activity": torch.tensor((((1.0, 0.0), (0.0, 2.0)),)),
-        "actions": torch.tensor(((4, 5),)),
-        "dones": torch.tensor(((False, True),)),
-        "policy_version": torch.tensor(((10.0, 10.0),)),
-        "policy_id": torch.tensor(((0, 0),)),
-    })
+    buff = TensorDict(
+        {
+            "obs": TensorDict(
+                {"telemetry_pose": torch.tensor((((100.0, 101.0, 1.0), (200.0, 201.0, 2.0), (300.0, 301.0, 3.0)),))}
+            ),
+            "dg_activity": torch.tensor((((1.0, 0.0), (0.0, 2.0)),)),
+            "actions": torch.tensor(((4, 5),)),
+            "dones": torch.tensor(((False, True),)),
+            "policy_version": torch.tensor(((10.0, 10.0),)),
+            "policy_id": torch.tensor(((0, 0),)),
+        }
+    )
 
     learner._capture_online_spatial(buff)
 

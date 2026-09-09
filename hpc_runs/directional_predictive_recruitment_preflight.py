@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from hpc_runs.intrmotiv_study import load_study
-
+from sample_factory.launcher.run_description import Experiment, RunDescription
 
 SPEC = Path(__file__).with_name("studies") / "directional_predictive_recruitment.study.json"
 STUDY = load_study(SPEC)

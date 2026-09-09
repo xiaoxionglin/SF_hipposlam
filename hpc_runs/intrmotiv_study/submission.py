@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import csv
-from pathlib import Path, PurePosixPath
 import shlex
+from collections import Counter
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .spec import SpecError, StudySpec
-
 
 REQUIRED_COLUMNS = {
     "job_id",
@@ -101,9 +100,7 @@ def audit_submission(
         "rows": len(rows),
         "status_counts": dict(sorted(Counter(row["status"] for row in rows).items())),
         "job_ids": job_ids,
-        "submitted_complete": len(job_ids) == study.expected_runs
-        and all(row["status"] == "submitted" for row in rows),
+        "submitted_complete": len(job_ids) == study.expected_runs and all(row["status"] == "submitted" for row in rows),
         "commands_match_study": True,
         "workspace_paths_valid": True,
     }
-

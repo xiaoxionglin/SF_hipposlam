@@ -11,7 +11,6 @@ from pathlib import Path
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.spec import SpecError
 
-
 STEP_TAG = "train/env_steps"
 REPLAY_TAG = "intrmotiv/hrl/behavior_replay_mismatch"
 TARGET_VALID_TAG = "intrmotiv/hrl/goal_condition/target_valid_fraction"
@@ -53,7 +52,7 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
         experiment = job["experiment"]
         if not experiment.startswith("00_PF_"):
             raise SpecError(f"unexpected preflight experiment {experiment!r}")
-        run_name = experiment[len("00_PF_"):]
+        run_name = experiment[len("00_PF_") :]
         run = expected[run_name]
         run_dir = train_root / job["train_root"] / experiment
         summary_dir = run_dir / ".summary" / "0"
@@ -110,7 +109,11 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
             if not values or not all(math.isfinite(value) for value in values):
                 failures.append(f"nonfinite or empty loss scalar {tag}")
 
-        replay_max = max((abs(value) for value in _values(accumulator, REPLAY_TAG)), default=math.nan) if REPLAY_TAG in available else math.nan
+        replay_max = (
+            max((abs(value) for value in _values(accumulator, REPLAY_TAG)), default=math.nan)
+            if REPLAY_TAG in available
+            else math.nan
+        )
         if not math.isfinite(replay_max) or replay_max > 1e-6:
             failures.append(f"behavior replay mismatch max is {replay_max!r}")
         target_valid_max = _finite_max(accumulator, TARGET_VALID_TAG) if TARGET_VALID_TAG in available else math.nan

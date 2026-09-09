@@ -18,19 +18,17 @@ def test_ca3_temporal_exclusion_is_a_dominant_event_margin_and_keeps_conflict_di
     dominant = torch.tensor([[False, True, False], [True, False, False]])
     valids = torch.ones(2, dtype=torch.bool)
 
-    loss, conflict_fraction, conflicting_activation_fraction, conflict_activity = (
-        dg_ca3_temporal_exclusion_loss(
-            activity,
-            states,
-            dominant,
-            n_features,
-            R,
-            L,
-            coefficient=0.5,
-            reward_scale=0.1,
-            valids=valids,
-            num_invalids=0,
-        )
+    loss, conflict_fraction, conflicting_activation_fraction, conflict_activity = dg_ca3_temporal_exclusion_loss(
+        activity,
+        states,
+        dominant,
+        n_features,
+        R,
+        L,
+        coefficient=0.5,
+        reward_scale=0.1,
+        valids=valids,
+        num_invalids=0,
     )
 
     assert torch.isclose(loss, torch.tensor(0.15))
@@ -78,19 +76,17 @@ def test_ca3_conflicting_activation_fraction_is_zero_without_activity():
     states = torch.zeros(1, n_features * (R + L - 1))
     states.view(1, n_features, R + L - 1)[0, 0, R - 1] = 1.0
 
-    _, conflict_fraction, conflicting_activation_fraction, conflict_activity = (
-        dg_ca3_temporal_exclusion_loss(
-            torch.zeros(1, n_features),
-            states,
-            torch.zeros(1, n_features, dtype=torch.bool),
-            n_features,
-            R,
-            L,
-            coefficient=1.0,
-            reward_scale=0.1,
-            valids=torch.ones(1, dtype=torch.bool),
-            num_invalids=0,
-        )
+    _, conflict_fraction, conflicting_activation_fraction, conflict_activity = dg_ca3_temporal_exclusion_loss(
+        torch.zeros(1, n_features),
+        states,
+        torch.zeros(1, n_features, dtype=torch.bool),
+        n_features,
+        R,
+        L,
+        coefficient=1.0,
+        reward_scale=0.1,
+        valids=torch.ones(1, dtype=torch.bool),
+        num_invalids=0,
     )
 
     assert torch.isclose(conflict_fraction, torch.tensor(2.0 / 3.0))
@@ -109,9 +105,7 @@ def test_recruitment_candidate_is_one_shot_at_age_l_and_rejects_other_dg_history
     ca3[3, 1, L - 1 :] = 1.0
     ca3[3, 2, 0] = 1.0
 
-    candidate, source, _ = dg_recruitment_candidate_mask(
-        states, n_features, R, L, torch.ones(4, dtype=torch.bool)
-    )
+    candidate, source, _ = dg_recruitment_candidate_mask(states, n_features, R, L, torch.ones(4, dtype=torch.bool))
 
     assert candidate.tolist() == [False, True, False, False]
     assert source[1].item() == 1
@@ -123,9 +117,7 @@ def test_recruitment_ignores_a_tail_already_present_at_rollout_start():
     ca3 = states.view(2, n_features, R + L - 1)
     ca3[:, 0, -1] = 1.0
 
-    candidate, _, _ = dg_recruitment_candidate_mask(
-        states, n_features, R, L, torch.ones(2, dtype=torch.bool)
-    )
+    candidate, _, _ = dg_recruitment_candidate_mask(states, n_features, R, L, torch.ones(2, dtype=torch.bool))
 
     assert candidate.tolist() == [False, False]
 
@@ -141,11 +133,7 @@ def test_orthogonal_feature_residual_has_unit_norm_and_leaves_existing_span():
 
 def test_old_projection_checkpoint_loads_without_recruitment_buffers():
     original = DGProjection_batchnorm_relu(5, 3, intercept=2.43)
-    old_state = {
-        key: value
-        for key, value in original.state_dict().items()
-        if not key.startswith("recruitment_")
-    }
+    old_state = {key: value for key, value in original.state_dict().items() if not key.startswith("recruitment_")}
     restored = DGProjection_batchnorm_relu(5, 3, intercept=2.43)
 
     restored.load_state_dict(old_state, strict=True)

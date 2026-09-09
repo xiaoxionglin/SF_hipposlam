@@ -1,8 +1,7 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
-
 
 SPEC = Path(__file__).with_name("studies") / "encoder_decoder_update_contract_preflight.study.json"
 

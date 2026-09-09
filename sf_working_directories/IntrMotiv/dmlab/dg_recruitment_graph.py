@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-
 RECRUITMENT_HISTORY_SIZE = 3
 HISTORY_LAST_EXCLUSIVE = 0
 HISTORY_AGE = 1
@@ -284,9 +283,7 @@ def directional_recruitment_eligibility(
 
     reliability = (edge_confidence + 1.0) / (control_attempts + 2.0)
     adjacency = (
-        (tctrl > 0)
-        & (edge_confidence >= float(confidence_threshold))
-        & (reliability >= float(reliability_threshold))
+        (tctrl > 0) & (edge_confidence >= float(confidence_threshold)) & (reliability >= float(reliability_threshold))
     )
     adjacency = adjacency.clone()
     adjacency.fill_diagonal_(False)
@@ -420,8 +417,7 @@ def predictive_recruitment_eligibility(
         gap = max(reliabilities) - min(reliabilities)
         attempts = sum(item[1] for item in contexts)
         if gap > float(reliability_gap[src].item()) or (
-            gap == float(reliability_gap[src].item())
-            and attempts > float(supporting_attempts[src].item())
+            gap == float(reliability_gap[src].item()) and attempts > float(supporting_attempts[src].item())
         ):
             reliability_gap[src] = gap
             supporting_attempts[src] = attempts

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
-
 
 SNAPSHOT_SCHEMA = "intrmotiv/online-spatial/v1"
 DEFAULT_GRAIN = 19
@@ -145,12 +144,7 @@ def spatial_rate_maps(
 
     x = pose[:, 0]
     y = pose[:, 1]
-    in_bounds = (
-        (x >= bounds.x_min)
-        & (x <= bounds.x_max)
-        & (y >= bounds.y_min)
-        & (y <= bounds.y_max)
-    )
+    in_bounds = (x >= bounds.x_min) & (x <= bounds.x_max) & (y >= bounds.y_min) & (y <= bounds.y_max)
     occupancy = np.zeros((grain, grain), dtype=np.int64)
     rate_sums = np.zeros((activity.shape[1], grain, grain), dtype=np.float64)
     if in_bounds.any():
@@ -194,9 +188,9 @@ def _binomial_smooth(array: np.ndarray) -> np.ndarray:
     weights = (1.0, 2.0, 1.0)
     for row, row_weight in enumerate(weights):
         for column, column_weight in enumerate(weights):
-            result += row_weight * column_weight * padded[
-                ..., row : row + value.shape[-2], column : column + value.shape[-1]
-            ]
+            result += (
+                row_weight * column_weight * padded[..., row : row + value.shape[-2], column : column + value.shape[-1]]
+            )
     return result / 16.0
 
 
@@ -234,12 +228,8 @@ def _bin_centers(bins: np.ndarray, bounds: SpatialBounds, grain: int) -> np.ndar
     result = np.full(bins.shape, np.nan, dtype=np.float32)
     valid = (bins[:, 0] >= 0) & (bins[:, 1] >= 0)
     if valid.any():
-        result[valid, 0] = bounds.x_min + (bins[valid, 0] + 0.5) * (
-            bounds.x_max - bounds.x_min
-        ) / grain
-        result[valid, 1] = bounds.y_min + (bins[valid, 1] + 0.5) * (
-            bounds.y_max - bounds.y_min
-        ) / grain
+        result[valid, 0] = bounds.x_min + (bins[valid, 0] + 0.5) * (bounds.x_max - bounds.x_min) / grain
+        result[valid, 1] = bounds.y_min + (bins[valid, 1] + 0.5) * (bounds.y_max - bounds.y_min) / grain
     return result
 
 
@@ -387,9 +377,7 @@ def reliable_graph_adjacency(
         raise SpatialContractError("invalid graph reliability thresholds")
     reliability = (confidence + 1.0) / (attempts + 2.0)
     adjacency = (
-        (tctrl > 0)
-        & (confidence >= float(confidence_threshold))
-        & (reliability >= float(reliability_threshold))
+        (tctrl > 0) & (confidence >= float(confidence_threshold)) & (reliability >= float(reliability_threshold))
     )
     adjacency = adjacency.astype(np.bool_, copy=True)
     np.fill_diagonal(adjacency, False)
@@ -451,9 +439,12 @@ def _global_efficiency(adjacency: np.ndarray) -> tuple[float, np.ndarray]:
     return float(inverse.sum() / denominator), distances
 
 
-def _density_matched_references(n_nodes: int, edge_count: int, samples: int = 64) -> tuple[np.ndarray, list[np.ndarray]]:
-    possible = [(i, j) for distance in range(1, n_nodes) for i in range(n_nodes)
-                for j in ((i + distance) % n_nodes,) if i < j]
+def _density_matched_references(
+    n_nodes: int, edge_count: int, samples: int = 64
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    possible = [
+        (i, j) for distance in range(1, n_nodes) for i in range(n_nodes) for j in ((i + distance) % n_nodes,) if i < j
+    ]
     possible = list(dict.fromkeys(possible))
     possible.sort(key=lambda edge: (min((edge[1] - edge[0]) % n_nodes, (edge[0] - edge[1]) % n_nodes), edge))
     lattice = np.zeros((n_nodes, n_nodes), dtype=np.bool_)
@@ -490,15 +481,17 @@ def _small_world_propensity(undirected: np.ndarray) -> float:
     random_length = 1.0 / random_efficiency if random_efficiency > 0 else np.inf
     clustering_denominator = lattice_clustering - random_clustering
     length_denominator = lattice_length - random_length
-    delta_clustering = 0.0 if abs(clustering_denominator) < 1e-12 else (
-        lattice_clustering - clustering
-    ) / clustering_denominator
-    delta_length = 0.0 if not np.isfinite(length) or abs(length_denominator) < 1e-12 else (
-        length - random_length
-    ) / length_denominator
+    delta_clustering = (
+        0.0 if abs(clustering_denominator) < 1e-12 else (lattice_clustering - clustering) / clustering_denominator
+    )
+    delta_length = (
+        0.0
+        if not np.isfinite(length) or abs(length_denominator) < 1e-12
+        else (length - random_length) / length_denominator
+    )
     delta_clustering = float(np.clip(delta_clustering, 0.0, 1.0))
     delta_length = float(np.clip(delta_length, 0.0, 1.0))
-    return float(np.clip(1.0 - np.sqrt((delta_clustering ** 2 + delta_length ** 2) / 2.0), 0.0, 1.0))
+    return float(np.clip(1.0 - np.sqrt((delta_clustering**2 + delta_length**2) / 2.0), 0.0, 1.0))
 
 
 def calculate_graph_diagnostics(
@@ -528,25 +521,33 @@ def calculate_graph_diagnostics(
     directed_edges = int(adjacency.sum())
     degrees = adjacency.sum(axis=0) + adjacency.sum(axis=1)
     edge_peak_distance = np.full((n_nodes, n_nodes), np.nan, dtype=np.float32)
-    eligible = np.zeros(n_nodes, dtype=np.bool_) if field_eligible is None else np.asarray(field_eligible, dtype=np.bool_)
-    peaks = np.full((n_nodes, 2), np.nan, dtype=np.float32) if dominant_peak_xy is None else np.asarray(
-        dominant_peak_xy, dtype=np.float32
+    eligible = (
+        np.zeros(n_nodes, dtype=np.bool_) if field_eligible is None else np.asarray(field_eligible, dtype=np.bool_)
+    )
+    peaks = (
+        np.full((n_nodes, 2), np.nan, dtype=np.float32)
+        if dominant_peak_xy is None
+        else np.asarray(dominant_peak_xy, dtype=np.float32)
     )
     if eligible.shape != (n_nodes,) or peaks.shape != (n_nodes, 2):
         raise SpatialContractError("graph nodes must align exactly with eligible mono-field diagnostics")
     valid_nodes = eligible & np.isfinite(peaks).all(axis=1)
     endpoint_valid = valid_nodes[:, None] & valid_nodes[None, :]
     if endpoint_valid.any():
-        edge_peak_distance[endpoint_valid] = np.linalg.norm(
-            peaks[:, None, :] - peaks[None, :, :], axis=-1
-        )[endpoint_valid]
+        edge_peak_distance[endpoint_valid] = np.linalg.norm(peaks[:, None, :] - peaks[None, :, :], axis=-1)[
+            endpoint_valid
+        ]
     valid_reliable = adjacency & endpoint_valid
 
-    prospective_attempts = np.zeros_like(np.asarray(attempts, dtype=np.float64)) if prospective_attempts is None else np.asarray(
-        prospective_attempts, dtype=np.float64
+    prospective_attempts = (
+        np.zeros_like(np.asarray(attempts, dtype=np.float64))
+        if prospective_attempts is None
+        else np.asarray(prospective_attempts, dtype=np.float64)
     )
-    prospective_successes = np.zeros_like(prospective_attempts) if prospective_successes is None else np.asarray(
-        prospective_successes, dtype=np.float64
+    prospective_successes = (
+        np.zeros_like(prospective_attempts)
+        if prospective_successes is None
+        else np.asarray(prospective_successes, dtype=np.float64)
     )
     if prospective_attempts.shape != adjacency.shape or prospective_successes.shape != adjacency.shape:
         raise SpatialContractError("prospective graph accumulators must align with the graph")
@@ -568,18 +569,30 @@ def calculate_graph_diagnostics(
         "graph_reliable_edge_density": np.asarray(directed_edges / max(1, n_nodes * (n_nodes - 1)), dtype=np.float32),
         "graph_largest_weak_component_size": np.asarray(weak_sizes[0] if weak_sizes else 0, dtype=np.int16),
         "graph_largest_strong_component_size": np.asarray(max(strong_sizes, default=0), dtype=np.int16),
-        "graph_reachable_pair_fraction": np.asarray(reachable.sum() / max(1, n_nodes * (n_nodes - 1)), dtype=np.float32),
-        "graph_mean_reachable_shortest_path_hops": np.asarray(reachable_hops.mean() if reachable_hops.size else 0.0, dtype=np.float32),
-        "graph_median_reachable_shortest_path_hops": np.asarray(np.median(reachable_hops) if reachable_hops.size else 0.0, dtype=np.float32),
+        "graph_reachable_pair_fraction": np.asarray(
+            reachable.sum() / max(1, n_nodes * (n_nodes - 1)), dtype=np.float32
+        ),
+        "graph_mean_reachable_shortest_path_hops": np.asarray(
+            reachable_hops.mean() if reachable_hops.size else 0.0, dtype=np.float32
+        ),
+        "graph_median_reachable_shortest_path_hops": np.asarray(
+            np.median(reachable_hops) if reachable_hops.size else 0.0, dtype=np.float32
+        ),
         "graph_reliable_global_efficiency": np.asarray(efficiency, dtype=np.float32),
         "graph_undirected_clustering": np.asarray(_undirected_clustering(undirected), dtype=np.float32),
-        "graph_directed_reciprocity": np.asarray((adjacency & adjacency.T).sum() / max(1, directed_edges), dtype=np.float32),
+        "graph_directed_reciprocity": np.asarray(
+            (adjacency & adjacency.T).sum() / max(1, directed_edges), dtype=np.float32
+        ),
         "graph_small_world_propensity": np.asarray(_small_world_propensity(undirected), dtype=np.float32),
-        "graph_max_total_degree_fraction": np.asarray(degrees.max(initial=0) / max(1, 2 * directed_edges), dtype=np.float32),
+        "graph_max_total_degree_fraction": np.asarray(
+            degrees.max(initial=0) / max(1, 2 * directed_edges), dtype=np.float32
+        ),
         "graph_degree_herfindahl": np.asarray(np.square(degrees / max(1, degrees.sum())).sum(), dtype=np.float32),
         "graph_spatial_endpoint_valid_fraction": np.asarray(endpoint_fraction, dtype=np.float32),
         "graph_reliable_edge_peak_distance": edge_peak_distance,
-        "graph_reliable_edge_peak_distance_mean": np.asarray(edge_distances.mean() if edge_distances.size else 0.0, dtype=np.float32),
+        "graph_reliable_edge_peak_distance_mean": np.asarray(
+            edge_distances.mean() if edge_distances.size else 0.0, dtype=np.float32
+        ),
         "graph_tctrl_peak_distance_correlation": np.asarray(correlation, dtype=np.float32),
         "graph_tctrl_peak_distance_pair_count": np.asarray(edge_distances.size, dtype=np.int32),
         "graph_prospective_attempt_count": np.asarray(prospective_total, dtype=np.float32),
@@ -670,13 +683,21 @@ def calculate_spatial_metrics(
         "stationary_step_fraction": float((step_distance <= stationary_distance).mean()) if step_distance.size else 0.0,
         "path_efficiency": float(total_displacement / total_path) if total_path > 0 else 0.0,
         "mean_absolute_circular_yaw_change": float(yaw_delta.mean()) if yaw_delta.size else 0.0,
-        "mono_field_unit_fraction": float(details["field_mono"].sum() / details["field_eligible"].sum())
-        if details["field_eligible"].any() else 0.0,
-        "mean_primary_secondary_peak_distance": float(np.nanmean(details["field_primary_secondary_peak_distance"]))
-        if np.isfinite(details["field_primary_secondary_peak_distance"]).any() else 0.0,
-        "median_dominant_peak_nearest_neighbor_distance": float(
-            np.nanmedian(details["field_dominant_peak_nearest_neighbor_distance"])
-        ) if np.isfinite(details["field_dominant_peak_nearest_neighbor_distance"]).any() else 0.0,
+        "mono_field_unit_fraction": (
+            float(details["field_mono"].sum() / details["field_eligible"].sum())
+            if details["field_eligible"].any()
+            else 0.0
+        ),
+        "mean_primary_secondary_peak_distance": (
+            float(np.nanmean(details["field_primary_secondary_peak_distance"]))
+            if np.isfinite(details["field_primary_secondary_peak_distance"]).any()
+            else 0.0
+        ),
+        "median_dominant_peak_nearest_neighbor_distance": (
+            float(np.nanmedian(details["field_dominant_peak_nearest_neighbor_distance"]))
+            if np.isfinite(details["field_dominant_peak_nearest_neighbor_distance"]).any()
+            else 0.0
+        ),
     }
 
 
@@ -729,8 +750,12 @@ class OnlineSpatialWindow:
                 raise SpatialContractError(f"{name} rollout shape {value.shape[:2]} != {leading}")
 
         selected: dict[str, list[np.ndarray | Any]] = {
-            "pose": [], "dg_activity": [], "actions": [], "dones": [],
-            "segment_id": [], "policy_version": [],
+            "pose": [],
+            "dg_activity": [],
+            "actions": [],
+            "dones": [],
+            "segment_id": [],
+            "policy_version": [],
         }
         for row in range(leading[0]):
             segment = self._next_segment
@@ -745,8 +770,7 @@ class OnlineSpatialWindow:
                 discontinuity = (
                     previous_valid
                     and max_segment_jump_distance is not None
-                    and float(np.linalg.norm(pose[row, step, :2] - previous_pose[:2]))
-                    > max_segment_jump_distance
+                    and float(np.linalg.norm(pose[row, step, :2] - previous_pose[:2])) > max_segment_jump_distance
                 )
                 if (not previous_valid and step > 0) or discontinuity:
                     # Gaps, terminals, and implausible unmarked relocations
@@ -780,16 +804,13 @@ class OnlineSpatialWindow:
         incoming_size = int(incoming["pose"].shape[0])
         if not self._arrays:
             self._arrays = {
-                key: np.empty((self.limit, *value.shape[1:]), dtype=value.dtype)
-                for key, value in incoming.items()
+                key: np.empty((self.limit, *value.shape[1:]), dtype=value.dtype) for key, value in incoming.items()
             }
         else:
             for key, value in incoming.items():
                 expected = self._arrays[key].shape[1:]
                 if value.shape[1:] != expected:
-                    raise SpatialContractError(
-                        f"{key} trailing shape {value.shape[1:]} != buffered shape {expected}"
-                    )
+                    raise SpatialContractError(f"{key} trailing shape {value.shape[1:]} != buffered shape {expected}")
 
         if incoming_size >= self.limit:
             for key, value in incoming.items():
@@ -821,8 +842,7 @@ class OnlineSpatialWindow:
             return {key: value[start : start + size].copy() for key, value in self._arrays.items()}
         first = self.limit - start
         return {
-            key: np.concatenate((value[start:], value[: size - first]), axis=0)
-            for key, value in self._arrays.items()
+            key: np.concatenate((value[start:], value[: size - first]), axis=0) for key, value in self._arrays.items()
         }
 
 
@@ -838,9 +858,19 @@ def validate_snapshot_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     for key, value in zip(SNAPSHOT_REQUIRED_ARRAYS, arrays):
         result[key] = value
     required_metadata = (
-        "schema_version", "target_env_steps", "actual_env_steps", "window_limit", "window_start_env_steps",
-        "window_end_env_steps", "policy_id", "run_name", "experiment_identity", "environment", "frameskip",
-        "grain", "bounds",
+        "schema_version",
+        "target_env_steps",
+        "actual_env_steps",
+        "window_limit",
+        "window_start_env_steps",
+        "window_end_env_steps",
+        "policy_id",
+        "run_name",
+        "experiment_identity",
+        "environment",
+        "frameskip",
+        "grain",
+        "bounds",
     )
     absent = [key for key in required_metadata if key not in payload]
     if absent:
@@ -926,8 +956,12 @@ def validate_snapshot_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         if "control_representation_generation" not in payload:
             raise SpatialContractError("control graph generation is required")
         for key in (
-            "control_passive_confidence", "control_passive_time", "control_passive_path_length",
-            "control_passive_dx", "control_passive_dy", "control_passive_dtheta_sin",
+            "control_passive_confidence",
+            "control_passive_time",
+            "control_passive_path_length",
+            "control_passive_dx",
+            "control_passive_dy",
+            "control_passive_dtheta_sin",
             "control_passive_dtheta_cos",
         ):
             if key not in payload or np.asarray(payload[key]).shape != matrix_shape:
@@ -944,8 +978,10 @@ def validate_snapshot_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise SpatialContractError("control and passive graph generations do not match")
     nodes = result["dg_activity"].shape[1]
     passive_keys = (
-        "passive_recruitment_confidence", "passive_recruitment_elapsed",
-        "passive_recruitment_birth_support", "passive_recruitment_generation",
+        "passive_recruitment_confidence",
+        "passive_recruitment_elapsed",
+        "passive_recruitment_birth_support",
+        "passive_recruitment_generation",
     )
     passive_presence = [key in payload for key in passive_keys]
     if any(passive_presence) and not all(passive_presence):
@@ -981,14 +1017,19 @@ def write_spatial_snapshot_atomic(output_dir: Path, payload: Mapping[str, Any]) 
     if existing:
         for path in existing:
             prior = load_spatial_snapshot(path)
-            if str(np.asarray(prior["run_name"]).item()) != run_name or int(np.asarray(prior["policy_id"]).item()) != policy_id:
+            if (
+                str(np.asarray(prior["run_name"]).item()) != run_name
+                or int(np.asarray(prior["policy_id"]).item()) != policy_id
+            ):
                 raise SpatialContractError(f"existing target has conflicting identity: {path}")
         return existing[0], False
 
     destination = output_dir / f"snapshot_target_{target:012d}_actual_{actual:012d}.npz"
     temp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(prefix=".online-spatial-", suffix=".npz", dir=output_dir, delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            prefix=".online-spatial-", suffix=".npz", dir=output_dir, delete=False
+        ) as handle:
             temp_path = Path(handle.name)
             np.savez_compressed(handle, **validated)
             handle.flush()
@@ -997,7 +1038,10 @@ def write_spatial_snapshot_atomic(output_dir: Path, payload: Mapping[str, Any]) 
             os.link(temp_path, destination)
         except FileExistsError:
             prior = load_spatial_snapshot(destination)
-            if str(np.asarray(prior["run_name"]).item()) != run_name or int(np.asarray(prior["policy_id"]).item()) != policy_id:
+            if (
+                str(np.asarray(prior["run_name"]).item()) != run_name
+                or int(np.asarray(prior["policy_id"]).item()) != policy_id
+            ):
                 raise SpatialContractError(f"concurrent snapshot has conflicting identity: {destination}")
             return destination, False
         return destination, True

@@ -12,7 +12,6 @@ from statistics import fmean
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.spec import SpecError
 
-
 TAGS = {
     "steps": "train/env_steps",
     "replay": "intrmotiv/hrl/behavior_replay_mismatch",
@@ -112,19 +111,35 @@ def analyze(study, jobs_tsv: Path, train_root: Path, minimum_steps: int) -> dict
         if max((abs(v) for v in values.get("arrival_loss", [])), default=0.0) <= 0:
             run_failures.append("ARR credit branch had zero loss")
 
-        row = {"run_name": run_name, **run.factors, "max_env_steps": max_steps,
-               "terminal_command_entropy": entropy, "terminal_pair_coverage": coverage,
-               "terminal_mean_silent_units": silent_units, "terminal_node_coverage": node_coverage,
-               "pass": not run_failures, "failures": run_failures}
+        row = {
+            "run_name": run_name,
+            **run.factors,
+            "max_env_steps": max_steps,
+            "terminal_command_entropy": entropy,
+            "terminal_pair_coverage": coverage,
+            "terminal_mean_silent_units": silent_units,
+            "terminal_node_coverage": node_coverage,
+            "pass": not run_failures,
+            "failures": run_failures,
+        }
         results.append(row)
         failures.extend(f"{run_name}: {item}" for item in run_failures)
 
-    return {**study.provenance(), "protocol": "dg-policy-gradient-first-outcome-preflight-v1",
-            "minimum_steps": minimum_steps, "expected_cells": len(expected),
-            "passed_cells": sum(row["pass"] for row in results),
-            "all_cells_pass": not failures, "static_contract_tests_required": [
-                "test_update_contract.py", "test_hrl_controllable_graph.py", "test_topological_frontier.py"],
-            "failures": failures, "runs": results}
+    return {
+        **study.provenance(),
+        "protocol": "dg-policy-gradient-first-outcome-preflight-v1",
+        "minimum_steps": minimum_steps,
+        "expected_cells": len(expected),
+        "passed_cells": sum(row["pass"] for row in results),
+        "all_cells_pass": not failures,
+        "static_contract_tests_required": [
+            "test_update_contract.py",
+            "test_hrl_controllable_graph.py",
+            "test_topological_frontier.py",
+        ],
+        "failures": failures,
+        "runs": results,
+    }
 
 
 def main():

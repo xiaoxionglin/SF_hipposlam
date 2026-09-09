@@ -11,7 +11,6 @@ from pathlib import Path
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.spec import SpecError
 
-
 STEP = "train/env_steps"
 REPLAY = "intrmotiv/hrl/behavior_replay_mismatch"
 TARGET_VALID = "intrmotiv/hrl/goal_condition/target_valid_fraction"
@@ -71,10 +70,22 @@ def analyze(study, jobs_tsv: Path, train_root: Path, minimum_steps: int) -> dict
         accumulator.Reload()
         available = set(accumulator.Tags().get("scalars", []))
         required = {
-            STEP, REPLAY, TARGET_VALID, FRONTIER, PRED_EVENTS, RECRUITMENT,
-            RESET_TOTAL, SCHEDULED_COUNT, APPLIED_COUNT, SCHEDULED_MASS,
-            APPLIED_MASS, REPLAY_MATCH, DG_FORWARD, DG_STATS_UPDATE,
-            ARRIVAL_LOSS, SOURCE_LOSS,
+            STEP,
+            REPLAY,
+            TARGET_VALID,
+            FRONTIER,
+            PRED_EVENTS,
+            RECRUITMENT,
+            RESET_TOTAL,
+            SCHEDULED_COUNT,
+            APPLIED_COUNT,
+            SCHEDULED_MASS,
+            APPLIED_MASS,
+            REPLAY_MATCH,
+            DG_FORWARD,
+            DG_STATS_UPDATE,
+            ARRIVAL_LOSS,
+            SOURCE_LOSS,
         }
         missing = sorted(required - available)
         if missing:
@@ -90,7 +101,8 @@ def analyze(study, jobs_tsv: Path, train_root: Path, minimum_steps: int) -> dict
 
         replay_max = (
             max((abs(value) for value in _values(accumulator, REPLAY)), default=math.nan)
-            if REPLAY in available else math.nan
+            if REPLAY in available
+            else math.nan
         )
         if not math.isfinite(replay_max) or replay_max > 1e-6:
             run_failures.append(f"behavior replay mismatch max is {replay_max!r}")
@@ -129,9 +141,7 @@ def analyze(study, jobs_tsv: Path, train_root: Path, minimum_steps: int) -> dict
         recruitment_final = recruitment[-1] if recruitment else math.nan
         reset_final = resets[-1] if resets else math.nan
         if not math.isfinite(recruitment_final) or abs(recruitment_final - reset_final) > 1e-6:
-            run_failures.append(
-                f"recruitment total {recruitment_final!r} != FiLM reset total {reset_final!r}"
-            )
+            run_failures.append(f"recruitment total {recruitment_final!r} != FiLM reset total {reset_final!r}")
         if run.factors["retirement"] == "monitor" and recruitment_final != 0:
             run_failures.append(f"MON recruitment total is {recruitment_final!r}, expected zero")
 

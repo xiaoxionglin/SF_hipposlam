@@ -1,3 +1,24 @@
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import (
+    CONDITIONS as FRONTIER_ISOLATION_CONDITIONS,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import (
+    PROJECT as FRONTIER_ISOLATION_PROJECT,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import (
+    RUN_DESCRIPTION as FRONTIER_ISOLATION_RUN_DESCRIPTION,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_matched_control import (
+    PROJECT as MATCHED_CONTROL_PROJECT,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_matched_control import (
+    RUN_DESCRIPTION as MATCHED_CONTROL_RUN_DESCRIPTION,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_waypoint_extension import (
+    RUN_DESCRIPTION as FRONTIER_WAYPOINT_EXTENSION_RUN_DESCRIPTION,
+)
+from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_motion_preflight import (
+    RUN_DESCRIPTION as MOTION_PREFLIGHT_RUN_DESCRIPTION,
+)
 from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import (
     BATCH_NAME,
     CELLS,
@@ -7,21 +28,6 @@ from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_pla
 from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning_preflight import (
     RUN_DESCRIPTION as PREFLIGHT_RUN_DESCRIPTION,
 )
-from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import (
-    CONDITIONS as FRONTIER_ISOLATION_CONDITIONS,
-    PROJECT as FRONTIER_ISOLATION_PROJECT,
-    RUN_DESCRIPTION as FRONTIER_ISOLATION_RUN_DESCRIPTION,
-)
-from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_waypoint_extension import (
-    RUN_DESCRIPTION as FRONTIER_WAYPOINT_EXTENSION_RUN_DESCRIPTION,
-)
-from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_matched_control import (
-    PROJECT as MATCHED_CONTROL_PROJECT,
-    RUN_DESCRIPTION as MATCHED_CONTROL_RUN_DESCRIPTION,
-)
-from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_motion_preflight import (
-    RUN_DESCRIPTION as MOTION_PREFLIGHT_RUN_DESCRIPTION,
-)
 
 
 def test_production_grid_has_16_cells_three_seeds_and_unique_names():
@@ -30,7 +36,9 @@ def test_production_grid_has_16_cells_three_seeds_and_unique_names():
     assert len(experiments) == 48
     assert len({experiment.base_name for experiment in experiments}) == 48
     for cell in CELLS:
-        matches = [experiment for experiment in experiments if f"C{cell.number:02d}_{cell.tag}_" in experiment.base_name]
+        matches = [
+            experiment for experiment in experiments if f"C{cell.number:02d}_{cell.tag}_" in experiment.base_name
+        ]
         assert len(matches) == 3
         for seed in (8, 99, 123):
             assert sum(f"_S{seed}" in experiment.base_name for experiment in matches) == 1
@@ -57,7 +65,10 @@ def test_production_grid_preserves_fixed_architecture_resources_and_workspace_pa
 
 
 def test_cells_encode_the_requested_ablation_matrix():
-    commands = {cell.number: next(e.cmd for e in RUN_DESCRIPTION.experiments if f"C{cell.number:02d}_" in e.base_name) for cell in CELLS}
+    commands = {
+        cell.number: next(e.cmd for e in RUN_DESCRIPTION.experiments if f"C{cell.number:02d}_" in e.base_name)
+        for cell in CELLS
+    }
     assert "--hrl_controllable_graph=False" in commands[1]
     assert "--hrl_manager_mode=visit_direct" in commands[2]
     assert "--hrl_manager_mode=frontier_direct" in commands[3]

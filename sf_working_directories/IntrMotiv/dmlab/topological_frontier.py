@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
@@ -12,7 +12,6 @@ from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
     current_dg_from_activity,
     option_target_one_hot,
 )
-
 
 MODE_NONE = 0
 MODE_NAVIGATE = 1
@@ -585,14 +584,20 @@ def advance_topological_manager(
         fields = [getattr(topo_layout, f"{prefix}_{name}") for name in ("x", "y", "heading")]
         if prefix == "segment":
             values = integrate_motion(
-                topo[:, fields[0]], topo[:, fields[1]], topo[:, fields[2]],
-                topo[:, topo_layout.segment_path], topo[:, topo_layout.segment_turn], action_features,
+                topo[:, fields[0]],
+                topo[:, fields[1]],
+                topo[:, fields[2]],
+                topo[:, topo_layout.segment_path],
+                topo[:, topo_layout.segment_turn],
+                action_features,
             )
             topo[:, fields[0]], topo[:, fields[1]], topo[:, fields[2]] = values[:3]
             topo[:, topo_layout.segment_path], topo[:, topo_layout.segment_turn] = values[3:]
         else:
             zeros = torch.zeros(topo.size(0), dtype=topo.dtype, device=topo.device)
-            values = integrate_motion(topo[:, fields[0]], topo[:, fields[1]], topo[:, fields[2]], zeros, zeros, action_features)
+            values = integrate_motion(
+                topo[:, fields[0]], topo[:, fields[1]], topo[:, fields[2]], zeros, zeros, action_features
+            )
             topo[:, fields[0]], topo[:, fields[1]], topo[:, fields[2]] = values[:3]
 
     current, has_active, n_active = current_dg_from_activity(dg_activity.detach())
@@ -683,7 +688,9 @@ def advance_topological_manager(
     )
 
     def start_exploration(row: int, source: int, frontier_score: float):
-        _set_option(option, topo, row, n_nodes, source, MODE_EXPLORE, float(exploration_horizon), option_layout, topo_layout)
+        _set_option(
+            option, topo, row, n_nodes, source, MODE_EXPLORE, float(exploration_horizon), option_layout, topo_layout
+        )
         topo[row, topo_layout.final_goal] = float(source + 1)
         topo[row, topo_layout.frontier_selected] = 1.0
         topo[row, topo_layout.frontier_score] = frontier_score
@@ -691,7 +698,9 @@ def advance_topological_manager(
             topo[row, topo_layout.local_candidate_count] = 0.0
 
     def start_target(row: int, source: int, target: int, mode: int, final: int, deadline_value: float):
-        geometry_condition = _geometry_condition(graph, source, target, option.dtype, option.device) if geometry == "se2" else None
+        geometry_condition = (
+            _geometry_condition(graph, source, target, option.dtype, option.device) if geometry == "se2" else None
+        )
         deadline = _deadline_from_value(deadline_value, fallback_horizon, margin_ratio, margin_steps)
         _set_option(option, topo, row, target, source, mode, deadline, option_layout, topo_layout, geometry_condition)
         topo[row, topo_layout.final_goal] = float(final + 1)
@@ -778,8 +787,8 @@ def advance_topological_manager(
     exploring = target == n_nodes
     hit = exclusive & normal_target & (current == target)
     wrong = (
-        control_outcome == "first_distinct"
-    ) & exclusive & normal_target & (current != source) & (current != target)
+        (control_outcome == "first_distinct") & exclusive & normal_target & (current != source) & (current != target)
+    )
     expired = (~hit) & (normal_target | exploring) & (option[:, option_layout.countdown] <= 1.0)
     elapsed = option[:, option_layout.age] + 1.0
 
@@ -829,14 +838,18 @@ def advance_topological_manager(
                 pending_destination = int(topo[row, topo_layout.pending_destination].item()) - 1
                 if current_node == final and pending_destination >= 0:
                     passive_time = float(graph.passive_time[current_node, pending_destination].item())
-                    start_target(row, current_node, pending_destination, MODE_VALIDATE, pending_destination, passive_time)
+                    start_target(
+                        row, current_node, pending_destination, MODE_VALIDATE, pending_destination, passive_time
+                    )
                 elif current_node == final:
                     topo[row, topo_layout.final_reached] = 1.0
                     start_exploration(row, current_node, float(scores[current_node].item()))
                 else:
                     hop = int(next_hop[current_node, final].item()) if waypoint_planning else final
                     if hop >= 0:
-                        start_target(row, current_node, hop, MODE_NAVIGATE, final, float(dist[current_node, hop].item()))
+                        start_target(
+                            row, current_node, hop, MODE_NAVIGATE, final, float(dist[current_node, hop].item())
+                        )
                     else:
                         choose_task(row, current_node)
             else:
@@ -875,9 +888,7 @@ def advance_topological_manager(
         raise ValueError(f"Unknown HRL target timing: {target_timing}")
     pieces = [behavior_target, behavior_geometry]
     if include_behavior_mode:
-        behavior_mode = F.one_hot(
-            behavior_mode.clamp(min=0, max=N_MANAGER_MODES - 1), N_MANAGER_MODES
-        ).to(option.dtype)
+        behavior_mode = F.one_hot(behavior_mode.clamp(min=0, max=N_MANAGER_MODES - 1), N_MANAGER_MODES).to(option.dtype)
         pieces.append(behavior_mode)
     return option, topo, torch.cat(pieces, dim=-1)
 
@@ -910,7 +921,12 @@ def dg_path_scatter_loss(
     # Straightness uses the segment trace, which resets only at a stable landmark transition.
     segment_x, segment_y = topo[:, layout.segment_x], topo[:, layout.segment_y]
     sx, sy, _, segment_path, _ = integrate_motion(
-        segment_x, segment_y, topo[:, layout.segment_heading], topo[:, layout.segment_path], topo[:, layout.segment_turn], actions
+        segment_x,
+        segment_y,
+        topo[:, layout.segment_heading],
+        topo[:, layout.segment_path],
+        topo[:, layout.segment_turn],
+        actions,
     )
     straightness = torch.sqrt(sx.square() + sy.square()) / segment_path.clamp_min(1e-6)
     mask = (anchor[..., 2] > 0) & (displacement >= min_displacement)
@@ -979,11 +995,7 @@ def update_topological_graph_from_rollout(
 
     previous_mode = prev_topo[:, topo_layout.mode].long()
     discovery = (next_topo[:, topo_layout.discovery] > 0) & valid
-    exploration_timeout = (
-        (previous_mode == MODE_EXPLORE)
-        & (next_option[:, option_layout.option_expired] > 0)
-        & valid
-    )
+    exploration_timeout = (previous_mode == MODE_EXPLORE) & (next_option[:, option_layout.option_expired] > 0) & valid
     attempt = discovery | exploration_timeout
     frontier_node = prev_option[:, option_layout.source].long() - 1
     attempt &= (frontier_node >= 0) & (frontier_node < n_nodes)
@@ -1004,12 +1016,12 @@ def update_topological_graph_from_rollout(
         "passive_update_count": passive_count.to(dtype=graph.node_visits.dtype),
         "frontier_attempt_count": attempt.sum().to(dtype=graph.node_visits.dtype),
         "frontier_discovery_count": discovery.sum().to(dtype=graph.node_visits.dtype),
-        "edge_probe_success_count": (
-            (next_topo[:, topo_layout.validation_success] > 0) & valid
-        ).sum().to(dtype=graph.node_visits.dtype),
-        "edge_probe_timeout_count": (
-            (next_topo[:, topo_layout.validation_timeout] > 0) & valid
-        ).sum().to(dtype=graph.node_visits.dtype),
+        "edge_probe_success_count": ((next_topo[:, topo_layout.validation_success] > 0) & valid)
+        .sum()
+        .to(dtype=graph.node_visits.dtype),
+        "edge_probe_timeout_count": ((next_topo[:, topo_layout.validation_timeout] > 0) & valid)
+        .sum()
+        .to(dtype=graph.node_visits.dtype),
     }
 
 

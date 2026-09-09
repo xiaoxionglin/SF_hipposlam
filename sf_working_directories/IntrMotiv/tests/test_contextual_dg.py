@@ -27,9 +27,7 @@ def test_additive_feedback_uses_bounded_residual():
     feedback = ContextualDGFeedback(2, 1, 2.0, "additive")
     with torch.no_grad():
         feedback.adapter.bias.copy_(torch.tensor([100.0, -100.0]))
-    activity, _ = feedback(
-        torch.tensor([[1.5, 3.0]]), torch.zeros(1, 2, 2)
-    )
+    activity, _ = feedback(torch.tensor([[1.5, 3.0]]), torch.zeros(1, 2, 2))
     assert torch.allclose(activity, torch.tensor([[0.5, 0.0]]), atol=1e-6)
 
 
@@ -39,9 +37,7 @@ def test_direct_detaches_context_but_bptt_reaches_previous_ca3():
         ca3 = torch.randn(1, 2, 2, requires_grad=True)
         feedback = ContextualDGFeedback(2, 2, 2.0, "additive", gradient_mode=gradient_mode)
         with torch.no_grad():
-            feedback.adapter.weight.copy_(
-                torch.tensor([[0.1, -0.2, 0.3, 0.4], [-0.3, 0.2, 0.1, -0.4]])
-            )
+            feedback.adapter.weight.copy_(torch.tensor([[0.1, -0.2, 0.3, 0.4], [-0.3, 0.2, 0.1, -0.4]]))
         feedback(visual, ca3)[0].sum().backward(retain_graph=True)
         reached = ca3.grad is not None and ca3.grad.abs().sum().item() > 0
         assert reached is expects_ca3_gradient
@@ -161,9 +157,7 @@ def test_context_core_sampling_and_packed_replay_match():
         sampled.append(output)
     sampled = torch.stack(sampled)
 
-    packed = torch.nn.utils.rnn.pack_padded_sequence(
-        sequence, torch.tensor([4, 4]), enforce_sorted=False
-    )
+    packed = torch.nn.utils.rnn.pack_padded_sequence(sequence, torch.tensor([4, 4]), enforce_sorted=False)
     packed_output, replay_state = core(packed, initial.clone())
     replay, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_output)
     assert torch.allclose(replay, sampled)
@@ -187,14 +181,10 @@ def test_context_core_bptt_reaches_earlier_evidence_only_in_bptt_mode():
         with torch.no_grad():
             sequence[:, :, :3] = 2.0
             sequence[:, :, -5] = 1.0
-        packed = torch.nn.utils.rnn.pack_padded_sequence(
-            sequence, torch.tensor([2]), enforce_sorted=False
-        )
+        packed = torch.nn.utils.rnn.pack_padded_sequence(sequence, torch.tensor([2]), enforce_sorted=False)
         packed_output, _ = core(packed, torch.zeros(1, core.total_state_size))
         replay, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_output)
-        current = replay[1, :, : core.core_output_size].view(
-            1, core.Hippo_n_feature, core.expanded_length
-        )[:, :, 0]
+        current = replay[1, :, : core.core_output_size].view(1, core.Hippo_n_feature, core.expanded_length)[:, :, 0]
         current.sum().backward()
         gradients[mode] = sequence.grad[0, :, :3].abs().sum().item()
     assert gradients["direct"] == 0.0

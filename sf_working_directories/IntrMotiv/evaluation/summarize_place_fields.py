@@ -274,7 +274,9 @@ def plot_comparison(rows: list[dict[str, object]], out_path: Path) -> None:
     for left, title, key, maximum, color in panels:
         draw.text((left, 72), title, font=axis_font, fill="black")
         draw.line((left, chart_top, left, chart_top + chart_height), fill=(80, 80, 80), width=2)
-        draw.line((left, chart_top + chart_height, left + chart_width, chart_top + chart_height), fill=(80, 80, 80), width=2)
+        draw.line(
+            (left, chart_top + chart_height, left + chart_width, chart_top + chart_height), fill=(80, 80, 80), width=2
+        )
         for tick in range(5):
             y = chart_top + chart_height - int(chart_height * tick / 4)
             value = maximum * tick / 4
@@ -288,12 +290,13 @@ def plot_comparison(rows: list[dict[str, object]], out_path: Path) -> None:
             height = int(chart_height * min(value / maximum, 1.0))
             draw.rectangle((x, chart_top + chart_height - height, x + bar_width, chart_top + chart_height), fill=color)
             draw.text((x, chart_top + chart_height - height - 19), f"{value:.3f}", font=label_font, fill="black")
-            draw.text((x - 8, chart_top + chart_height + 12), compact_label(str(row["label"])), font=label_font, fill="black")
+            draw.text(
+                (x - 8, chart_top + chart_height + 12), compact_label(str(row["label"])), font=label_font, fill="black"
+            )
     image.save(out_path)
 
 
 def write_report(rows: list[dict[str, object]], out_path: Path) -> None:
-    frame = pd.DataFrame(rows)
     lines = [
         "# DG Place-Field Rollout Summary",
         "",

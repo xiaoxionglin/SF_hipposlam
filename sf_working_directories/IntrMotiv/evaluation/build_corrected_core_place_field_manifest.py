@@ -8,11 +8,7 @@ import csv
 import re
 from pathlib import Path
 
-from sf_working_directories.IntrMotiv.evaluation.build_place_field_sweep import (
-    checkpoint_frames,
-    select_checkpoints,
-)
-
+from sf_working_directories.IntrMotiv.evaluation.build_place_field_sweep import checkpoint_frames, select_checkpoints
 
 RUN_RE = re.compile(r"^00_CCR_C(?P<cell>\d{2})_(?P<tag>.+)_S(?P<seed>8|99|123)$")
 

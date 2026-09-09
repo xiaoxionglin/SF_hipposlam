@@ -1,8 +1,7 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
-
 
 STUDIES = Path(__file__).with_name("studies")
 
@@ -10,9 +9,7 @@ STUDIES = Path(__file__).with_name("studies")
 class CA3FeedbackPredictiveDGStudyTests(unittest.TestCase):
     def setUp(self):
         self.production = load_study(STUDIES / "ca3_feedback_predictive_dg.study.json")
-        self.preflight = load_study(
-            STUDIES / "ca3_feedback_predictive_dg_preflight.study.json"
-        )
+        self.preflight = load_study(STUDIES / "ca3_feedback_predictive_dg_preflight.study.json")
 
     def test_complete_structural_matrix(self):
         production = self.production.expand_runs()

@@ -2,10 +2,7 @@ from types import SimpleNamespace
 
 import torch
 
-from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import (
-    TargetFiLMDecoder,
-    controller_core_view,
-)
+from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import TargetFiLMDecoder, controller_core_view
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DGProjection_batchnorm_relu
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
     BaseDistanceRecorder,
@@ -134,9 +131,7 @@ def test_encoder_decoder_and_simultaneous_gradients_follow_graph_contract():
 
 
 def test_running_consistent_batchnorm_updates_once_and_is_inference_consistent():
-    projection = DGProjection_batchnorm_relu(
-        3, 2, intercept=-10.0, batchnorm_semantics="running_consistent"
-    )
+    projection = DGProjection_batchnorm_relu(3, 2, intercept=-10.0, batchnorm_semantics="running_consistent")
     projection.train()
     x = torch.tensor([[1.0, 0.0, 2.0], [3.0, 2.0, 0.0], [5.0, 1.0, 4.0]])
     raw = projection.linear(x).detach()
@@ -162,9 +157,7 @@ def test_running_consistent_batchnorm_updates_once_and_is_inference_consistent()
 
 
 def test_poststep_atomic_calibrates_updated_weights_and_publishes_one_generation():
-    projection = DGProjection_batchnorm_relu(
-        3, 2, intercept=-10.0, batchnorm_semantics="running_poststep_atomic"
-    )
+    projection = DGProjection_batchnorm_relu(3, 2, intercept=-10.0, batchnorm_semantics="running_poststep_atomic")
     projection.train()
     x = torch.tensor([[1.0, 0.0, 2.0], [3.0, 2.0, 0.0], [5.0, 1.0, 4.0]])
 
@@ -179,9 +172,7 @@ def test_poststep_atomic_calibrates_updated_weights_and_publishes_one_generation
 
     assert int(projection.batchnorm1d.num_batches_tracked) == 1
     assert torch.allclose(projection.batchnorm1d.running_mean, expected.mean(dim=0))
-    assert torch.allclose(
-        projection.batchnorm1d.running_var, expected.var(dim=0, unbiased=False)
-    )
+    assert torch.allclose(projection.batchnorm1d.running_var, expected.var(dim=0, unbiased=False))
     assert projection.weight_generation.item() == 1
     assert projection.statistics_generation.item() == 1
 
@@ -195,9 +186,7 @@ def test_poststep_atomic_calibrates_updated_weights_and_publishes_one_generation
 
 
 def test_input_centered_atomic_removes_feature_common_mode_before_projection():
-    projection = DGProjection_batchnorm_relu(
-        3, 2, intercept=-10.0, batchnorm_semantics="input_centered_atomic"
-    )
+    projection = DGProjection_batchnorm_relu(3, 2, intercept=-10.0, batchnorm_semantics="input_centered_atomic")
     projection.train()
     x = torch.tensor([[10.0, 1.0, 3.0], [12.0, 4.0, 1.0], [14.0, 2.0, 5.0]])
     with projection.running_stats_update(True):
@@ -244,7 +233,9 @@ def test_poststep_calibration_count_updates_returned_loss_summary_scope():
 
 def test_push_pull_rewards_have_opposite_distance_preferences():
     distances = torch.tensor([[0.0, 2.0, 2.0, 0.0], [0.0, 6.0, 6.0, 0.0]])
-    decoder, encoder = legacy_reward_streams(distances, baseline=10.0, reward_scale=0.1, encoder_reward_method="encourage")
+    decoder, encoder = legacy_reward_streams(
+        distances, baseline=10.0, reward_scale=0.1, encoder_reward_method="encourage"
+    )
     assert encoder[1].mean() > encoder[0].mean()
     assert decoder[0].mean() > decoder[1].mean()
 

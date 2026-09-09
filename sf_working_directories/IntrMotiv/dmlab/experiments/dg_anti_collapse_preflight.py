@@ -1,16 +1,17 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.dg_anti_collapse_iteration import (
-    BATCH_NAME,
-    common_variant,
-)
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.dg_anti_collapse_iteration import BATCH_NAME, common_variant
 
 PREFLIGHT_NAME = f"{BATCH_NAME}_preflight"
 
 
 def experiment(name: str, hrl: bool, row_repulsion: bool) -> Experiment:
-    cli = common_variant(99, "punish", 2.0 if not row_repulsion else 2.43, 0.03 if not row_repulsion else 0.0, 0.01 if row_repulsion else 0.0)
+    cli = common_variant(
+        99,
+        "punish",
+        2.0 if not row_repulsion else 2.43,
+        0.03 if not row_repulsion else 0.0,
+        0.01 if row_repulsion else 0.0,
+    )
     cli = cli.replace("--train_for_env_steps=80000000", "--train_for_env_steps=1000000")
     cli += f"--wandb_group={PREFLIGHT_NAME} "
     if hrl:

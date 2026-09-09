@@ -94,7 +94,7 @@ def single_run(cfg, time_str: str, verbose: bool = False):
 
     # learner = create_learner(cfg,env_info,)
 
-    #################### register hook
+    # Register activation hooks.
     layers_to_log = [
         "encoder.basic_encoder.mlp_layers.0",
         "encoder.DG_projection.linear",
@@ -134,7 +134,7 @@ def single_run(cfg, time_str: str, verbose: bool = False):
     checkpoints = BaseDistanceRecorder.get_checkpoints(
         BaseDistanceRecorder.checkpoint_dir(cfg, policy_id), f"{name_prefix}_*"
     )
-    checkpoint_dict = BaseDistanceRecorder.load_checkpoint(checkpoints, device)
+    BaseDistanceRecorder.load_checkpoint(checkpoints, device)
     # actor_critic.load_state_dict(checkpoint_dict["model"])
 
     # if cfg.reset_params:
@@ -148,8 +148,6 @@ def single_run(cfg, time_str: str, verbose: bool = False):
     true_objectives = [deque([], maxlen=100) for _ in range(env.num_agents)]
     num_frames = 0
 
-    last_render_start = time.time()
-
     def max_frames_reached(frames):
         return cfg.max_num_frames is not None and frames > cfg.max_num_frames
 
@@ -160,7 +158,6 @@ def single_run(cfg, time_str: str, verbose: bool = False):
     episode_reward = None
     finished_episode = [False for _ in range(env.num_agents)]
 
-    video_frames = []
     num_episodes = 0
     num_traj = 0
 

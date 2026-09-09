@@ -375,10 +375,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--online_spatial_output_root",
-        default=(
-            "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/"
-            "train_dir/analysis/online_spatial"
-        ),
+        default=("/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/" "train_dir/analysis/online_spatial"),
         type=str,
         help="Workspace analysis root for batch/run/policy spatial snapshots.",
     )
@@ -517,7 +514,9 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="A factor by which the gradients of the encoder get multiplied. Only works when the gradients get flipped/",
     )
     p.add_argument(
-        "--iterative_update", default=False, type=str2bool,
+        "--iterative_update",
+        default=False,
+        type=str2bool,
         help="Alternate encoder and decoder updates using the baseline single optimizer/checkpoint format.",
     )
     p.add_argument(
@@ -553,19 +552,27 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--dg_transition_prediction_hidden_size", default=128, type=int)
     p.add_argument("--dg_transition_prediction_coeff", default=0.1, type=float)
     p.add_argument(
-        "--iterative_initial_encoder_steps", default=128, type=int,
+        "--iterative_initial_encoder_steps",
+        default=128,
+        type=int,
         help="Initial encoder-only optimizer steps before alternating phases.",
     )
     p.add_argument(
-        "--iterative_decoder_steps", default=512, type=int,
+        "--iterative_decoder_steps",
+        default=512,
+        type=int,
         help="Decoder-only optimizer steps in each alternating cycle.",
     )
     p.add_argument(
-        "--iterative_encoder_steps", default=128, type=int,
+        "--iterative_encoder_steps",
+        default=128,
+        type=int,
         help="Encoder-only optimizer steps in each alternating cycle.",
     )
     p.add_argument(
-        "--iterative_start_phase", default="decoder", choices=["decoder", "encoder"],
+        "--iterative_start_phase",
+        default="decoder",
+        choices=["decoder", "encoder"],
         help="Phase immediately after the optional initial encoder warmup.",
     )
     p.add_argument(

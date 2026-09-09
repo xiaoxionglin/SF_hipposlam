@@ -578,11 +578,7 @@ class DmlabGymEnv_custom(gym.Env):
             terminal_pose_fresh = self._refresh_terminal_debug_pose()
 
         info = {"num_frames": self.action_repeat}
-        if (
-            self.with_pos_telemetry
-            and self.last_debug_position is not None
-            and self.last_debug_rotation is not None
-        ):
+        if self.with_pos_telemetry and self.last_debug_position is not None and self.last_debug_rotation is not None:
             # DMLab rotations are (pitch, yaw, roll) in degrees. Keep only the
             # horizontal pose needed by telemetry. This private value is
             # consumed and removed by DmlabRewardShapingWrapper; it is never a

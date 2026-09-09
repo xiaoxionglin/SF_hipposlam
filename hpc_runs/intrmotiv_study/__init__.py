@@ -11,4 +11,3 @@ __all__ = [
     "WORKFLOW_VERSION",
     "load_study",
 ]
-

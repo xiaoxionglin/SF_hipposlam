@@ -11,7 +11,6 @@ from pathlib import Path
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.spec import SpecError
 
-
 STEP = "train/env_steps"
 REPLAY = "intrmotiv/hrl/behavior_replay_mismatch"
 TARGET_VALID = "intrmotiv/hrl/goal_condition/target_valid_fraction"
@@ -55,7 +54,7 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
         prefix = "00_PF_"
         if not experiment.startswith(prefix):
             raise SpecError(f"unexpected preflight experiment {experiment!r}")
-        run_name = experiment[len(prefix):]
+        run_name = experiment[len(prefix) :]
         run = expected[run_name]
         run_dir = train_root / job["train_root"] / experiment
         summary_dir = run_dir / ".summary" / "0"
@@ -94,9 +93,18 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
         accumulator.Reload()
         available = set(accumulator.Tags().get("scalars", []))
         required = {
-            STEP, REPLAY, TARGET_VALID, FRONTIER, PRED_EVENTS, PRED_ELIGIBLE,
-            FULLY_TESTED, RECRUITMENT, TOTAL_EVENTS, CREDITED_EVENTS,
-            ARRIVAL_LOSS, SOURCE_LOSS,
+            STEP,
+            REPLAY,
+            TARGET_VALID,
+            FRONTIER,
+            PRED_EVENTS,
+            PRED_ELIGIBLE,
+            FULLY_TESTED,
+            RECRUITMENT,
+            TOTAL_EVENTS,
+            CREDITED_EVENTS,
+            ARRIVAL_LOSS,
+            SOURCE_LOSS,
         }
         missing = sorted(required - available)
         if missing:
@@ -113,10 +121,18 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
             if not values or not all(math.isfinite(value) for value in values):
                 failures.append(f"nonfinite or empty loss scalar {tag}")
 
-        replay_max = max((abs(value) for value in _values(accumulator, REPLAY)), default=math.nan) if REPLAY in available else math.nan
+        replay_max = (
+            max((abs(value) for value in _values(accumulator, REPLAY)), default=math.nan)
+            if REPLAY in available
+            else math.nan
+        )
         if not math.isfinite(replay_max) or replay_max > 1e-6:
             failures.append(f"behavior replay mismatch max is {replay_max!r}")
-        for tag, label in ((TARGET_VALID, "goal target"), (FRONTIER, "frontier manager"), (PRED_EVENTS, "PRED evidence")):
+        for tag, label in (
+            (TARGET_VALID, "goal target"),
+            (FRONTIER, "frontier manager"),
+            (PRED_EVENTS, "PRED evidence"),
+        ):
             if tag not in available or _maximum(accumulator, tag) <= 0:
                 failures.append(f"{label} had no activity")
 
@@ -125,9 +141,15 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
         match_fraction = credited / total if total > 0 else 0.0
         selected_loss = SOURCE_LOSS if run.factors["encoder_credit"] == "source" else ARRIVAL_LOSS
         excluded_loss = ARRIVAL_LOSS if selected_loss == SOURCE_LOSS else SOURCE_LOSS
-        if selected_loss not in available or max((abs(v) for v in _values(accumulator, selected_loss)), default=0.0) == 0:
+        if (
+            selected_loss not in available
+            or max((abs(v) for v in _values(accumulator, selected_loss)), default=0.0) == 0
+        ):
             failures.append("selected encoder-credit branch had zero loss")
-        if excluded_loss not in available or max((abs(v) for v in _values(accumulator, excluded_loss)), default=math.inf) > 1e-8:
+        if (
+            excluded_loss not in available
+            or max((abs(v) for v in _values(accumulator, excluded_loss)), default=math.inf) > 1e-8
+        ):
             failures.append("unselected encoder-credit branch was nonzero")
 
         recruitment_max = _maximum(accumulator, RECRUITMENT) if RECRUITMENT in available else math.nan
@@ -162,8 +184,7 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
     pooled_match_fraction = pooled_credited / pooled_total if pooled_total > 0 else 0.0
     if pooled_match_fraction < 0.5:
         all_failures.append(
-            "pooled within-rollout predecessor match fraction is "
-            f"{pooled_match_fraction:.3f}, below 0.5"
+            "pooled within-rollout predecessor match fraction is " f"{pooled_match_fraction:.3f}, below 0.5"
         )
     passed = sum(bool(result.get("pass")) for result in results)
     return {

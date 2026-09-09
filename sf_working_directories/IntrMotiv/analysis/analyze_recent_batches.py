@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-
 METRICS = {
     "distance": ("train/distance_metric", "intrmotiv/distance/mean"),
     "dg_density": ("train/dg_density", "intrmotiv/dg/density"),
@@ -87,12 +86,8 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args()
 
-    paths = [
-        ("flat_fixed", path)
-        for path in sorted(args.flat_batch.glob("*/*/.summary/0/events.out.tfevents.*"))
-    ] + [
-        ("persistence", path)
-        for path in sorted(args.persistence_batch.glob("*/*/.summary/0/events.out.tfevents.*"))
+    paths = [("flat_fixed", path) for path in sorted(args.flat_batch.glob("*/*/.summary/0/events.out.tfevents.*"))] + [
+        ("persistence", path) for path in sorted(args.persistence_batch.glob("*/*/.summary/0/events.out.tfevents.*"))
     ]
     rows = [parse_event(path, batch) for batch, path in paths]
     frame = pd.DataFrame(rows)

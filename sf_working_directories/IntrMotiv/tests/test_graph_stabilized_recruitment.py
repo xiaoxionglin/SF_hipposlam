@@ -95,9 +95,7 @@ def test_redundancy_requires_mutual_supported_edges_at_inclusive_boundary(thresh
 
 
 def test_redundancy_loser_uses_supported_incident_confidence_and_tie_breaks_high_index():
-    confidence = torch.tensor(
-        [[0.0, 1.0, 0.8], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float32
-    )
+    confidence = torch.tensor([[0.0, 1.0, 0.8], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float32)
     elapsed = torch.tensor([[0.0, 4.0, 9.0], [4.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
     result = graph_recruitment_eligibility(confidence, elapsed, torch.zeros(3), 0.25, 4)
     assert result.redundant_loser[1]
@@ -107,7 +105,6 @@ def test_redundancy_loser_uses_supported_incident_confidence_and_tie_breaks_high
 
 
 def test_passive_graph_old_checkpoint_defaults_to_protected_empty_state():
-    graph = PassiveRecruitmentGraph(3)
     restored = PassiveRecruitmentGraph(3)
     restored.load_state_dict({}, strict=True)
     assert restored.confidence.eq(0).all()
@@ -122,9 +119,7 @@ def test_policy_buffer_hrl_prefers_tctrl_and_flat_mode_uses_passive_evidence():
     policy = PolicyControllableGraph(2)
     policy.edge_confidence[0, 1] = 1.0
     policy.tctrl[0, 1] = 5.0
-    learner.actor_critic = SimpleNamespace(
-        core=SimpleNamespace(policy_graph=policy, passive_recruitment_graph=passive)
-    )
+    learner.actor_critic = SimpleNamespace(core=SimpleNamespace(policy_graph=policy, passive_recruitment_graph=passive))
     learner.cfg = SimpleNamespace(
         hrl_controllable_graph=True,
         hrl_graph_memory="policy_buffer",
@@ -195,9 +190,7 @@ def test_predictive_rule_is_batch_local_and_context_conditional():
     target = torch.tensor([3, 3, 3, 3])
     context = torch.tensor([1, 1, 2, 2])
     success = torch.tensor([True, True, False, False])
-    result = predictive_recruitment_eligibility(
-        source, target, context, success, torch.zeros(4), n_nodes=4
-    )
+    result = predictive_recruitment_eligibility(source, target, context, success, torch.zeros(4), n_nodes=4)
     assert result.event_count == 4
     assert result.context_group_count == 2
     assert result.eligible.tolist() == [True, False, False, False]

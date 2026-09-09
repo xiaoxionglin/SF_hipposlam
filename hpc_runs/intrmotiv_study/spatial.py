@@ -10,8 +10,8 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 from .spatial_contract import (
-    SPATIAL_DETAIL_ARRAYS,
     SNAPSHOT_SCHEMA,
+    SPATIAL_DETAIL_ARRAYS,
     SpatialBounds,
     SpatialContractError,
     calculate_graph_diagnostics,
@@ -21,7 +21,6 @@ from .spatial_contract import (
     spatial_rate_maps,
 )
 from .spec import SpecError, StudySpec
-
 
 SPATIAL_METRICS = (
     "valid_sample_count",
@@ -219,31 +218,33 @@ def collect_spatial_records(
             int(_scalar(payload, "grain")),
             float(np.asarray(payload.get("stationary_distance", 1.0)).item()),
         )
-        records.append({
-            "run_name": run_name,
-            "condition": run.condition,
-            "base": run.base,
-            "seed": run.seed,
-            **run.factors,
-            **run.metadata,
-            "policy_id": policy_id,
-            "target_env_steps": target,
-            "actual_env_steps": int(_scalar(payload, "actual_env_steps")),
-            "window_limit": int(_scalar(payload, "window_limit")),
-            "scalar_window_limit": int(
-                np.asarray(payload.get("scalar_window_limit", payload["window_limit"])).item()
-            ),
-            "environment": str(_scalar(payload, "environment")),
-            "frameskip": int(_scalar(payload, "frameskip")),
-            "snapshot_path": str(path.resolve()),
-            **metrics,
-            "graph_available": int("control_tctrl" in payload),
-            **{
-                key: float(np.asarray(graph_diagnostics[key]).item())
-                for key in GRAPH_SCALAR_KEYS
-                if key in graph_diagnostics
-            },
-        })
+        records.append(
+            {
+                "run_name": run_name,
+                "condition": run.condition,
+                "base": run.base,
+                "seed": run.seed,
+                **run.factors,
+                **run.metadata,
+                "policy_id": policy_id,
+                "target_env_steps": target,
+                "actual_env_steps": int(_scalar(payload, "actual_env_steps")),
+                "window_limit": int(_scalar(payload, "window_limit")),
+                "scalar_window_limit": int(
+                    np.asarray(payload.get("scalar_window_limit", payload["window_limit"])).item()
+                ),
+                "environment": str(_scalar(payload, "environment")),
+                "frameskip": int(_scalar(payload, "frameskip")),
+                "snapshot_path": str(path.resolve()),
+                **metrics,
+                "graph_available": int("control_tctrl" in payload),
+                **{
+                    key: float(np.asarray(graph_diagnostics[key]).item())
+                    for key in GRAPH_SCALAR_KEYS
+                    if key in graph_diagnostics
+                },
+            }
+        )
     records.sort(key=lambda row: (row["run_name"], row["policy_id"], row["target_env_steps"]))
 
     targets = expected_spatial_targets(study)
@@ -255,12 +256,15 @@ def collect_spatial_records(
         for target in targets
         if (run.name, policy, target) not in observed
     ]
-    inventory = [{
-        "run_name": row["run_name"],
-        "policy_id": row["policy_id"],
-        "target_env_steps": row["target_env_steps"],
-        "snapshot_path": row["snapshot_path"],
-    } for row in records]
+    inventory = [
+        {
+            "run_name": row["run_name"],
+            "policy_id": row["policy_id"],
+            "target_env_steps": row["target_env_steps"],
+            "snapshot_path": row["snapshot_path"],
+        }
+        for row in records
+    ]
     status = {
         **study.provenance(),
         "snapshot_schema": SNAPSHOT_SCHEMA,
@@ -286,9 +290,7 @@ def collect_spatial_detail_records(
     unit_rows: list[dict[str, Any]] = []
     field_rows: list[dict[str, Any]] = []
     edge_rows: list[dict[str, Any]] = []
-    for path, payload in discover_spatial_snapshots(
-        study, snapshot_root, require_workspace=require_workspace
-    ):
+    for path, payload in discover_spatial_snapshots(study, snapshot_root, require_workspace=require_workspace):
         bounds = SpatialBounds(*np.asarray(payload["bounds"], dtype=float).tolist())
         details = _validated_spatial_details(payload, bounds)
         graph = _validated_graph_diagnostics(payload, details)
@@ -301,27 +303,27 @@ def collect_spatial_detail_records(
         }
         units = details["active_fraction"].size
         for unit in range(units):
-            unit_rows.append({
-                **identity,
-                "unit_id": unit,
-                "active_fraction": float(details["active_fraction"][unit]),
-                "spatial_information": float(details["spatial_information"][unit]),
-                "active_observation_count": int(details["field_active_observation_count"][unit]),
-                "active_bin_count": int(details["field_active_bin_count"][unit]),
-                "field_eligible": int(details["field_eligible"][unit]),
-                "mono_field_score": float(details["field_mono_score"][unit]),
-                "mono_field": int(details["field_mono"][unit]),
-                "dominant_peak_x": float(details["field_dominant_peak_xy"][unit, 0]),
-                "dominant_peak_y": float(details["field_dominant_peak_xy"][unit, 1]),
-                "secondary_peak_x": float(details["field_secondary_peak_xy"][unit, 0]),
-                "secondary_peak_y": float(details["field_secondary_peak_xy"][unit, 1]),
-                "primary_secondary_peak_distance": float(
-                    details["field_primary_secondary_peak_distance"][unit]
-                ),
-                "dominant_peak_nearest_neighbor_distance": float(
-                    details["field_dominant_peak_nearest_neighbor_distance"][unit]
-                ),
-            })
+            unit_rows.append(
+                {
+                    **identity,
+                    "unit_id": unit,
+                    "active_fraction": float(details["active_fraction"][unit]),
+                    "spatial_information": float(details["spatial_information"][unit]),
+                    "active_observation_count": int(details["field_active_observation_count"][unit]),
+                    "active_bin_count": int(details["field_active_bin_count"][unit]),
+                    "field_eligible": int(details["field_eligible"][unit]),
+                    "mono_field_score": float(details["field_mono_score"][unit]),
+                    "mono_field": int(details["field_mono"][unit]),
+                    "dominant_peak_x": float(details["field_dominant_peak_xy"][unit, 0]),
+                    "dominant_peak_y": float(details["field_dominant_peak_xy"][unit, 1]),
+                    "secondary_peak_x": float(details["field_secondary_peak_xy"][unit, 0]),
+                    "secondary_peak_y": float(details["field_secondary_peak_xy"][unit, 1]),
+                    "primary_secondary_peak_distance": float(details["field_primary_secondary_peak_distance"][unit]),
+                    "dominant_peak_nearest_neighbor_distance": float(
+                        details["field_dominant_peak_nearest_neighbor_distance"][unit]
+                    ),
+                }
+            )
         smoothed = details["smoothed_rate_maps"]
         labels = details["field_component_labels"]
         for threshold_index, fraction in enumerate(details["field_threshold_fractions"]):
@@ -340,18 +342,20 @@ def collect_spatial_detail_records(
                         int(np.argmax(np.where(component_mask, smoothed[:, :, unit], -np.inf))),
                         component_mask.shape,
                     )
-                    field_rows.append({
-                        **identity,
-                        "unit_id": unit,
-                        "threshold_fraction": float(fraction),
-                        "component_id": component,
-                        "mass_rank": rank[component],
-                        "bin_count": int(component_mask.sum()),
-                        "superlevel_mass": mass,
-                        "superlevel_mass_fraction": mass / total_mass if total_mass else 0.0,
-                        "peak_x_bin": int(column),
-                        "peak_y_bin": int(row),
-                    })
+                    field_rows.append(
+                        {
+                            **identity,
+                            "unit_id": unit,
+                            "threshold_fraction": float(fraction),
+                            "component_id": component,
+                            "mass_rank": rank[component],
+                            "bin_count": int(component_mask.sum()),
+                            "superlevel_mass": mass,
+                            "superlevel_mass_fraction": mass / total_mass if total_mass else 0.0,
+                            "peak_x_bin": int(column),
+                            "peak_y_bin": int(row),
+                        }
+                    )
         if "control_tctrl" in payload:
             reliable = graph["graph_reliable_adjacency"]
             distances = graph["graph_reliable_edge_peak_distance"]
@@ -417,26 +421,28 @@ def _figure_runtime():
     import matplotlib
 
     matplotlib.use("Agg")
-    from matplotlib import font_manager
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
 
-    font_path = Path(font_manager.findfont(
-        font_manager.FontProperties(family="DejaVu Sans"), fallback_to_default=False
-    ))
+    font_path = Path(
+        font_manager.findfont(font_manager.FontProperties(family="DejaVu Sans"), fallback_to_default=False)
+    )
     if font_path.suffix.lower() not in {".ttf", ".otf"} or not font_path.is_file():
         raise RuntimeError("a verified scalable DejaVu Sans TTF/OTF font is required")
-    plt.rcParams.update({
-        "font.family": "DejaVu Sans",
-        "font.size": 18,
-        "axes.titlesize": 20,
-        "axes.labelsize": 18,
-        "xtick.labelsize": 16,
-        "ytick.labelsize": 16,
-        "legend.fontsize": 16,
-        "figure.titlesize": 22,
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    plt.rcParams.update(
+        {
+            "font.family": "DejaVu Sans",
+            "font.size": 18,
+            "axes.titlesize": 20,
+            "axes.labelsize": 18,
+            "xtick.labelsize": 16,
+            "ytick.labelsize": 16,
+            "legend.fontsize": 16,
+            "figure.titlesize": 22,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+        }
+    )
     return plt
 
 
@@ -498,9 +504,7 @@ def render_occupancy_trajectory(payload: Mapping[str, Any], output_stem: Path) -
     segments = np.asarray(payload["segment_id"], dtype=np.int64)
     bounds_values = np.asarray(payload["bounds"], dtype=float)
     bounds = SpatialBounds(*bounds_values.tolist())
-    _, occupancy, _ = spatial_rate_maps(
-        pose, payload["dg_activity"], bounds, int(_scalar(payload, "grain"))
-    )
+    _, occupancy, _ = spatial_rate_maps(pose, payload["dg_activity"], bounds, int(_scalar(payload, "grain")))
     fig, (occupancy_ax, trajectory_ax) = plt.subplots(1, 2, figsize=(14, 7), constrained_layout=True)
     cmap = plt.get_cmap("cividis").copy()
     cmap.set_bad("#eeeeee")
@@ -527,8 +531,16 @@ def render_occupancy_trajectory(payload: Mapping[str, Any], output_stem: Path) -
     stride = max(1, pose.shape[0] // 100)
     yaw = np.deg2rad(pose[::stride, 2])
     trajectory_ax.quiver(
-        pose[::stride, 0], pose[::stride, 1], np.cos(yaw), np.sin(yaw),
-        color="#202020", angles="xy", scale_units="xy", scale=0.012, width=0.0025, alpha=0.65,
+        pose[::stride, 0],
+        pose[::stride, 1],
+        np.cos(yaw),
+        np.sin(yaw),
+        color="#202020",
+        angles="xy",
+        scale_units="xy",
+        scale=0.012,
+        width=0.0025,
+        alpha=0.65,
     )
     trajectory_ax.set_xlim(bounds.x_min, bounds.x_max)
     trajectory_ax.set_ylim(bounds.y_min, bounds.y_max)

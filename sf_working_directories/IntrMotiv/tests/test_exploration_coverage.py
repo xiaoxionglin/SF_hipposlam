@@ -67,11 +67,13 @@ def test_online_spatial_pose_is_a_float32_privileged_observation():
     env.last_debug_position = None
     env.last_debug_rotation = None
 
-    obs = env.format_obs_dict({
-        "RGB": np.zeros((2, 2, 3), dtype=np.uint8),
-        "DEBUG.POS.TRANS": np.asarray((7.0, 11.0, 13.0)),
-        "DEBUG.POS.ROT": np.asarray((1.0, 45.0, 2.0)),
-    })
+    obs = env.format_obs_dict(
+        {
+            "RGB": np.zeros((2, 2, 3), dtype=np.uint8),
+            "DEBUG.POS.TRANS": np.asarray((7.0, 11.0, 13.0)),
+            "DEBUG.POS.ROT": np.asarray((1.0, 45.0, 2.0)),
+        }
+    )
 
     assert set(obs) == {"obs", "telemetry_pose"}
     assert obs["telemetry_pose"].dtype == np.float32

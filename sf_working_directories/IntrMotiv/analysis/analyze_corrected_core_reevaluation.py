@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-
 CELLS = {
     1: "Flat control",
     2: "Direct delayed",

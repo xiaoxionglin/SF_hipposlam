@@ -1,7 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.hrl_intrinsic_iteration2 import BASE_CLI
-
 
 BATCH_NAME = "intrmotiv_hrl_iteration2_iterative_preflight_20260820"
 

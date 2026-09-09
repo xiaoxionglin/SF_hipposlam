@@ -13,7 +13,6 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-
 WORKSPACE_ROOT = pathlib.Path("/work/classic/fr_xl1014-train")
 REQUIRED_COLUMNS = (
     "condition",
@@ -124,11 +123,13 @@ def build_sbatch_command(
             "WANDB_MODE=disabled",
         )
     )
-    for key, value in (("PLACE_FIELD_RECORD_PANEL", record_observation_panel),
-                       ("PLACE_FIELD_REPLAY_PANEL", replay_observation_panel)):
+    for key, value in (
+        ("PLACE_FIELD_RECORD_PANEL", record_observation_panel),
+        ("PLACE_FIELD_REPLAY_PANEL", replay_observation_panel),
+    ):
         if value is not None:
             path = workspace_path(value, "Observation panel")
-            if ',' in str(path):
+            if "," in str(path):
                 raise ValueError("Observation panel path cannot contain Slurm export delimiters")
             export += f",{key}={path}"
     return [

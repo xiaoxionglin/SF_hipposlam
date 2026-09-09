@@ -1,4 +1,5 @@
 # from asyncio.sslproto import add_flowcontrol_defaults
+import copy
 from contextlib import contextmanager
 from email import header
 from logging import warning
@@ -6,10 +7,9 @@ from logging import warning
 import gymnasium as gym
 import numpy as np
 import torch
-import copy
 import torch.nn.functional as F
 import torchvision.models as models
-from torch import Tensor, device, nn
+from torch import Tensor, nn
 
 from sample_factory.model.encoder import ConvEncoder, Encoder, ResnetEncoder
 from sample_factory.model.model_utils import model_device
@@ -436,9 +436,7 @@ class DGProjection_batchnorm_relu(nn.Module):
             if int(self.feature_num_batches_tracked.item()) == 0:
                 self.feature_running_mean.copy_(batch_mean)
             else:
-                momentum = float(
-                    self.batchnorm1d.momentum if self.batchnorm1d.momentum is not None else 0.1
-                )
+                momentum = float(self.batchnorm1d.momentum if self.batchnorm1d.momentum is not None else 0.1)
                 self.feature_running_mean.lerp_(batch_mean, momentum)
             self.feature_num_batches_tracked.add_(1)
 
@@ -682,7 +680,7 @@ class DGProjectionWithRunningQuantile(nn.Module):
         return output
 
 
-##### Actual Encoders For This Project #####
+# Actual encoders for this project
 
 
 class DepthEncoder(Encoder):
@@ -692,13 +690,9 @@ class DepthEncoder(Encoder):
         input_ch = 1
         log.debug("Num input channels for depth encoder: %d", input_ch)
 
-        if cfg.encoder_conv_architecture in ("resnet_impala", "pretrained_resnet", "layer2_resnet18"):
-            # configuration from the IMPALA paper
-            resnet_conf = [[16, 2], [32, 2], [32, 2]]
-        else:
+        if cfg.encoder_conv_architecture not in ("resnet_impala", "pretrained_resnet", "layer2_resnet18"):
             raise NotImplementedError(f"Unknown resnet architecture {cfg.encoder_conv_architecture}")
 
-        curr_input_channels = input_ch
         self.downsample = nn.Upsample(size=(1, 10))
 
         self.encoder_out_size = size
@@ -772,7 +766,6 @@ class FixedMobileNetSmallEncoder(Encoder):
     def __init__(self, cfg, obs_space, pretrained=True, fixed=True):
         super().__init__(cfg)
 
-        input_ch = obs_space.shape[0]
         # Load the pretrained MobileNetV3 Small weights from torchvision.
         weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None
         mobilenet = models.mobilenet_v3_small(weights=weights)
@@ -922,7 +915,9 @@ class HipposlamEncoder(Encoder):
             payload = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
             model_state = payload.get("model", payload)
             prefix = "encoder.DG_projection."
-            reference_state = {key[len(prefix):]: value for key, value in model_state.items() if key.startswith(prefix)}
+            reference_state = {
+                key[len(prefix) :]: value for key, value in model_state.items() if key.startswith(prefix)
+            }
             self.goal_reference_projection = copy.deepcopy(self.DG_projection)
             # DGProjection_batchnorm_relu's state-dict hook supplies initialized
             # values for bookkeeping buffers introduced after older checkpoints.

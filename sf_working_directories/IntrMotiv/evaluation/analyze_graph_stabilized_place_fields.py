@@ -10,7 +10,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
 BACKBONES = ("C05", "C13", "C15")
 CELLS = ((4, 5), (4, 10), (8, 5), (8, 10))
 SEEDS = (8, 99, 123)
@@ -52,8 +51,7 @@ def validate(frame: pd.DataFrame) -> None:
         for seed in SEEDS
     }
     observed = set(
-        frame[["backbone", "redundancy_max_steps", "half_life_k", "seed"]]
-        .itertuples(index=False, name=None)
+        frame[["backbone", "redundancy_max_steps", "half_life_k", "seed"]].itertuples(index=False, name=None)
     )
     if observed != expected:
         raise ValueError(
@@ -83,36 +81,18 @@ def condition_summary(frame: pd.DataFrame) -> pd.DataFrame:
 def paired_factor_effects(frame: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for backbone in BACKBONES:
-        subset = frame[frame["backbone"] == backbone].set_index(
-            ["seed", "redundancy_max_steps", "half_life_k"]
-        )
+        subset = frame[frame["backbone"] == backbone].set_index(["seed", "redundancy_max_steps", "half_life_k"])
         for metric in METRICS:
             by_seed: dict[int, dict[str, float]] = {}
             for seed in SEEDS:
+
                 def value(distance: int, half_life: int) -> float:
                     return float(subset.loc[(seed, distance, half_life), metric])
 
                 by_seed[seed] = {
-                    "D8_minus_D4": 0.5
-                    * (
-                        value(8, 5)
-                        - value(4, 5)
-                        + value(8, 10)
-                        - value(4, 10)
-                    ),
-                    "H10k_minus_H5k": 0.5
-                    * (
-                        value(4, 10)
-                        - value(4, 5)
-                        + value(8, 10)
-                        - value(8, 5)
-                    ),
-                    "interaction": (
-                        value(8, 10)
-                        - value(4, 10)
-                        - value(8, 5)
-                        + value(4, 5)
-                    ),
+                    "D8_minus_D4": 0.5 * (value(8, 5) - value(4, 5) + value(8, 10) - value(4, 10)),
+                    "H10k_minus_H5k": 0.5 * (value(4, 10) - value(4, 5) + value(8, 10) - value(8, 5)),
+                    "interaction": (value(8, 10) - value(4, 10) - value(8, 5) + value(4, 5)),
                 }
             for effect in ("D8_minus_D4", "H10k_minus_H5k", "interaction"):
                 values = np.asarray([by_seed[seed][effect] for seed in SEEDS])
@@ -124,10 +104,7 @@ def paired_factor_effects(frame: pd.DataFrame) -> pd.DataFrame:
                         "mean": float(values.mean()),
                         "sd": float(values.std(ddof=1)),
                         "n": len(values),
-                        **{
-                            f"seed_{seed}": by_seed[seed][effect]
-                            for seed in SEEDS
-                        },
+                        **{f"seed_{seed}": by_seed[seed][effect] for seed in SEEDS},
                     }
                 )
     return pd.DataFrame(rows)
@@ -249,12 +226,8 @@ def main() -> None:
     frame = parse_design(pd.read_csv(args.input_csv))
     validate(frame)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    condition_summary(frame).to_csv(
-        args.output_dir / "place_field_condition_summary.csv", index=False
-    )
-    paired_factor_effects(frame).to_csv(
-        args.output_dir / "place_field_paired_factor_effects.csv", index=False
-    )
+    condition_summary(frame).to_csv(args.output_dir / "place_field_condition_summary.csv", index=False)
+    paired_factor_effects(frame).to_csv(args.output_dir / "place_field_paired_factor_effects.csv", index=False)
     plot_overview(frame, args.output_dir)
     print(
         f"Analyzed {len(frame)} runs at target {int(frame.target_frames.iloc[0])}; "

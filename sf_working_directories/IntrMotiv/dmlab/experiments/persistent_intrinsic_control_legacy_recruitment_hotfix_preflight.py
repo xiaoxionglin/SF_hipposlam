@@ -1,12 +1,7 @@
 """Force the legacy-recruitment/policy-graph invalidation path once."""
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import (
-    CELLS,
-    make_experiment,
-)
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import CELLS, make_experiment
 
 BATCH_NAME = "intrmotiv_persistent_intrinsic_control_legacy_recruitment_hotfix_preflight_20260908"
 C15 = next(cell for cell in CELLS if cell.number == 15)

@@ -12,3 +12,4 @@ repos:
     rev: 7.1.0
     hooks:
     -   id: flake8
+        exclude: ^(sf_working_directories/(default|jannek)/|sf_xxl/)

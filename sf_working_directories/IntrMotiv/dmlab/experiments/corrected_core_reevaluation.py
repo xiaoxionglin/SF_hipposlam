@@ -5,12 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.dg_structural_diversity import (
     COMMON_CLI as HISTORICAL_COMMON_CLI,
-    PROJECT as HISTORICAL_PROJECT,
 )
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.dg_structural_diversity import PROJECT as HISTORICAL_PROJECT
 
 BATCH_NAME = "intrmotiv_corrected_core_reevaluation_20260901"
 PROJECT = "SF_IntrMotiv_CorrectedCoreReevaluation"
@@ -66,14 +64,14 @@ CELLS = (
     ),
     Cell(14, "TOPOLOGY_VISIT_O1", timing="delayed", recruitment=True, deadline="long", manager="topology_visit_direct"),
     Cell(15, "TOPOLOGY_UCB_DIRECT_O1", timing="delayed", recruitment=True, deadline="long", manager="frontier_direct"),
-    Cell(16, "TOPOLOGY_UCB_WAYPOINT_O1", timing="delayed", recruitment=True, deadline="long", manager="frontier_waypoint"),
+    Cell(
+        16, "TOPOLOGY_UCB_WAYPOINT_O1", timing="delayed", recruitment=True, deadline="long", manager="frontier_waypoint"
+    ),
 )
 
 
 COMMON_CLI = (
-    HISTORICAL_COMMON_CLI.replace(
-        f"--wandb_project={HISTORICAL_PROJECT}", f"--wandb_project={PROJECT}"
-    )
+    HISTORICAL_COMMON_CLI.replace(f"--wandb_project={HISTORICAL_PROJECT}", f"--wandb_project={PROJECT}")
     .replace(
         "--save_best_metric=distance_metric",
         "--save_best_metric=z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
@@ -103,8 +101,9 @@ def make_experiment(
     name = f"{prefix}CCR_C{cell.number:02d}_{cell.tag}_S{seed}"
     group = f"{BATCH_NAME}_{group_suffix}" if group_suffix else BATCH_NAME
     cli = (
-        COMMON_CLI.replace("--train_for_env_steps=100000000", f"--train_for_env_steps={train_for_env_steps}")
-        .replace("--iterative_update=False", f"--iterative_update={cell.iterative}")
+        COMMON_CLI.replace("--train_for_env_steps=100000000", f"--train_for_env_steps={train_for_env_steps}").replace(
+            "--iterative_update=False", f"--iterative_update={cell.iterative}"
+        )
         + f"--seed={seed} "
         + f"--dg_global_punishment_coeff={cell.global_coeff} "
         + f"--dg_row_repulsion_coeff={cell.row_coeff} "

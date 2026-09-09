@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import gymnasium as gym
 import numpy as np
 import torch
-import gymnasium as gym
 
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
 from sf_working_directories.IntrMotiv.dmlab.dmlab_gym import DmlabGymEnv_custom
@@ -282,11 +282,17 @@ def test_terminal_path_telemetry_skips_a_stale_position():
             return {}, {}
 
         def step(self, action):
-            return {}, 0.0, True, False, {
-                "num_frames": 1,
-                "intrmotiv_position": np.asarray((0.0, 0.0, 0.0)),
-                "intrmotiv_terminal_position_fresh": False,
-            }
+            return (
+                {},
+                0.0,
+                True,
+                False,
+                {
+                    "num_frames": 1,
+                    "intrmotiv_position": np.asarray((0.0, 0.0, 0.0)),
+                    "intrmotiv_terminal_position_fresh": False,
+                },
+            )
 
     wrapped = DmlabRewardShapingWrapper(FakeEnv(), action_path_integration=True)
     wrapped.reset()
@@ -748,9 +754,7 @@ def test_immediate_target_geometry_and_mode_match_packed_replay():
         sampled_states.append(sampled_state.clone())
     sampled_outputs = torch.stack(sampled_outputs)
 
-    packed = torch.nn.utils.rnn.pack_padded_sequence(
-        sequence, torch.tensor([sequence.size(0)]), enforce_sorted=False
-    )
+    packed = torch.nn.utils.rnn.pack_padded_sequence(sequence, torch.tensor([sequence.size(0)]), enforce_sorted=False)
     packed_output, replay_state = core(packed, state.clone())
     replay_output, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_output)
     assert torch.equal(replay_output, sampled_outputs)

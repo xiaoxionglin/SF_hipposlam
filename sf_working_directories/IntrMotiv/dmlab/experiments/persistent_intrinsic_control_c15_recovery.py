@@ -1,12 +1,7 @@
 """Resume all three C15 runs from their last pre-hotfix checkpoints."""
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.persistent_intrinsic_control_c15 import (
-    STUDY,
-    build,
-)
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.persistent_intrinsic_control_c15 import STUDY, build
 
 RECOVERY_CHECKPOINTS = {
     8: "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_persistent_intrinsic_control_c15_r2_20260908/PIC_C15_CONTINUE_S8_/00_PIC_C15_CONTINUE_S8/checkpoint_p0/checkpoint_000010198_167084032.pth",
@@ -17,9 +12,7 @@ RECOVERY_CHECKPOINTS = {
 
 def recovery_experiment(run):
     original = build(run)
-    old_checkpoint = next(
-        arg for arg in run.args if arg.startswith("--load_model_path=")
-    )
+    old_checkpoint = next(arg for arg in run.args if arg.startswith("--load_model_path="))
     command = original.cmd.replace(
         old_checkpoint,
         f"--load_model_path={RECOVERY_CHECKPOINTS[run.seed]}",

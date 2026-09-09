@@ -1,7 +1,6 @@
 """Complete the paired 20-run frontier-manager and waypoint comparison."""
 
 from sample_factory.launcher.run_description import RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import (
     BATCH_NAME,
     CONDITIONS,
@@ -9,7 +8,6 @@ from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolati
     make_experiment,
 )
 from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import Cell
-
 
 # The initial submission already contains the first three seeds for the first
 # two rows. This extension adds only the missing fourteen jobs.

@@ -1,10 +1,7 @@
 import torch
 
-from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
-    dg_global_punishment_loss,
-    dg_row_repulsion_loss,
-)
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DGProjection_batchnorm_relu
+from sf_working_directories.IntrMotiv.dmlab.custom_learner import dg_global_punishment_loss, dg_row_repulsion_loss
 
 
 def test_batchnorm_projection_retains_pre_threshold_logits():

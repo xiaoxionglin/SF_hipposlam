@@ -8,9 +8,7 @@ from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
     build_matched_encoder_credit,
     retirement_endpoint_allowed,
 )
-from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import (
-    PersistentPredictiveRecruitmentEvidence,
-)
+from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import PersistentPredictiveRecruitmentEvidence
 
 
 def _credit_inputs():
@@ -45,23 +43,17 @@ def test_arrival_and_source_credit_share_events_and_reward_mass_but_not_recipien
 def test_source_credit_drops_boundary_invalid_and_unverified_alignment():
     progression, candidates, dominant, valid, baseline = _credit_inputs()
     progression[0, 4, 1] = 5  # resolves before this actor rollout
-    _, _, stats = build_matched_encoder_credit(
-        progression, candidates, dominant, valid, baseline, 0.1, "source"
-    )
+    _, _, stats = build_matched_encoder_credit(progression, candidates, dominant, valid, baseline, 0.1, "source")
     assert stats["boundary_dropped"].item() == 1
 
     progression, candidates, dominant, valid, baseline = _credit_inputs()
     valid[0, 2] = False
-    _, _, stats = build_matched_encoder_credit(
-        progression, candidates, dominant, valid, baseline, 0.1, "source"
-    )
+    _, _, stats = build_matched_encoder_credit(progression, candidates, dominant, valid, baseline, 0.1, "source")
     assert stats["invalid_interval"].item() == 1
 
     progression, candidates, dominant, valid, baseline = _credit_inputs()
     dominant[0, 1, 1] = False
-    _, _, stats = build_matched_encoder_credit(
-        progression, candidates, dominant, valid, baseline, 0.1, "source"
-    )
+    _, _, stats = build_matched_encoder_credit(progression, candidates, dominant, valid, baseline, 0.1, "source")
     assert stats["alignment_failure"].item() == 1
 
 
@@ -193,9 +185,7 @@ def test_core_checkpoint_contains_persistent_pred_without_changing_rnn_state_sha
     # child module supplies zero defaults so strict model restoration remains
     # backward compatible.
     legacy_state = {
-        key: value
-        for key, value in state.items()
-        if not key.startswith("predictive_recruitment_evidence.")
+        key: value for key, value in state.items() if not key.startswith("predictive_recruitment_evidence.")
     }
     legacy_restored = SimpleSequenceWithBypassCore(cfg, 16)
     legacy_restored.load_state_dict(legacy_state, strict=True)

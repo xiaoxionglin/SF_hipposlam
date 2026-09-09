@@ -5,14 +5,15 @@ from types import SimpleNamespace
 import gymnasium as gym
 import torch
 from torch import nn
-from sample_factory.utils.attr_dict import AttrDict
 
+from sample_factory.utils.attr_dict import AttrDict
 from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import (
     IntrMotivActorCriticSharedWeights,
     TargetFiLMDecoder,
     TargetRelativeDecoder,
 )
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
+from sf_working_directories.IntrMotiv.dmlab.topological_frontier import MODE_EXPLORE, MODE_VALIDATE, N_MANAGER_MODES
 
 
 def test_target_relative_adapter_uses_32d_target_and_selected_trace_without_registering_core():
@@ -103,11 +104,6 @@ def test_target_id_film_checkpoint_round_trip_preserves_modulation():
     second.load_state_dict(first.state_dict())
     for name, value in first.state_dict().items():
         assert torch.equal(value, second.state_dict()[name])
-from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
-    MODE_EXPLORE,
-    MODE_VALIDATE,
-    N_MANAGER_MODES,
-)
 
 
 class _ActionParameters(nn.Module):
@@ -181,8 +177,7 @@ def _has_nonzero_grad(module):
 
 def _has_only_zero_or_missing_grad(module):
     return all(
-        parameter.grad is None or torch.count_nonzero(parameter.grad).item() == 0
-        for parameter in module.parameters()
+        parameter.grad is None or torch.count_nonzero(parameter.grad).item() == 0 for parameter in module.parameters()
     )
 
 

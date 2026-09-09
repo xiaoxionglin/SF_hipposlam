@@ -9,7 +9,6 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 
 from hpc_runs.intrmotiv_study import load_study
 
-
 TAGS = {
     "frames": "train/env_steps",
     "onset": "intrmotiv/memory/onset_fraction",
@@ -48,8 +47,11 @@ def audit(study, root: Path, required_frames: int):
         for key, tag in TAGS.items():
             applicable = goal or key not in {"goal_active", "goal_hit", "goal_ambiguous", "replay_mismatch"}
             events = sorted(values.get(tag, []), key=lambda event: event.wall_time) if applicable else []
-            record[key] = ({"last": events[-1].value, "max": max(event.value for event in events), "samples": len(events)}
-                           if events else {"last": None, "max": 0.0, "samples": 0, "applicable": applicable})
+            record[key] = (
+                {"last": events[-1].value, "max": max(event.value for event in events), "samples": len(events)}
+                if events
+                else {"last": None, "max": 0.0, "samples": 0, "applicable": applicable}
+            )
             if applicable and (not events or any(not math.isfinite(event.value) for event in events)):
                 record["errors"].append(f"{key}: missing or nonfinite")
         if record["frames"]["max"] < required_frames:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import math
+from collections import defaultdict
 from statistics import fmean, stdev
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -100,12 +100,14 @@ def linear_contrasts(
                 selected.append((weight, matches[0]))
             for metric in metrics:
                 value = sum(weight * _number(record.get(metric), metric) for weight, record in selected)
-                detailed.append({
-                    **dict(zip(cell_fields, cell_key)),
-                    "contrast": name,
-                    "metric": metric,
-                    "value": value,
-                })
+                detailed.append(
+                    {
+                        **dict(zip(cell_fields, cell_key)),
+                        "contrast": name,
+                        "metric": metric,
+                        "value": value,
+                    }
+                )
 
     summary_groups: dict[tuple[Any, ...], list[float]] = defaultdict(list)
     summary_fields = [*group_by, "contrast", "metric"]
@@ -116,11 +118,12 @@ def linear_contrasts(
     summary: list[dict[str, Any]] = []
     for group_key in sorted(summary_groups, key=lambda value: tuple(map(str, value))):
         values = summary_groups[group_key]
-        summary.append({
-            **dict(zip(summary_fields, group_key)),
-            "mean": fmean(values),
-            "sd": stdev(values) if len(values) > 1 else math.nan,
-            "n": len(values),
-        })
+        summary.append(
+            {
+                **dict(zip(summary_fields, group_key)),
+                "mean": fmean(values),
+                "sd": stdev(values) if len(values) > 1 else math.nan,
+                "n": len(values),
+            }
+        )
     return detailed, summary
-

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 import gymnasium as gym
-from torch import Tensor, nn
 import torch
+from torch import Tensor, nn
 
 from sample_factory.algo.utils.action_distributions import get_action_distribution
 from sample_factory.algo.utils.tensor_dict import TensorDict
@@ -24,9 +24,7 @@ def controller_core_view(core_output: Tensor, ca3_size: int, ppo_dg_gradient: st
         return core_output
     if ppo_dg_gradient != "stop":
         raise ValueError(f"Unknown ppo_dg_gradient={ppo_dg_gradient}")
-    return torch.cat(
-        (core_output[:, : int(ca3_size)].detach(), core_output[:, int(ca3_size) :]), dim=-1
-    )
+    return torch.cat((core_output[:, : int(ca3_size)].detach(), core_output[:, int(ca3_size) :]), dim=-1)
 
 
 class _PreserveMarkedInitializationMixin:
@@ -68,13 +66,9 @@ class TargetRelativeDecoder(nn.Module):
         valid = target.sum(dim=-1) > 0
         target_id = target.argmax(dim=-1)
         target_id = torch.where(valid, target_id, torch.full_like(target_id, self.n_targets))
-        ca3 = core_output[:, : self.core_output_size].reshape(
-            -1, self.n_targets, self.expanded_length
-        )
+        ca3 = core_output[:, : self.core_output_size].reshape(-1, self.n_targets, self.expanded_length)
         selected_trace = (ca3 * target.unsqueeze(-1)).sum(dim=1)
-        relative = torch.cat(
-            (self.target_embedding(target_id), self.trace_projection(selected_trace)), dim=-1
-        )
+        relative = torch.cat((self.target_embedding(target_id), self.trace_projection(selected_trace)), dim=-1)
         return self.network(torch.cat((core_output, relative), dim=-1))
 
     def get_out_size(self) -> int:
@@ -102,9 +96,7 @@ class TargetFiLMDecoder(nn.Module):
         # A one-hot target left-multiplies this table to select one row. Keeping
         # this as an explicit parameter makes the conditioning operation
         # transparent and maps an all-zero no-target vector to zero modulation.
-        self.target_modulation = nn.Parameter(
-            torch.zeros(self.n_targets, 2 * hidden_size)
-        )
+        self.target_modulation = nn.Parameter(torch.zeros(self.n_targets, 2 * hidden_size))
         self.output_layer = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
@@ -173,9 +165,7 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             self.critic_linear.apply(self.initialize_weights)
             self.action_parameterization.apply(self.initialize_weights)
 
-        self.separate_goal_controllers = (
-            getattr(cfg, "intrinsic_goal_controller", "shared") == "separate"
-        )
+        self.separate_goal_controllers = getattr(cfg, "intrinsic_goal_controller", "shared") == "separate"
         if getattr(self, "separate_goal_controllers", False):
             if getattr(cfg, "intrinsic_goal_mode", "none") == "none":
                 raise ValueError("Separate goal controllers require intrinsic goals")
@@ -235,16 +225,18 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
         # bypass, target, geometry, and manager-mode features retain their
         # existing PPO gradient paths.
         ca3_size = int(getattr(self.core, "core_output_size", 0))
-        controller_output = controller_core_view(
-            core_output, ca3_size, getattr(self, "ppo_dg_gradient", "stop")
-        )
+        controller_output = controller_core_view(core_output, ca3_size, getattr(self, "ppo_dg_gradient", "stop"))
         if getattr(self, "separate_goal_controllers", False):
             start = self.core.target_condition_start
-            target = controller_output[:, start:start + int(self.cfg.Hippo_n_feature)]
+            target = controller_output[:, start : start + int(self.cfg.Hippo_n_feature)]
             valid = target.sum(-1, keepdim=True).gt(0)
-            selector = torch.where(valid, target, torch.nn.functional.one_hot(
-                torch.zeros(target.size(0), dtype=torch.long, device=target.device), target.size(1)
-            ).to(target.dtype))
+            selector = torch.where(
+                valid,
+                target,
+                torch.nn.functional.one_hot(
+                    torch.zeros(target.size(0), dtype=torch.long, device=target.device), target.size(1)
+                ).to(target.dtype),
+            )
             decoded = [decoder(controller_output) for decoder in self.goal_decoders]
             values_by_goal = torch.stack(
                 [critic(hidden).squeeze(-1) for critic, hidden in zip(self.goal_critics, decoded)], dim=1
@@ -266,12 +258,8 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             return super().forward_tail(controller_output, values_only, sample_actions, action_mask)
 
         goal_output = self.decoder(controller_output)
-        exploration_output = self.exploration_decoder(
-            controller_output[:, : self.core.policy_base_output_size]
-        )
-        mode = controller_output[
-            :, self.core.mode_condition_start : self.core.mode_condition_start + 5
-        ]
+        exploration_output = self.exploration_decoder(controller_output[:, : self.core.policy_base_output_size])
+        mode = controller_output[:, self.core.mode_condition_start : self.core.mode_condition_start + 5]
         free_exploration = mode[:, 2] > 0.5
         goal_values = self.critic_linear(goal_output).squeeze()
         exploration_values = self.exploration_critic_linear(exploration_output).squeeze()
@@ -281,12 +269,8 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             return result
 
         goal_params, _ = self.action_parameterization(goal_output, action_mask)
-        exploration_params, _ = self.exploration_action_parameterization(
-            exploration_output, action_mask
-        )
-        action_params = torch.where(
-            free_exploration.unsqueeze(-1), exploration_params, goal_params
-        )
+        exploration_params, _ = self.exploration_action_parameterization(exploration_output, action_mask)
+        action_params = torch.where(free_exploration.unsqueeze(-1), exploration_params, goal_params)
         self.last_action_distribution = get_action_distribution(self.action_space, action_params)
         result["action_logits"] = action_params
         result["free_exploration_mask"] = free_exploration

@@ -11,7 +11,6 @@ from pathlib import Path
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-
 METRICS = {
     "target_hit_rate": "intrmotiv/hrl/target_hit_rate",
     "timeout_rate": "intrmotiv/hrl/option_timeout_rate",

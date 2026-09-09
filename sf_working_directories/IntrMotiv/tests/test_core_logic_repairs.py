@@ -10,13 +10,9 @@ from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
     dg_unused_batch_recruitment_loss,
     normalize_dg_projection_rows,
 )
-from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import source_from_trace
+from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import hrl_option_state_size, source_from_trace
+from sf_working_directories.IntrMotiv.dmlab.topological_frontier import GEOMETRY_POLICY_SIZE, topological_state_size
 from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import maybe_overwrite_rnn_size
-from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
-    GEOMETRY_POLICY_SIZE,
-    topological_state_size,
-)
-from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import hrl_option_state_size
 
 
 def test_marked_pretrained_layer_is_not_reinitialized():
@@ -111,6 +107,7 @@ def test_immediate_manager_descriptor_is_in_allocated_and_persistent_rnn_size():
         Hippo_L=64,
         Hippo_n_feature=n,
     )
+
     # AttrDict-style dotted lookup used by production resolves to the nested
     # CLI value; emulate it for this focused sizing test.
     class Config(SimpleNamespace):

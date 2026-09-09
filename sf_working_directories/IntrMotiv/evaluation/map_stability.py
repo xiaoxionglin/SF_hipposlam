@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
 MIN_PEAK_OCCUPANCY = 3
 
 
@@ -66,7 +65,9 @@ def main() -> None:
     if len(rows) < 2:
         raise ValueError(f"Need at least two checkpoints for {args.condition}")
     rows.sort(key=lambda row: int(row["checkpoint_frames"]))
-    artifacts = [(row, np.load(artifact_path(args.input_dir / "raw", row["label_suffix"]), allow_pickle=False)) for row in rows]
+    artifacts = [
+        (row, np.load(artifact_path(args.input_dir / "raw", row["label_suffix"]), allow_pickle=False)) for row in rows
+    ]
     reference_row, reference = artifacts[-1]
     reference_occupancy = reference["occupancy"]
     reference_maps = reference["rate_maps"]

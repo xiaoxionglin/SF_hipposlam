@@ -1,12 +1,7 @@
 """Isolate passive-graph UCB frontier target selection from direct-target HRL."""
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import (
-    COMMON_CLI,
-    Cell,
-)
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import COMMON_CLI, Cell
 
 BATCH_NAME = "intrmotiv_frontier_manager_isolation_20260831"
 PROJECT = "SF_IntrMotiv_FrontierManagerIsolation"

@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from sf_working_directories.IntrMotiv.evaluation.summarize_place_fields import summarize_artifact
 from hpc_runs.intrmotiv_study.spatial_contract import (
     FIELD_MIN_ACTIVE_BINS,
     FIELD_MIN_ACTIVE_OBSERVATIONS,
@@ -18,6 +17,7 @@ from hpc_runs.intrmotiv_study.spatial_contract import (
     _binomial_smooth,
     _component_labels,
 )
+from sf_working_directories.IntrMotiv.evaluation.summarize_place_fields import summarize_artifact
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,11 +77,7 @@ def peak_statistics(
     peak_array = np.stack(peaks)
     _, counts = np.unique(peak_array, axis=0, return_counts=True)
     probabilities = counts / counts.sum()
-    entropy = (
-        float(-(probabilities * np.log(probabilities)).sum() / np.log(len(peaks)))
-        if len(peaks) > 1
-        else 0.0
-    )
+    entropy = float(-(probabilities * np.log(probabilities)).sum() / np.log(len(peaks))) if len(peaks) > 1 else 0.0
     distances = [
         float(np.linalg.norm(peak_array[first] - peak_array[second]))
         for first in range(len(peak_array))
@@ -263,7 +259,9 @@ def derive_row(item: dict[str, str], artifact: Path) -> dict[str, object]:
         "mean_components_30pct": float(structure["component_count"][0, eligible].mean()) if eligible.any() else 0.0,
         "mean_components_50pct": float(structure["component_count"][1, eligible].mean()) if eligible.any() else 0.0,
         "mean_components_70pct": float(structure["component_count"][2, eligible].mean()) if eligible.any() else 0.0,
-        "mean_dominant_component_mass": float(structure["dominant_mass"][:, eligible].mean()) if eligible.any() else 0.0,
+        "mean_dominant_component_mass": (
+            float(structure["dominant_mass"][:, eligible].mean()) if eligible.any() else 0.0
+        ),
         "incoming_confidence_field_spread_correlation": incoming_spread_correlation,
     }
 

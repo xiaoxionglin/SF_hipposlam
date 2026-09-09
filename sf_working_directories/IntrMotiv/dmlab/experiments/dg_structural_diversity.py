@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
 
-
 BATCH_NAME = "intrmotiv_dg_structural_diversity_20260826"
 PROJECT = "SF_IntrMotiv_DGStructuralDiversity"
 WANDB_ROOT = "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb"

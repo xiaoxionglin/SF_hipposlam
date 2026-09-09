@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import BATCH_NAME as CORRECTED_BATCH
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import CELLS
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import PROJECT as CORRECTED_PROJECT
 from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import (
-    BATCH_NAME as CORRECTED_BATCH,
-    CELLS,
-    PROJECT as CORRECTED_PROJECT,
     make_experiment as make_corrected_experiment,
 )
-
 
 BATCH_NAME = "intrmotiv_graph_stabilized_recruitment_20260903"
 PROJECT = "SF_IntrMotiv_GraphStabilizedRecruitment"

@@ -1,6 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
 
-
 BATCH_NAME = "intrmotiv_dg_anti_collapse_20260824"
 PROJECT = "SF_IntrMotiv_DGAntiCollapse"
 WANDB_ROOT = "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb"

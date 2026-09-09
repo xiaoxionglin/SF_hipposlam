@@ -30,15 +30,12 @@ def build_run_description(
         raise RuntimeError("Sample Factory is required to build a training RunDescription") from error
     if experiment_builder is None:
         experiments = [
-            Experiment(run.name, " ".join(shlex.quote(arg) for arg in run.args), [{}])
-            for run in study.expand_runs()
+            Experiment(run.name, " ".join(shlex.quote(arg) for arg in run.args), [{}]) for run in study.expand_runs()
         ]
     else:
         experiments = [experiment_builder(run) for run in study.expand_runs()]
         observed_names = [experiment.name for experiment in experiments]
         expected_names = [run.name for run in study.expand_runs()]
         if observed_names != expected_names:
-            raise RuntimeError(
-                "custom experiment_builder must preserve StudySpec run names and order"
-            )
+            raise RuntimeError("custom experiment_builder must preserve StudySpec run names and order")
     return RunDescription(study.batch_name, experiments=experiments)

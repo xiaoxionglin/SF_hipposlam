@@ -2,10 +2,8 @@
 
 from pathlib import Path
 
-from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from hpc_runs.intrmotiv_study import load_study
-
+from sample_factory.launcher.run_description import Experiment, RunDescription
 
 SPEC = Path(__file__).resolve().parents[4] / "hpc_runs/studies/persistent_intrinsic_control.study.json"
 STUDY = load_study(SPEC)
@@ -19,7 +17,9 @@ def preflight(run):
             "--online_spatial_snapshot_targets=100000000,200000000,300000000,450000000,600000000",
             "--online_spatial_snapshot_targets=1000000,2000000",
         )
-        arg = arg.replace("--online_spatial_snapshot_max_frames=600000000", "--online_spatial_snapshot_max_frames=2000000")
+        arg = arg.replace(
+            "--online_spatial_snapshot_max_frames=600000000", "--online_spatial_snapshot_max_frames=2000000"
+        )
         arg = arg.replace(
             "--wandb_group=intrmotiv_persistent_intrinsic_control_20260908",
             "--wandb_group=intrmotiv_persistent_intrinsic_control_20260908_preflight_r2",

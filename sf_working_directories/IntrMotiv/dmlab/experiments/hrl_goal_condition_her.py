@@ -5,9 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.dg_structural_diversity import COMMON_CLI
-
 
 BATCH_NAME = "intrmotiv_hrl_goal_condition_her_20260901"
 PROJECT = "SF_IntrMotiv_HRLGoalConditionHER"
@@ -39,8 +37,9 @@ def make_experiment(
     name_prefix = f"{prefix}_" if prefix else ""
     name = f"{name_prefix}GCH_{cell.tag}_S{seed}"
     cli = (
-        COMMON_CLI.replace("--train_for_env_steps=100000000", f"--train_for_env_steps={train_for_env_steps}")
-        .replace("--wandb_project=SF_IntrMotiv_DGStructuralDiversity", f"--wandb_project={PROJECT}")
+        COMMON_CLI.replace("--train_for_env_steps=100000000", f"--train_for_env_steps={train_for_env_steps}").replace(
+            "--wandb_project=SF_IntrMotiv_DGStructuralDiversity", f"--wandb_project={PROJECT}"
+        )
         + f"--seed={seed} "
         + "--dg_global_punishment_coeff=0 --dg_row_repulsion_coeff=0 "
         + "--dg_ca3_temporal_exclusion_coeff=0 --dg_orthogonal_recruitment=False "

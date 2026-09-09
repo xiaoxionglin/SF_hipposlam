@@ -20,7 +20,6 @@ from hpc_runs.intrmotiv_study.spatial_contract import (
 )
 from sample_factory.utils.utils import log
 
-
 PLACE_FIELD_KEYS = {
     "valid_sample_count": "online_spatial_place_valid_sample_count",
     "in_bounds_fraction": "online_spatial_place_in_bounds_fraction",
@@ -76,32 +75,31 @@ class TrainingSpatialTelemetry:
         self.policy_id = int(policy_id)
         self.frameskip = int(env_info.frameskip)
         self.window_limit = int(cfg.online_spatial_window_observations)
-        configured_scalar_window = int(
-            getattr(cfg, "online_spatial_scalar_window_observations", 10_000)
-        )
+        configured_scalar_window = int(getattr(cfg, "online_spatial_scalar_window_observations", 10_000))
         self.scalar_window_limit = min(configured_scalar_window, self.window_limit)
         self.scalar_interval = int(cfg.online_spatial_scalar_interval_frames)
         self.snapshot_interval = int(cfg.online_spatial_snapshot_interval_frames)
         self.snapshot_max = int(cfg.online_spatial_snapshot_max_frames)
         self.grain = int(cfg.online_spatial_grid_grain)
         self.stationary_distance = float(cfg.online_spatial_stationary_distance)
-        self.max_segment_jump_distance = float(
-            getattr(cfg, "online_spatial_max_segment_jump_distance", 250.0)
-        )
+        self.max_segment_jump_distance = float(getattr(cfg, "online_spatial_max_segment_jump_distance", 250.0))
         self.bounds = SpatialBounds(
             float(cfg.online_spatial_x_min),
             float(cfg.online_spatial_x_max),
             float(cfg.online_spatial_y_min),
             float(cfg.online_spatial_y_max),
         )
-        if min(
-            self.window_limit,
-            configured_scalar_window,
-            self.scalar_interval,
-            self.snapshot_interval,
-            self.snapshot_max,
-            self.grain,
-        ) <= 0:
+        if (
+            min(
+                self.window_limit,
+                configured_scalar_window,
+                self.scalar_interval,
+                self.snapshot_interval,
+                self.snapshot_max,
+                self.grain,
+            )
+            <= 0
+        ):
             raise SpatialContractError("online spatial window, cadence, maximum, and grain must be positive")
         if self.snapshot_max < self.snapshot_interval:
             raise SpatialContractError("online spatial snapshot maximum must be at least one interval")
@@ -116,27 +114,35 @@ class TrainingSpatialTelemetry:
             if self.snapshot_interval == 25_000_000 and self.snapshot_max == 100_000_000:
                 self.snapshot_targets = DEFAULT_SNAPSHOT_TARGETS
             else:
-                self.snapshot_targets = tuple(range(self.snapshot_interval, self.snapshot_max + 1, self.snapshot_interval))
+                self.snapshot_targets = tuple(
+                    range(self.snapshot_interval, self.snapshot_max + 1, self.snapshot_interval)
+                )
         else:
             try:
                 self.snapshot_targets = tuple(int(value.strip()) for value in target_setting.split(","))
             except ValueError as error:
-                raise SpatialContractError("online spatial snapshot targets must be comma-separated integers") from error
+                raise SpatialContractError(
+                    "online spatial snapshot targets must be comma-separated integers"
+                ) from error
             if (
                 not self.snapshot_targets
                 or tuple(sorted(set(self.snapshot_targets))) != self.snapshot_targets
                 or any(value <= 0 for value in self.snapshot_targets)
             ):
-                raise SpatialContractError("online spatial snapshot targets must be unique increasing positive integers")
+                raise SpatialContractError(
+                    "online spatial snapshot targets must be unique increasing positive integers"
+                )
 
         workspace = Path(cfg.online_spatial_workspace_root).expanduser().resolve()
         configured_root = str(getattr(cfg, "online_spatial_output_root", "") or "").strip()
-        output_root = Path(configured_root).expanduser() if configured_root else Path(cfg.train_dir) / "analysis" / "online_spatial"
+        output_root = (
+            Path(configured_root).expanduser()
+            if configured_root
+            else Path(cfg.train_dir) / "analysis" / "online_spatial"
+        )
         output_root = output_root.resolve()
         if not workspace.is_absolute() or not _contained(output_root, workspace):
-            raise SpatialContractError(
-                f"online spatial output root {output_root} must be inside workspace {workspace}"
-            )
+            raise SpatialContractError(f"online spatial output root {output_root} must be inside workspace {workspace}")
         experiment = PurePosixPath(str(cfg.experiment))
         if experiment.is_absolute() or ".." in experiment.parts or not experiment.name:
             raise SpatialContractError(f"invalid experiment identity for spatial telemetry: {cfg.experiment!r}")
@@ -160,8 +166,10 @@ class TrainingSpatialTelemetry:
         except ValueError:
             training_relative = Path()
         relative_parts = tuple(part for part in training_relative.parts if part not in ("", "."))
-        batch_name = relative_parts[0] if relative_parts else (
-            experiment.parts[-2] if len(experiment.parts) > 1 else "unbatched"
+        batch_name = (
+            relative_parts[0]
+            if relative_parts
+            else (experiment.parts[-2] if len(experiment.parts) > 1 else "unbatched")
         )
         self.batch_name = batch_name
         identity_parts = (*relative_parts, *experiment.parts)
@@ -228,20 +236,40 @@ class TrainingSpatialTelemetry:
         result: dict[str, Any] = {}
         if graph is not None:
             control_names = (
-                "node_visits", "tctrl", "edge_confidence", "control_attempts",
-                "passive_confidence", "passive_time", "passive_path_length", "passive_dx", "passive_dy",
-                "passive_dtheta_sin", "passive_dtheta_cos", "frontier_attempts", "frontier_discoveries",
-                "landmark_pose", "pose_valid", "pose_stress", "representation_generation",
-                "prospective_attempts", "prospective_successes", "prospective_probability_sum",
-                "prospective_brier_sum", "prospective_timing_count", "prospective_timing_sum",
-                "prospective_predicted_timing_sum", "prospective_timing_absolute_error_sum",
+                "node_visits",
+                "tctrl",
+                "edge_confidence",
+                "control_attempts",
+                "passive_confidence",
+                "passive_time",
+                "passive_path_length",
+                "passive_dx",
+                "passive_dy",
+                "passive_dtheta_sin",
+                "passive_dtheta_cos",
+                "frontier_attempts",
+                "frontier_discoveries",
+                "landmark_pose",
+                "pose_valid",
+                "pose_stress",
+                "representation_generation",
+                "prospective_attempts",
+                "prospective_successes",
+                "prospective_probability_sum",
+                "prospective_brier_sum",
+                "prospective_timing_count",
+                "prospective_timing_sum",
+                "prospective_predicted_timing_sum",
+                "prospective_timing_absolute_error_sum",
             )
-            result.update({
-                ("control_attempts" if name == "control_attempts" else f"control_{name}"): self._cpu(
-                    getattr(graph, name)
-                )
-                for name in control_names
-            })
+            result.update(
+                {
+                    ("control_attempts" if name == "control_attempts" else f"control_{name}"): self._cpu(
+                        getattr(graph, name)
+                    )
+                    for name in control_names
+                }
+            )
             result["control_confidence_threshold"] = np.asarray(
                 float(getattr(self.cfg, "hrl_edge_confidence_threshold", 0.5)), dtype=np.float32
             )
@@ -251,13 +279,21 @@ class TrainingSpatialTelemetry:
         passive = getattr(core, "passive_recruitment_graph", None)
         if passive is not None:
             for name in ("confidence", "elapsed", "birth_support", "representation_generation"):
-                destination = "passive_recruitment_generation" if name == "representation_generation" else f"passive_recruitment_{name}"
+                destination = (
+                    "passive_recruitment_generation"
+                    if name == "representation_generation"
+                    else f"passive_recruitment_{name}"
+                )
                 result[destination] = self._cpu(getattr(passive, name))
         projection = getattr(getattr(actor_critic, "encoder", None), "DG_projection", None)
         if projection is not None:
             for name in (
-                "recruitment_committed", "recruitment_activation_counts", "recruitment_row_counts",
-                "recruitment_count", "recruitment_repeat_count", "recruitment_tiny_residual_count",
+                "recruitment_committed",
+                "recruitment_activation_counts",
+                "recruitment_row_counts",
+                "recruitment_count",
+                "recruitment_repeat_count",
+                "recruitment_tiny_residual_count",
             ):
                 if hasattr(projection, name):
                     result[f"dg_{name}"] = self._cpu(getattr(projection, name))
@@ -351,9 +387,7 @@ class TrainingSpatialTelemetry:
             for target in self.pending_snapshot_targets:
                 path, created = write_spatial_snapshot_atomic(
                     self.output_dir,
-                    self._snapshot_payload(
-                        target, actual, snapshot_details, graph_payload, snapshot_graph_diagnostics
-                    ),
+                    self._snapshot_payload(target, actual, snapshot_details, graph_payload, snapshot_graph_diagnostics),
                 )
                 log.info("%s online spatial snapshot %s", "Wrote" if created else "Kept", path)
             self.pending_snapshot_targets.clear()
@@ -361,9 +395,7 @@ class TrainingSpatialTelemetry:
         if not scalar_due:
             return {}
         arrays = self.window.arrays(self.scalar_window_limit)
-        spatial_details = calculate_place_field_details(
-            arrays["pose"], arrays["dg_activity"], self.bounds, self.grain
-        )
+        spatial_details = calculate_place_field_details(arrays["pose"], arrays["dg_activity"], self.bounds, self.grain)
         graph_diagnostics = self._graph_diagnostics(graph_payload, spatial_details)
         values = calculate_spatial_metrics(
             arrays["pose"],
@@ -376,6 +408,8 @@ class TrainingSpatialTelemetry:
         )
         result = {destination: values[source] for source, destination in PLACE_FIELD_KEYS.items()}
         result.update({destination: values[source] for source, destination in TRAJECTORY_KEYS.items()})
-        result.update({destination: float(graph_diagnostics.get(source, 0.0)) for source, destination in GRAPH_KEYS.items()})
+        result.update(
+            {destination: float(graph_diagnostics.get(source, 0.0)) for source, destination in GRAPH_KEYS.items()}
+        )
         result["online_spatial_scalar_target_env_steps"] = float(scalar_target)
         return result

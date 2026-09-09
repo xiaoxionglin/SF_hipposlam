@@ -5,12 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.dg_structural_diversity import (
     COMMON_CLI as STRUCTURAL_COMMON_CLI,
-    PROJECT as STRUCTURAL_PROJECT,
 )
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.dg_structural_diversity import PROJECT as STRUCTURAL_PROJECT
 
 BATCH_NAME = "intrmotiv_topological_frontier_planning_20260831"
 PROJECT = "SF_IntrMotiv_TopologicalFrontierPlanning"
@@ -67,9 +65,7 @@ CELLS = (
 )
 
 
-COMMON_CLI = STRUCTURAL_COMMON_CLI.replace(
-    f"--wandb_project={STRUCTURAL_PROJECT}", f"--wandb_project={PROJECT}"
-)
+COMMON_CLI = STRUCTURAL_COMMON_CLI.replace(f"--wandb_project={STRUCTURAL_PROJECT}", f"--wandb_project={PROJECT}")
 
 
 def make_experiment(

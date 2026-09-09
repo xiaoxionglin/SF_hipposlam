@@ -2,15 +2,11 @@
 
 from pathlib import Path
 
-from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from hpc_runs.intrmotiv_study import load_study
-from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import (
-    CELLS,
-    PROJECT as ORIGINAL_PROJECT,
-    make_experiment,
-)
-
+from sample_factory.launcher.run_description import Experiment, RunDescription
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import CELLS
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import PROJECT as ORIGINAL_PROJECT
+from sf_working_directories.IntrMotiv.dmlab.experiments.corrected_core_reevaluation import make_experiment
 
 SPEC = Path(__file__).resolve().parents[4] / "hpc_runs/studies/persistent_intrinsic_control_c15.study.json"
 STUDY = load_study(SPEC)
@@ -18,9 +14,7 @@ C15 = next(cell for cell in CELLS if cell.number == 15)
 
 
 def build(run):
-    original = make_experiment(
-        C15, run.seed, train_for_env_steps=600_000_000, group_suffix="pic_c15_20260908"
-    )
+    original = make_experiment(C15, run.seed, train_for_env_steps=600_000_000, group_suffix="pic_c15_20260908")
     command = original.cmd.replace(
         f"--wandb_project={ORIGINAL_PROJECT}",
         "--wandb_project=SF_IntrMotiv_PersistentIntrinsicControl",
@@ -29,9 +23,7 @@ def build(run):
         "--wandb_group=intrmotiv_persistent_intrinsic_control_c15_r2_20260908",
     )
     supplemental = [
-        arg
-        for arg in run.args
-        if arg.startswith("--load_model_path=") or arg.startswith("--online_spatial_snapshot_")
+        arg for arg in run.args if arg.startswith("--load_model_path=") or arg.startswith("--online_spatial_snapshot_")
     ]
     return Experiment(run.name, f"{command} {' '.join(supplemental)}", [{}])
 

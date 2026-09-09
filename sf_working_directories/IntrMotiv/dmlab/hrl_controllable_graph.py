@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
@@ -224,9 +224,7 @@ def controllability_distances(
     diagonal = torch.eye(layout.n_nodes, device=hrl_state.device, dtype=torch.bool).unsqueeze(0)
     distances = torch.where(diagonal, torch.zeros_like(distances), distances)
     for intermediate in range(layout.n_nodes):
-        via_intermediate = (
-            distances[:, :, intermediate].unsqueeze(-1) + distances[:, intermediate, :].unsqueeze(1)
-        )
+        via_intermediate = distances[:, :, intermediate].unsqueeze(-1) + distances[:, intermediate, :].unsqueeze(1)
         distances = torch.minimum(distances, via_intermediate)
     return distances
 
@@ -626,7 +624,9 @@ class PolicyControllableGraph(nn.Module):
         attempted = attempted & (target >= 0) & (target < self.n_nodes) & (source != target)
         prospective = attempted.clone()
         if prospective.any():
-            prospective = prospective & before_known[source.clamp(0, self.n_nodes - 1), target.clamp(0, self.n_nodes - 1)]
+            prospective = (
+                prospective & before_known[source.clamp(0, self.n_nodes - 1), target.clamp(0, self.n_nodes - 1)]
+            )
         if prospective.any():
             prospective_indices = source[prospective] * self.n_nodes + target[prospective]
             outcomes = hit[prospective].to(dtype=self.node_visits.dtype)
@@ -643,16 +643,12 @@ class PolicyControllableGraph(nn.Module):
             prospective_success = prospective & hit
             if prospective_success.any():
                 timing_indices = source[prospective_success] * self.n_nodes + target[prospective_success]
-                actual_timing = nxt[:, layout.completion_elapsed][prospective_success].to(
-                    dtype=self.node_visits.dtype
-                )
+                actual_timing = nxt[:, layout.completion_elapsed][prospective_success].to(dtype=self.node_visits.dtype)
                 predicted_timing = self.tctrl[source[prospective_success], target[prospective_success]].clone()
                 timing_ones = torch.ones_like(actual_timing)
                 self.prospective_timing_count.flatten().scatter_add_(0, timing_indices, timing_ones)
                 self.prospective_timing_sum.flatten().scatter_add_(0, timing_indices, actual_timing)
-                self.prospective_predicted_timing_sum.flatten().scatter_add_(
-                    0, timing_indices, predicted_timing
-                )
+                self.prospective_predicted_timing_sum.flatten().scatter_add_(0, timing_indices, predicted_timing)
                 self.prospective_timing_absolute_error_sum.flatten().scatter_add_(
                     0, timing_indices, (actual_timing - predicted_timing).abs()
                 )

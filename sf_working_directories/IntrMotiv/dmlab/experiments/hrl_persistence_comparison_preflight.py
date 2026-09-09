@@ -1,10 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.hrl_persistence_comparison import (
-    COMMON_CLI,
-    _schedule_cli,
-)
-
+from sf_working_directories.IntrMotiv.dmlab.experiments.hrl_persistence_comparison import COMMON_CLI, _schedule_cli
 
 BATCH_NAME = "intrmotiv_hrl_persistence_comparison_preflight_20260821"
 
@@ -37,8 +32,7 @@ def global_preflight() -> Experiment:
         "--hrl_controllable_graph=True --hrl_graph_memory=policy_buffer "
         "--hrl_persistent_fast_weights=False --hrl_fast_weight_half_life_options=10000 "
         "--seed=20260821 --wandb_group=preflight_global_fixed "
-        "--wandb_tags preflight hrl global_graph fixed_episode "
-        + _schedule_cli(False)
+        "--wandb_tags preflight hrl global_graph fixed_episode " + _schedule_cli(False)
     )
     return Experiment("GHRL_PREFLIGHT", cli, [{}])
 
@@ -50,8 +44,7 @@ def long_preflight() -> Experiment:
         "--hrl_controllable_graph=True --hrl_graph_memory=episode "
         "--hrl_persistent_fast_weights=False --hrl_fast_weight_half_life_options=10000 "
         "--seed=20260822 --wandb_group=preflight_stream_long "
-        "--wandb_tags preflight hrl stream_graph long_episode "
-        + _schedule_cli(False)
+        "--wandb_tags preflight hrl stream_graph long_episode " + _schedule_cli(False)
     )
     return Experiment("LHRL_PREFLIGHT", cli, [{}])
 

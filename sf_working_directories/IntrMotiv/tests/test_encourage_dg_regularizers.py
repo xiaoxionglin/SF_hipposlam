@@ -3,10 +3,7 @@ import math
 import torch
 
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import dg_usage_metrics
-from sf_working_directories.IntrMotiv.dmlab.experiments.encourage_dg_regularizers import (
-    LOSS_ARMS,
-    RUN_DESCRIPTION,
-)
+from sf_working_directories.IntrMotiv.dmlab.experiments.encourage_dg_regularizers import LOSS_ARMS, RUN_DESCRIPTION
 
 
 def test_encourage_regularizer_factorial_is_exactly_replicated():

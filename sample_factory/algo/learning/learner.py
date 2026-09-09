@@ -245,7 +245,7 @@ class BaseLearner(Configurable):
         self.load_from_checkpoint(self.policy_id)
         self._register_forward_hooks()
         self._register_backward_hooks()
-        ### Is this the right place to register all hooks for both new initializations & restarts? ###
+        # Register hooks for both new initializations and restarts.
         self.param_server.init(self.actor_critic, self.train_step, self.device)
         self.policy_versions_tensor[self.policy_id] = self.train_step
 

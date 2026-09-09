@@ -7,16 +7,15 @@ for place-field telemetry.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from hashlib import sha256
 from itertools import product
-import json
 from pathlib import Path, PurePosixPath
-import re
 from typing import Any, Mapping, Sequence
 
 from .version import SCHEMA_ID, WORKFLOW_VERSION
-
 
 Scalar = str | int | float | bool
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -206,12 +205,14 @@ class StudySpec:
             label = item.get("label", name)
             if not isinstance(label, str) or not label:
                 raise SpecError(f"bases[{index}].label must be a nonempty string")
-            bases.append(BaseSpec(
-                name=name,
-                label=label,
-                args=_strings(item.get("args", []), f"bases[{index}].args"),
-                metadata=_metadata(item.get("metadata", {}), f"bases[{index}].metadata"),
-            ))
+            bases.append(
+                BaseSpec(
+                    name=name,
+                    label=label,
+                    args=_strings(item.get("args", []), f"bases[{index}].args"),
+                    metadata=_metadata(item.get("metadata", {}), f"bases[{index}].metadata"),
+                )
+            )
         if not bases or len({base.name for base in bases}) != len(bases):
             raise SpecError("bases must be nonempty and have unique names")
 
@@ -230,12 +231,14 @@ class StudySpec:
                 label = level.get("label", str(value))
                 if not isinstance(label, str) or not label:
                     raise SpecError(f"factor {name!r} level label must be nonempty")
-                levels.append(FactorLevel(
-                    value=value,
-                    label=label,
-                    args=_strings(level.get("args", []), f"factor {name!r} level args"),
-                    metadata=_metadata(level.get("metadata", {}), f"factor {name!r} level metadata"),
-                ))
+                levels.append(
+                    FactorLevel(
+                        value=value,
+                        label=label,
+                        args=_strings(level.get("args", []), f"factor {name!r} level args"),
+                        metadata=_metadata(level.get("metadata", {}), f"factor {name!r} level metadata"),
+                    )
+                )
             if not levels or len({json.dumps(level.value, sort_keys=True) for level in levels}) != len(levels):
                 raise SpecError(f"factor {name!r} must have nonempty, unique values")
             factors.append(FactorSpec(name=name, levels=tuple(levels)))
@@ -254,9 +257,7 @@ class StudySpec:
             natural_count *= len(factor.levels)
         expected_runs = raw.get("expected_runs", natural_count)
         if expected_runs != natural_count:
-            raise SpecError(
-                f"expected_runs={expected_runs!r}, but the Cartesian product contains {natural_count} runs"
-            )
+            raise SpecError(f"expected_runs={expected_runs!r}, but the Cartesian product contains {natural_count} runs")
 
         spec = cls(
             source=source or Path("<memory>"),
@@ -294,14 +295,8 @@ class StudySpec:
         combinations = list(level_products)
         for base in self.bases:
             for selected_levels in combinations:
-                factor_values = {
-                    factor.name: level.value
-                    for factor, level in zip(self.factors, selected_levels)
-                }
-                factor_labels = {
-                    factor.name: level.label
-                    for factor, level in zip(self.factors, selected_levels)
-                }
+                factor_values = {factor.name: level.value for factor, level in zip(self.factors, selected_levels)}
+                factor_labels = {factor.name: level.label for factor, level in zip(self.factors, selected_levels)}
                 for seed in self.seeds:
                     context: dict[str, Scalar] = {
                         "study_id": self.study_id,
@@ -314,9 +309,7 @@ class StudySpec:
                     for factor, level in zip(self.factors, selected_levels):
                         context[factor.name] = level.value
                         context[f"{factor.name}_label"] = level.label
-                        context.update({
-                            f"{factor.name}_{key}": value for key, value in level.metadata.items()
-                        })
+                        context.update({f"{factor.name}_{key}": value for key, value in level.metadata.items()})
                     metadata = dict(self.study_metadata)
                     metadata.update(base.metadata)
                     for factor, level in zip(self.factors, selected_levels):
@@ -327,9 +320,7 @@ class StudySpec:
                         *(arg for level in selected_levels for arg in level.args),
                         self.seed_arg,
                     ]
-                    args = tuple(
-                        _render(template, context, "training argument") for template in arg_templates
-                    )
+                    args = tuple(_render(template, context, "training argument") for template in arg_templates)
                     if not all(arg.startswith("--") for arg in args):
                         raise SpecError("every rendered training argument must begin with '--'")
                     flags = [arg.split("=", 1)[0] for arg in args]
@@ -339,20 +330,22 @@ class StudySpec:
                             f"run {_render(self.run_name_template, context, 'run name')!r} "
                             f"defines duplicate flags {duplicate_flags!r}"
                         )
-                    runs.append(RunSpec(
-                        name=_render(self.run_name_template, context, "training.run_name_template"),
-                        condition=_render(
-                            self.condition_name_template, context, "training.condition_name_template"
-                        ),
-                        batch_name=self.batch_name,
-                        base=base.name,
-                        seed=seed,
-                        factors=factor_values,
-                        factor_labels=factor_labels,
-                        metadata=metadata,
-                        args=args,
-                        context=context,
-                    ))
+                    runs.append(
+                        RunSpec(
+                            name=_render(self.run_name_template, context, "training.run_name_template"),
+                            condition=_render(
+                                self.condition_name_template, context, "training.condition_name_template"
+                            ),
+                            batch_name=self.batch_name,
+                            base=base.name,
+                            seed=seed,
+                            factors=factor_values,
+                            factor_labels=factor_labels,
+                            metadata=metadata,
+                            args=args,
+                            context=context,
+                        )
+                    )
         names = [run.name for run in runs]
         if len(runs) != self.expected_runs or len(set(names)) != len(names):
             raise SpecError("expanded runs must match expected_runs and have unique names")

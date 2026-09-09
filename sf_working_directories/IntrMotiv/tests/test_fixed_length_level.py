@@ -2,7 +2,6 @@ from pathlib import Path
 
 from sf_working_directories.IntrMotiv.dmlab.dmlab_env import dmlab_env_by_name
 
-
 LEVEL_NAME = "openfield_map2_fixed_loc3_fixedlength_noreward"
 
 

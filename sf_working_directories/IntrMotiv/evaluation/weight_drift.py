@@ -17,7 +17,6 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-
 WEIGHT_KEY = "encoder.DG_projection.linear.weight"
 BN_MEAN_KEY = "encoder.DG_projection.batchnorm1d.running_mean"
 BN_VAR_KEY = "encoder.DG_projection.batchnorm1d.running_var"
@@ -87,7 +86,9 @@ def analyze_run(run_dir: Path, targets: list[int]) -> tuple[pd.DataFrame, pd.Dat
     per_checkpoint: list[dict[str, object]] = []
     for checkpoint, weight, running_mean, running_var in loaded:
         cosine_initial = row_cosine(weight, first_weight)
-        cosine_previous = row_cosine(weight, previous_weight) if previous_weight is not None else torch.ones_like(cosine_initial)
+        cosine_previous = (
+            row_cosine(weight, previous_weight) if previous_weight is not None else torch.ones_like(cosine_initial)
+        )
         per_checkpoint.append(
             {
                 "run": run_dir.name,
@@ -100,7 +101,9 @@ def analyze_run(run_dir: Path, targets: list[int]) -> tuple[pd.DataFrame, pd.Dat
                 "weight_norm_mean": float(weight.norm(dim=1).mean()),
                 "weight_norm_std": float(weight.norm(dim=1).std(unbiased=False)),
                 "bn_running_mean_mae_to_initial": float((running_mean - first_mean).abs().mean()),
-                "bn_running_logvar_mae_to_initial": float((running_var.clamp_min(1e-8).log() - first_var.clamp_min(1e-8).log()).abs().mean()),
+                "bn_running_logvar_mae_to_initial": float(
+                    (running_var.clamp_min(1e-8).log() - first_var.clamp_min(1e-8).log()).abs().mean()
+                ),
             }
         )
         previous_weight = weight
@@ -133,7 +136,9 @@ def analyze_run(run_dir: Path, targets: list[int]) -> tuple[pd.DataFrame, pd.Dat
         "final_weight_norm_mean": float(final_weight.norm(dim=1).mean()),
         "final_weight_norm_std": float(final_weight.norm(dim=1).std(unbiased=False)),
         "final_bn_running_mean_mae_to_initial": float((final_mean - first_mean).abs().mean()),
-        "final_bn_running_logvar_mae_to_initial": float((final_var.clamp_min(1e-8).log() - first_var.clamp_min(1e-8).log()).abs().mean()),
+        "final_bn_running_logvar_mae_to_initial": float(
+            (final_var.clamp_min(1e-8).log() - first_var.clamp_min(1e-8).log()).abs().mean()
+        ),
     }
     return pd.DataFrame(per_checkpoint), per_unit, summary
 
@@ -145,9 +150,14 @@ def write_report(output_dir: Path, per_checkpoint: pd.DataFrame, per_unit: pd.Da
     summary.to_csv(output_dir / "dg_projection_drift_summary.csv", index=False)
     shown = summary[
         [
-            "run", "initial_env_steps", "late_env_steps", "final_env_steps",
-            "initial_to_final_mean_cosine", "initial_to_final_mean_angle_deg",
-            "late_to_final_mean_cosine", "late_to_final_stable_rows_cosine_ge_0_99",
+            "run",
+            "initial_env_steps",
+            "late_env_steps",
+            "final_env_steps",
+            "initial_to_final_mean_cosine",
+            "initial_to_final_mean_angle_deg",
+            "late_to_final_mean_cosine",
+            "late_to_final_stable_rows_cosine_ge_0_99",
         ]
     ]
     columns = list(shown.columns)
@@ -159,14 +169,18 @@ def write_report(output_dir: Path, per_checkpoint: pd.DataFrame, per_unit: pd.Da
             values.append(f"{value:.5f}" if isinstance(value, (float, np.floating)) else str(value))
         table.append("| " + " | ".join(values) + " |")
     lines = [
-        "# DG Projection Weight Drift", "",
+        "# DG Projection Weight Drift",
+        "",
         "The layer-2 ResNet-18 trunk is ImageNet-pretrained and fixed. This report measures corresponding rows of `encoder.DG_projection.linear.weight` with cosine similarity. Row norm stability is not receptive-field stability; the probe does not measure DG activity on fixed observations or spatial place fields.",
         "",
         "`late_to_final` compares the last two sampled checkpoints, normally near 75M and 100M frames. `stable_rows_cosine_ge_0_99` is a descriptive threshold, not a learned consolidation criterion.",
         "",
-        "## Summary", "",
-        *table, "",
-        "## Interpretation", "",
+        "## Summary",
+        "",
+        *table,
+        "",
+        "## Interpretation",
+        "",
         "Repeated high reward or target hits are not causally evaluated here. In the present HRL implementation, target-hit reward gates the worker reward, while DG projection updates use the separate encoder-reward stream. A causal stabilization claim requires future fixed-observation and spatial-field probes conditioned on visits and reward.",
     ]
     (output_dir / "dg_projection_drift_report.md").write_text("\n".join(lines) + "\n")
@@ -174,7 +188,9 @@ def write_report(output_dir: Path, per_checkpoint: pd.DataFrame, per_unit: pd.Da
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Measure DG projection row drift from IntrMotiv checkpoints.")
-    parser.add_argument("run_dir", nargs="+", type=Path, help="Sample Factory policy directories containing checkpoint_p0.")
+    parser.add_argument(
+        "run_dir", nargs="+", type=Path, help="Sample Factory policy directories containing checkpoint_p0."
+    )
     parser.add_argument("--output", type=Path, required=True, help="Workspace directory for analysis artifacts.")
     parser.add_argument("--checkpoint-targets-m", type=float, nargs="+", default=[0, 25, 50, 75])
     args = parser.parse_args()

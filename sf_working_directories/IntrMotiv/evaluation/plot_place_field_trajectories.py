@@ -9,9 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
-
 from summarize_place_fields import _font, display_label, plot_run, summarize_artifact
-
 
 COLORS = ((55, 126, 184), (228, 26, 28), (77, 175, 74), (152, 78, 163), (255, 127, 0), (166, 86, 40))
 
@@ -102,7 +100,9 @@ def draw_family_trajectory(frame: pd.DataFrame, families: tuple[str, ...], title
                 draw.line(points, fill=color, width=3)
             for point in points:
                 draw.ellipse((point[0] - 5, point[1] - 5, point[0] + 5, point[1] + 5), fill=color)
-        draw.text((left + width // 2 - 100, top + height + 45), "checkpoint environment frames", font=small_font, fill="black")
+        draw.text(
+            (left + width // 2 - 100, top + height + 45), "checkpoint environment frames", font=small_font, fill="black"
+        )
     legend_top = 665
     for index, condition in enumerate(conditions):
         example = subset[subset["condition"] == condition].iloc[0]
@@ -133,7 +133,9 @@ def make_contact_sheets(frame: pd.DataFrame, paths: dict[str, Path], out_dir: Pa
             tiles.append(tile)
         canvas = Image.new("RGB", (1770, 1370), "white")
         draw = ImageDraw.Draw(canvas)
-        draw.text((24, 18), f"DG field evolution | {chart_label(group.iloc[0])} | seed 99", font=_font(25), fill="black")
+        draw.text(
+            (24, 18), f"DG field evolution | {chart_label(group.iloc[0])} | seed 99", font=_font(25), fill="black"
+        )
         for index, tile in enumerate(tiles):
             row, col = divmod(index, 3)
             x, y = 12 + col * 585, 75 + row * 640

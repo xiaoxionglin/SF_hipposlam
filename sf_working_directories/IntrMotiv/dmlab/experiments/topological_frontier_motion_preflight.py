@@ -1,11 +1,7 @@
 """Terminal action-path integration preflight after repeated-command correction."""
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import (
-    CELLS,
-    make_experiment,
-)
+from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import CELLS, make_experiment
 
 
 def make_terminal_motion_preflight() -> Experiment:

@@ -1,10 +1,9 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.analysis import linear_contrasts
 from hpc_runs.intrmotiv_study.telemetry import build_intervention_manifest
-
 
 SPEC = Path(__file__).with_name("studies") / "directional_predictive_recruitment.study.json"
 

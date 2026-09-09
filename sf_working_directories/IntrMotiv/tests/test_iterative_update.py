@@ -35,8 +35,13 @@ def test_learner_preserves_the_configured_phase_schedule_without_gradient_masks(
         iterative_encoder_steps=1,
         iterative_start_phase=DECODER,
     )
-    assert [
-        (setattr(learner, "train_step", step), learner._iterative_phase())[1]
-        for step in range(7)
-    ] == [ENCODER, ENCODER, DECODER, DECODER, DECODER, DECODER, ENCODER]
+    assert [(setattr(learner, "train_step", step), learner._iterative_phase())[1] for step in range(7)] == [
+        ENCODER,
+        ENCODER,
+        DECODER,
+        DECODER,
+        DECODER,
+        DECODER,
+        ENCODER,
+    ]
     assert not hasattr(learner, "_apply_iterative_gradient_mask")

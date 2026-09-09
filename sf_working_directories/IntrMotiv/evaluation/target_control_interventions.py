@@ -28,7 +28,6 @@ from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
 )
 from sf_working_directories.IntrMotiv.evaluation.place_fields import load_policy_env
 
-
 WORKSPACE_ROOT = pathlib.Path("/work/classic/fr_xl1014-train")
 MANIFEST_COLUMNS = (
     "condition",
@@ -113,9 +112,7 @@ def target_geometry(graph, source: int, target: int, device, dtype) -> torch.Ten
     dx = cosine * delta[0] + sine * delta[1]
     dy = -sine * delta[0] + cosine * delta[1]
     dtheta = target_pose[2] - source_pose[2]
-    return torch.stack((dx / 32.0, dy / 32.0, torch.sin(dtheta), torch.cos(dtheta))).to(
-        device=device, dtype=dtype
-    )
+    return torch.stack((dx / 32.0, dy / 32.0, torch.sin(dtheta), torch.cos(dtheta))).to(device=device, dtype=dtype)
 
 
 def condition_for_target(actor_critic, core_output: torch.Tensor, source: int, target: int) -> torch.Tensor:
@@ -143,9 +140,7 @@ def counterfactual_action_sensitivity(actor_critic, core_output, source: int) ->
     conditioned = torch.cat(
         [condition_for_target(actor_critic, core_output, source, target) for target in targets], dim=0
     )
-    result = actor_critic.forward_tail(
-        conditioned, values_only=False, sample_actions=False, action_mask=None
-    )
+    result = actor_critic.forward_tail(conditioned, values_only=False, sample_actions=False, action_mask=None)
     probabilities = F.softmax(result["action_logits"], dim=-1)
     if probabilities.size(0) < 2:
         return 0.0
@@ -246,14 +241,13 @@ def add_matched_shuffled_targets(rows: list[dict[str, object]], n_nodes: int) ->
         candidates = [
             (other_index, other)
             for other_index, other in enumerate(rows)
-            if other_index != index
-            and other["source"] == row["source"]
-            and other["target"] != row["target"]
+            if other_index != index and other["source"] == row["source"] and other["target"] != row["target"]
         ]
         if not candidates:
             row["shuffled_target"] = -1
             row["shuffled_success"] = math.nan
             continue
+
         def context_distance(item):
             other_index, other = item
             orientation_delta = abs(int(other["source_orientation_bin"]) - int(row["source_orientation_bin"]))
@@ -264,6 +258,7 @@ def add_matched_shuffled_targets(rows: list[dict[str, object]], n_nodes: int) ->
                 + orientation_delta,
                 other_index,
             )
+
         _, donor = min(candidates, key=context_distance)
         shuffled_target = int(donor["target"])
         row["shuffled_target"] = shuffled_target
@@ -281,11 +276,7 @@ def summarize_trials(
     executed_rate = float(np.mean(executed)) if executed else math.nan
     shuffled_rate = float(np.mean(shuffled)) if shuffled else math.nan
     lift = executed_rate / shuffled_rate if shuffled and shuffled_rate > 0 else math.inf
-    relative_gain = (
-        (executed_rate - shuffled_rate) / shuffled_rate
-        if shuffled and shuffled_rate > 0
-        else math.inf
-    )
+    relative_gain = (executed_rate - shuffled_rate) / shuffled_rate if shuffled and shuffled_rate > 0 else math.inf
     return {
         "trial_count": len(rows),
         "ordered_pairs_eligible": int(eligible_pairs.sum()),
@@ -295,9 +286,9 @@ def summarize_trials(
         "matched_shuffled_target_success_rate": shuffled_rate,
         "executed_over_shuffled_lift": lift,
         "executed_over_shuffled_relative_gain": relative_gain,
-        "mean_counterfactual_action_sensitivity": float(
-            np.nanmean([row["counterfactual_action_sensitivity"] for row in rows])
-        ) if rows else math.nan,
+        "mean_counterfactual_action_sensitivity": (
+            float(np.nanmean([row["counterfactual_action_sensitivity"] for row in rows])) if rows else math.nan
+        ),
         "decision_cap": decision_cap,
     }
 
@@ -318,8 +309,10 @@ def run_interventions(
     )
     if getattr(cfg, "intrinsic_goal_mode", "none") == "ca3_absent_target":
         from sf_working_directories.IntrMotiv.evaluation.absent_goal_interventions import run_absent_goal_interventions
-        return run_absent_goal_interventions(cfg, env, env_info, actor_critic, checkpoint,
-                                             device, decision_cap, deterministic, **(absent_options or {}))
+
+        return run_absent_goal_interventions(
+            cfg, env, env_info, actor_critic, checkpoint, device, decision_cap, deterministic, **(absent_options or {})
+        )
     if not bool(getattr(cfg, "hrl_controllable_graph", False)):
         raise ValueError("Target-control intervention requires a controllable-graph policy")
     n_nodes = int(cfg.Hippo_n_feature)
@@ -369,9 +362,7 @@ def run_interventions(
                     counts,
                     exclusive_node,
                     attempts_per_pair,
-                    eligible_pairs[exclusive_node]
-                    if (observed_targets_only or local_successor_targets_only)
-                    else None,
+                    eligible_pairs[exclusive_node] if (observed_targets_only or local_successor_targets_only) else None,
                 )
                 if target is not None:
                     active_trial = Trial(
@@ -393,9 +384,7 @@ def run_interventions(
                     actor_critic, core_output, active_trial.source
                 )
                 active_trial.sensitivity_count += 1
-                conditioned = condition_for_target(
-                    actor_critic, core_output, active_trial.source, active_trial.target
-                )
+                conditioned = condition_for_target(actor_critic, core_output, active_trial.source, active_trial.target)
                 policy_outputs = actor_critic.forward_tail(
                     conditioned, values_only=False, sample_actions=True, action_mask=None
                 )
@@ -414,9 +403,7 @@ def run_interventions(
             if bool(dones[0]):
                 if active_trial is not None:
                     endpoint = as_numpy(obs["pos"][0])
-                    rows.append(
-                        trial_row(active_trial, endpoint, -1, "censored_boundary", decision + 1)
-                    )
+                    rows.append(trial_row(active_trial, endpoint, -1, "censored_boundary", decision + 1))
                     counts[active_trial.source, active_trial.target] += 1
                     active_trial = None
                 rnn_states[0].zero_()
@@ -473,25 +460,28 @@ def main() -> None:
         args.decision_cap,
         args.attempts_per_pair,
         args.deterministic,
-        absent_options={key: intervention[source] for key, source in (
-            ('starts', 'starts'), ('prefix_length', 'prefix_decisions'),
-            ('horizons', 'horizons'), ('max_commands', 'max_commands')) if source in intervention},
-        first_distinct=bool(
-            intervention.get("terminate_on_first_distinct_exclusive_outcome", False)
-        ),
-        observed_targets_only=bool(
-            intervention.get("balanced_observed_alternative_targets", False)
-        ),
-        local_successor_targets_only=bool(
-            intervention.get("balanced_local_successor_targets", False)
-        ),
+        absent_options={
+            key: intervention[source]
+            for key, source in (
+                ("starts", "starts"),
+                ("prefix_length", "prefix_decisions"),
+                ("horizons", "horizons"),
+                ("max_commands", "max_commands"),
+            )
+            if source in intervention
+        },
+        first_distinct=bool(intervention.get("terminate_on_first_distinct_exclusive_outcome", False)),
+        observed_targets_only=bool(intervention.get("balanced_observed_alternative_targets", False)),
+        local_successor_targets_only=bool(intervention.get("balanced_local_successor_targets", False)),
     )
     if provenance:
-        summary.update({
-            key: provenance[key]
-            for key in ("schema", "workflow_version", "study_id", "study_sha256")
-            if key in provenance
-        })
+        summary.update(
+            {
+                key: provenance[key]
+                for key in ("schema", "workflow_version", "study_id", "study_sha256")
+                if key in provenance
+            }
+        )
     summary.update(
         condition=row["condition"],
         seed=int(row["seed"]),

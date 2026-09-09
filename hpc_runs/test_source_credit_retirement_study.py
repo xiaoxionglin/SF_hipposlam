@@ -1,5 +1,5 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.analysis import linear_contrasts
@@ -8,7 +8,6 @@ from hpc_runs.intrmotiv_study.telemetry import (
     build_intervention_manifest,
     build_place_field_manifests,
 )
-
 
 SPEC = Path(__file__).with_name("studies") / "source_credit_retirement.study.json"
 
@@ -74,9 +73,7 @@ class SourceCreditRetirementStudyTests(unittest.TestCase):
                 + 64 * credit * (retirement == "pred_open")
             )
             records.append({"seed": run.seed, **run.factors, "score": score})
-        _, summary = linear_contrasts(
-            records, ["score"], [], ["seed"], self.study.analysis["contrasts"]
-        )
+        _, summary = linear_contrasts(records, ["score"], [], ["seed"], self.study.analysis["contrasts"])
         expected = {
             "SRC_minus_ARR_MON": 1.0,
             "SRC_minus_ARR_DIRS": 1.0,
@@ -117,9 +114,7 @@ class SourceCreditRetirementStudyTests(unittest.TestCase):
                         run_dir=batch_root / run.name,
                     )
                 )
-        rows, trajectory = build_place_field_manifests(
-            self.study, inventory, require_checkpoint_files=False
-        )
+        rows, trajectory = build_place_field_manifests(self.study, inventory, require_checkpoint_files=False)
         self.assertEqual(len(rows), 70)
         self.assertEqual(len(trajectory), 50)
         self.assertEqual(len(build_intervention_manifest(self.study, rows)), 30)

@@ -1,17 +1,18 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import torch
-from types import SimpleNamespace
 
+from sf_working_directories.IntrMotiv.evaluation.analyze_place_field_manifest import (
+    connected_components_above_half_peak,
+    per_unit_rows,
+)
 from sf_working_directories.IntrMotiv.evaluation.place_fields import (
     compute_place_fields,
     compute_pre_threshold_maps,
     load_checkpoint_dict,
     optional_graph_arrays,
-)
-from sf_working_directories.IntrMotiv.evaluation.analyze_place_field_manifest import (
-    connected_components_above_half_peak,
-    per_unit_rows,
 )
 
 

@@ -10,7 +10,6 @@ from typing import Any, Iterable, Mapping
 from .discovery import discover_run_directories
 from .spec import RunSpec, SpecError, StudySpec
 
-
 MANIFEST_COLUMNS = (
     "condition",
     "family",
@@ -52,9 +51,7 @@ def _render_fields(run: RunSpec, templates: Mapping[str, Any]) -> dict[str, str]
         try:
             fields[name] = template.format_map(dict(run.context))
         except KeyError as error:
-            raise SpecError(
-                f"telemetry field {name!r} references unknown field {error.args[0]!r}"
-            ) from error
+            raise SpecError(f"telemetry field {name!r} references unknown field {error.args[0]!r}") from error
     return fields
 
 
@@ -67,8 +64,10 @@ def build_place_field_manifests(
     if telemetry.get("protocol") != "dg-place-fields-v1":
         raise SpecError("telemetry.protocol must be 'dg-place-fields-v1'")
     target_frames = telemetry.get("target_frames")
-    if not isinstance(target_frames, list) or not target_frames or not all(
-        isinstance(value, int) and value > 0 for value in target_frames
+    if (
+        not isinstance(target_frames, list)
+        or not target_frames
+        or not all(isinstance(value, int) and value > 0 for value in target_frames)
     ):
         raise SpecError("telemetry.target_frames must be a nonempty integer array")
     if sorted(set(target_frames)) != target_frames:
@@ -91,9 +90,7 @@ def build_place_field_manifests(
     templates = telemetry.get("manifest_fields", {})
     if not isinstance(templates, Mapping):
         raise SpecError("telemetry.manifest_fields must be an object")
-    label_template = telemetry.get(
-        "label_template", "{condition}__s{seed}__f{checkpoint_frames}"
-    )
+    label_template = telemetry.get("label_template", "{condition}__s{seed}__f{checkpoint_frames}")
     if not isinstance(label_template, str):
         raise SpecError("telemetry.label_template must be a string")
 
@@ -104,7 +101,11 @@ def build_place_field_manifests(
     for run in study.expand_runs():
         if run.seed not in selected_seeds and run.name not in intervention_runs:
             continue
-        selected_targets = target_frames if run.seed == trajectory_seed else ([target_frames[-1]] if run.seed in selected_seeds else [])
+        selected_targets = (
+            target_frames
+            if run.seed == trajectory_seed
+            else ([target_frames[-1]] if run.seed in selected_seeds else [])
+        )
         if run.name in intervention_runs:
             selected_targets = sorted(set(selected_targets) | set(intervention_targets))
         for target in selected_targets:
@@ -126,9 +127,7 @@ def build_place_field_manifests(
             try:
                 label = label_template.format_map(context)
             except KeyError as error:
-                raise SpecError(
-                    f"telemetry.label_template references unknown field {error.args[0]!r}"
-                ) from error
+                raise SpecError(f"telemetry.label_template references unknown field {error.args[0]!r}") from error
             row = {
                 "condition": run.condition,
                 **_render_fields(run, templates),
@@ -184,10 +183,7 @@ def build_intervention_manifest(
     if not isinstance(intervention, Mapping):
         raise SpecError("telemetry.intervention must be an object")
     if intervention.get("protocol") != "target-control-intervention-v1":
-        raise SpecError(
-            "telemetry.intervention.protocol must be "
-            "'target-control-intervention-v1'"
-        )
+        raise SpecError("telemetry.intervention.protocol must be " "'target-control-intervention-v1'")
     target_frames = intervention.get("target_frames")
     if (
         not isinstance(target_frames, list)
@@ -195,16 +191,14 @@ def build_intervention_manifest(
         or not isinstance(target_frames[0], int)
         or target_frames[0] <= 0
     ):
-        raise SpecError(
-            "telemetry.intervention.target_frames must contain one positive integer"
-        )
+        raise SpecError("telemetry.intervention.target_frames must contain one positive integer")
     target = str(target_frames[0])
-    expected = {
-        (run.condition, str(run.seed))
-        for run in selected_intervention_runs(study)
-    }
-    selected = [dict(row) for row in rows if row.get("target_frames") == target
-                and (row.get("condition"), row.get("seed")) in expected]
+    expected = {(run.condition, str(run.seed)) for run in selected_intervention_runs(study)}
+    selected = [
+        dict(row)
+        for row in rows
+        if row.get("target_frames") == target and (row.get("condition"), row.get("seed")) in expected
+    ]
     observed = [(row.get("condition"), row.get("seed")) for row in selected]
     if len(observed) != len(set(observed)):
         raise SpecError("intervention manifest contains duplicate condition/seed rows")
@@ -212,8 +206,7 @@ def build_intervention_manifest(
         missing = sorted(expected - set(observed))
         unexpected = sorted(set(observed) - expected)
         raise SpecError(
-            "intervention rows differ from the declared study; "
-            f"missing={missing}, unexpected={unexpected}"
+            "intervention rows differ from the declared study; " f"missing={missing}, unexpected={unexpected}"
         )
     return selected
 
@@ -227,22 +220,22 @@ def discover_nemo_checkpoints(study: StudySpec, batch_root: Path) -> list[Checkp
             select_checkpoints,
         )
     except ImportError as error:
-        raise RuntimeError(
-            "render-telemetry must run from the NEMO2 SF_hipposlam checkout"
-        ) from error
+        raise RuntimeError("render-telemetry must run from the NEMO2 SF_hipposlam checkout") from error
 
     inventory: list[CheckpointRecord] = []
     run_directories = discover_run_directories(study, batch_root)
     for run in study.expand_runs():
         run_dir = run_directories[run.name]
         for target, checkpoint in select_checkpoints(run_dir):
-            inventory.append(CheckpointRecord(
-                run_name=run.name,
-                target_frames=int(target),
-                checkpoint_frames=int(checkpoint_frames(checkpoint)),
-                checkpoint=Path(checkpoint),
-                run_dir=run_dir,
-            ))
+            inventory.append(
+                CheckpointRecord(
+                    run_name=run.name,
+                    target_frames=int(target),
+                    checkpoint_frames=int(checkpoint_frames(checkpoint)),
+                    checkpoint=Path(checkpoint),
+                    run_dir=run_dir,
+                )
+            )
     return inventory
 
 

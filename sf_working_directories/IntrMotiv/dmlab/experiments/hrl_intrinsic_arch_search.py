@@ -1,6 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
 
-
 BATCH_NAME = "intrmotiv_hrl_batch1_20260818"
 SEEDS = [8, 99, 123, 456]
 SEQUENCE_LENGTHS = [32, 64, 128]

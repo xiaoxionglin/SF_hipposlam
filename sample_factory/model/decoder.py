@@ -2,11 +2,11 @@ from abc import ABC
 from typing import List
 
 import torch
-from sf_xxl.dmlab.custom_decoder import ShiftRegisterTransformerDecoder
 
 from sample_factory.algo.utils.torch_utils import calc_num_elements
 from sample_factory.model.model_utils import ModelModule, create_mlp, nonlinearity
 from sample_factory.utils.typing import Config
+from sf_xxl.dmlab.custom_decoder import ShiftRegisterTransformerDecoder
 
 
 class Decoder(ModelModule, ABC):

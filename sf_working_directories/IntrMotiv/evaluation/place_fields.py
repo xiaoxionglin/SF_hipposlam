@@ -22,7 +22,6 @@ from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.utils import log
 from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
 
-
 XBOUND = (100.0, 2000.0)
 YBOUND = (100.0, 2000.0)
 
@@ -150,9 +149,7 @@ def load_policy_env(
     cfg.device = "cpu"
     cfg.eval_deterministic = bool(deterministic)
     cfg.env_frameskip = cfg.eval_env_frameskip = cfg.env_frameskip
-    env = make_env_func_batched(
-        cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=None
-    )
+    env = make_env_func_batched(cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=None)
     env_info = extract_env_info(env, cfg)
     if hasattr(env.unwrapped, "reset_on_init"):
         env.unwrapped.reset_on_init = False
@@ -221,6 +218,7 @@ def rollout_dg(
     )
     if replay_panel is not None:
         from sf_working_directories.IntrMotiv.evaluation.observation_panel import replay_observations
+
         env.close()
         pose, dg, logits = replay_observations(actor_critic, cfg, replay_panel, device)
         return cfg, checkpoint, pose, dg, logits, optional_graph_arrays(actor_critic)
@@ -255,6 +253,7 @@ def rollout_dg(
             rot = obs["rot"].clone()
             if record_panel is not None:
                 from sf_working_directories.IntrMotiv.evaluation.observation_panel import record_observation
+
                 record_observation(panel_records, obs, panel_previous_actions)
             normalized_obs = prepare_and_normalize_obs(actor_critic, obs)
             policy_outputs = actor_critic(normalized_obs, rnn_states)
@@ -269,7 +268,7 @@ def rollout_dg(
                 actions = unsqueeze_tensor(actions, dim=-1)
             if record_panel is not None:
                 panel_action = actions.detach().cpu().numpy().copy()
-                panel_records['actions'].append(panel_action)
+                panel_records["actions"].append(panel_action)
             actions = preprocess_actions(env_info, actions)
             rnn_states = policy_outputs["new_rnn_states"]
 
@@ -295,6 +294,7 @@ def rollout_dg(
             if record_panel is not None:
                 panel_records["dones"].append(dones.copy())
                 from sf_working_directories.IntrMotiv.evaluation.observation_panel import previous_actions_after_step
+
                 panel_previous_actions = previous_actions_after_step(panel_action, dones, actor_critic.action_space.n)
             episode_reward = rew.float().clone() if episode_reward is None else episode_reward + rew.float()
             num_frames += 1
@@ -320,6 +320,7 @@ def rollout_dg(
     env.close()
     if record_panel is not None:
         from sf_working_directories.IntrMotiv.evaluation.observation_panel import save_panel
+
         save_panel(record_panel, panel_records)
 
     core = torch.cat(core_buffers, dim=0).numpy()
@@ -333,9 +334,7 @@ def rollout_dg(
     if len(pre_threshold_buffers) == len(core_buffers):
         pre_threshold_logits = torch.cat(pre_threshold_buffers, dim=0).numpy()
         if pre_threshold_logits.shape[1] != n_feature:
-            raise ValueError(
-                f"Pre-threshold DG logits {pre_threshold_logits.shape} do not match F={n_feature}"
-            )
+            raise ValueError(f"Pre-threshold DG logits {pre_threshold_logits.shape} do not match F={n_feature}")
     pose = pd.DataFrame(pose_records).iloc[: dg.shape[0]].reset_index(drop=True)
     return cfg, checkpoint, pose, dg, pre_threshold_logits, optional_graph_arrays(actor_critic)
 
@@ -365,10 +364,11 @@ def compute_place_fields(pose: pd.DataFrame, dg: np.ndarray, grain: int):
 def spatial_details_for_artifact(pose, activity, grain):
     """Adapt workflow [y,x] arrays to the evaluator's stable [x,y] contract."""
     from hpc_runs.intrmotiv_study.spatial_contract import calculate_place_field_details
-    details = calculate_place_field_details(pose[['x', 'y', 'rot_y']].to_numpy(), activity, grain=grain)
-    for key in ('occupancy', 'rate_maps', 'smoothed_rate_maps'):
+
+    details = calculate_place_field_details(pose[["x", "y", "rot_y"]].to_numpy(), activity, grain=grain)
+    for key in ("occupancy", "rate_maps", "smoothed_rate_maps"):
         details[key] = details[key].swapaxes(0, 1)
-    details['field_component_labels'] = details['field_component_labels'].swapaxes(1, 2)
+    details["field_component_labels"] = details["field_component_labels"].swapaxes(1, 2)
     # Peak-bin and physical-coordinate arrays are already explicitly [x,y].
     return details
 
@@ -514,7 +514,7 @@ def main():
             _, raw_maps, raw_si, raw_fraction = compute_place_fields(pose, raw_dg, args.grain)
             for prefix, activity in (("raw_dg", raw_dg), ("post_inhibition", dg)):
                 details = spatial_details_for_artifact(pose, activity, args.grain)
-                artifact.update({prefix + '_' + key: value for key, value in details.items()})
+                artifact.update({prefix + "_" + key: value for key, value in details.items()})
             artifact.update(
                 raw_dg_rate_maps=raw_maps,
                 raw_dg_spatial_information=raw_si,
@@ -530,8 +530,10 @@ def main():
             }
         pose.to_csv(run_out / "pose.csv", index=False)
         from sf_working_directories.IntrMotiv.evaluation.ca3_memory_behavior import behavior_diagnostics
-        (run_out / "behavior_diagnostics.json").write_text(json.dumps(
-            behavior_diagnostics(pose, dg, refractory=int(cfg.Hippo_R)), indent=2) + "\n")
+
+        (run_out / "behavior_diagnostics.json").write_text(
+            json.dumps(behavior_diagnostics(pose, dg, refractory=int(cfg.Hippo_R)), indent=2) + "\n"
+        )
         np.savez_compressed(run_out / "place_fields.npz", **artifact)
         if args.save_raw_activations:
             raw = {"dg": dg}

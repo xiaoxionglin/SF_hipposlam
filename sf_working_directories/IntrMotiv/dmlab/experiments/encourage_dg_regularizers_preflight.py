@@ -1,7 +1,6 @@
 """Short validation runs for the encourage DG-regularizer factorial."""
 
 from sample_factory.launcher.run_description import RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.encourage_dg_regularizers import (
     BATCH_NAME,
     LOSS_ARMS,

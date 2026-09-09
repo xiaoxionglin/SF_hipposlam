@@ -61,12 +61,8 @@ def test_dominant_tie_break_is_deterministic():
 def test_simultaneous_candidates_are_not_each_others_predecessors():
     baseline = 7
     progression = torch.tensor([[[7, 7, 7], [0, 0, 4], [0, 0, 7]]])
-    candidates = torch.tensor(
-        [[[False, False, False], [True, True, False], [True, True, False]]]
-    )
-    dominant = torch.tensor(
-        [[[False, False, False], [False, True, False], [True, False, False]]]
-    )
+    candidates = torch.tensor([[[False, False, False], [True, True, False], [True, True, False]]])
+    dominant = torch.tensor([[[False, False, False], [False, True, False], [True, False, False]]])
 
     distance = predecessor_distance_for_dominant_events(progression, candidates, dominant, baseline)
 

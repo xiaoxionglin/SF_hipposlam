@@ -1,13 +1,8 @@
 """Causal UCB-manager control with matched topology and local exploration."""
 
 from sample_factory.launcher.run_description import RunDescription
-
-from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import (
-    FULL_SEEDS,
-    make_experiment,
-)
+from sf_working_directories.IntrMotiv.dmlab.experiments.frontier_manager_isolation import FULL_SEEDS, make_experiment
 from sf_working_directories.IntrMotiv.dmlab.experiments.topological_frontier_planning import Cell
-
 
 BATCH_NAME = "intrmotiv_frontier_manager_matched_control_20260831"
 PROJECT = "SF_IntrMotiv_FrontierManagerCausalControl"

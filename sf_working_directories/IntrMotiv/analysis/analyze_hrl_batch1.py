@@ -12,10 +12,8 @@ import numpy as np
 import pandas as pd
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-
 RUN_RE = re.compile(
-    r"B1_F(?P<F>\d+)_L(?P<L>\d+)_T(?P<threshold>\d+)_ER"
-    r"(?P<reward_method>punish|encourage|mean)_S(?P<seed>\d+)"
+    r"B1_F(?P<F>\d+)_L(?P<L>\d+)_T(?P<threshold>\d+)_ER" r"(?P<reward_method>punish|encourage|mean)_S(?P<seed>\d+)"
 )
 
 METRICS = [
@@ -135,13 +133,9 @@ def main() -> None:
     frame.to_csv(args.output_dir / "per_run_windows.csv", index=False)
 
     aggregate(frame, ["window"]).to_csv(args.output_dir / "aggregate_overall.csv", index=False)
-    aggregate(frame, ["window", "reward_method"]).to_csv(
-        args.output_dir / "aggregate_reward_method.csv", index=False
-    )
+    aggregate(frame, ["window", "reward_method"]).to_csv(args.output_dir / "aggregate_reward_method.csv", index=False)
     aggregate(frame, ["window", "L"]).to_csv(args.output_dir / "aggregate_sequence_length.csv", index=False)
-    aggregate(frame, ["window", "threshold"]).to_csv(
-        args.output_dir / "aggregate_threshold.csv", index=False
-    )
+    aggregate(frame, ["window", "threshold"]).to_csv(args.output_dir / "aggregate_threshold.csv", index=False)
     aggregate(frame, ["window", "L", "threshold", "reward_method"]).to_csv(
         args.output_dir / "aggregate_cells.csv", index=False
     )

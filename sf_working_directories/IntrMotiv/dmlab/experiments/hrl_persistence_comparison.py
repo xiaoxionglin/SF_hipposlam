@@ -1,6 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
 
-
 BATCH_NAME = "intrmotiv_hrl_persistence_comparison_20260821"
 PROJECT = "SF_IntrMotiv_HRLPersistenceComparison"
 WANDB_ROOT = "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb"
@@ -116,10 +115,6 @@ RUN_DESCRIPTION = RunDescription(
             for half_life in HALF_LIVES
             for mode_tag, iterative in ITERATIVE_MODES
         ],
-        *[
-            flat_long(seed, mode_tag, iterative)
-            for seed in SEEDS
-            for mode_tag, iterative in ITERATIVE_MODES
-        ],
+        *[flat_long(seed, mode_tag, iterative) for seed in SEEDS for mode_tag, iterative in ITERATIVE_MODES],
     ],
 )

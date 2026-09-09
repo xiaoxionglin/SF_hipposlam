@@ -5,7 +5,7 @@ from typing import Optional
 from tensorboardX import SummaryWriter
 
 from sample_factory.algo.runners.runner import AlgoObserver, Runner
-from sample_factory.algo.utils.misc import ExperimentStatus, TRAIN_STATS
+from sample_factory.algo.utils.misc import TRAIN_STATS, ExperimentStatus
 from sample_factory.algo.utils.model_context import global_learner_factory, global_model_factory
 from sample_factory.algo.utils.multiprocessing_utils import get_mp_ctx
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
@@ -21,17 +21,6 @@ from sf_working_directories.IntrMotiv.dmlab.custom_decoder import make_hipposlam
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import make_hipposlam_encoder
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import make_hipposlam_learner
 from sf_working_directories.IntrMotiv.dmlab.custom_params import add_hipposlam_env_args, hipposlam_override_defaults
-from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
-    hrl_option_state_size,
-    hrl_persistent_state_size,
-    hrl_state_size,
-)
-from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
-    ACTION_FEATURE_SIZE,
-    GEOMETRY_POLICY_SIZE,
-    topological_state_size,
-)
-from sf_working_directories.IntrMotiv.dmlab.reward_summaries import write_intrmotiv_summaries
 from sf_working_directories.IntrMotiv.dmlab.dmlab_env import (
     DMLAB_ENVS,
     dmlab_extra_episodic_stats_processing,
@@ -41,6 +30,17 @@ from sf_working_directories.IntrMotiv.dmlab.dmlab_env import (
 )
 from sf_working_directories.IntrMotiv.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_caches
 from sf_working_directories.IntrMotiv.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
+from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
+    hrl_option_state_size,
+    hrl_persistent_state_size,
+    hrl_state_size,
+)
+from sf_working_directories.IntrMotiv.dmlab.reward_summaries import write_intrmotiv_summaries
+from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
+    ACTION_FEATURE_SIZE,
+    GEOMETRY_POLICY_SIZE,
+    topological_state_size,
+)
 
 
 class DmlabEnvWithCache:
@@ -96,14 +96,6 @@ def initialize_level_cache(cfg: Config, mp_ctx: BaseContext) -> Optional[DmlabLe
 
 
 def maybe_overwrite_rnn_size(cfg):
-    cfg.extra_policy_output_shapes = (
-        (("dg_activity", [int(cfg.Hippo_n_feature)]),)
-        if getattr(cfg, "online_spatial_telemetry", False)
-        else ()
-    )
-    cfg.wandb_step_metric_namespaces = ("intrmotiv",)
-    cfg.head_l1_size = int(cfg.Hippo_n_feature)
-
     if getattr(cfg, "extra_decoder_loss", False):
         raise ValueError(
             "extra_decoder_loss is disabled: its historical objective had the wrong sign and must be repaired "
@@ -114,6 +106,13 @@ def maybe_overwrite_rnn_size(cfg):
             "distance_metric is an internal temporal statistic, not a valid PBT objective; "
             "use intrmotiv_pbt_objective or an external exploration metric"
         )
+
+    cfg.extra_policy_output_shapes = (
+        (("dg_activity", [int(cfg.Hippo_n_feature)]),) if getattr(cfg, "online_spatial_telemetry", False) else ()
+    )
+    cfg.wandb_step_metric_namespaces = ("intrmotiv",)
+    cfg.head_l1_size = int(cfg.Hippo_n_feature)
+
     manager_mode = getattr(cfg, "hrl_manager_mode", "visit_direct")
     topological = manager_mode != "visit_direct"
     graph_recruitment = bool(getattr(cfg, "dg_orthogonal_recruitment", False)) and (
@@ -221,7 +220,10 @@ def maybe_overwrite_rnn_size(cfg):
         if context_feedback != "none" and not intrinsic_goal:
             raise ValueError("Flat finite-memory mechanisms require no learned feedback")
     if intrinsic_goal:
-        if goal_conditioning not in ("target_id_additive", "target_id_film") or int(getattr(cfg, "intrinsic_goal_horizon", 64)) < 1:
+        if (
+            goal_conditioning not in ("target_id_additive", "target_id_film")
+            or int(getattr(cfg, "intrinsic_goal_horizon", 64)) < 1
+        ):
             raise ValueError("Intrinsic goals require additive/FiLM target identity and a positive horizon")
         if getattr(cfg, "decoder_reward_gate", "none") != "none":
             raise ValueError("Goal cells use their own arrival reward")
@@ -257,13 +259,18 @@ def maybe_overwrite_rnn_size(cfg):
         rnn_size = hippo_n_feature * (R + L - 1) + 13
         if intrinsic_goal:
             from .ca3_memory import GOAL_STATE_SIZE
+
             rnn_size += GOAL_STATE_SIZE
-            if (getattr(cfg, "intrinsic_goal_reference_checkpoint", None)
-                    or getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"):
+            if (
+                getattr(cfg, "intrinsic_goal_reference_checkpoint", None)
+                or getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
+            ):
                 rnn_size += int(cfg.Hippo_n_feature)
         if context_feedback != "none" and context_history == "ca3_action":
-            action_count = 5 if getattr(cfg, "dmlab_reduced_action_set", False) else (
-                15 if getattr(cfg, "dmlab_extended_action_set", False) else 9
+            action_count = (
+                5
+                if getattr(cfg, "dmlab_reduced_action_set", False)
+                else (15 if getattr(cfg, "dmlab_extended_action_set", False) else 9)
             )
             # Current previous-action observation is retained in the bypass;
             # the separate shift register stores the ordered causal R-history.
@@ -288,11 +295,7 @@ def maybe_overwrite_rnn_size(cfg):
             # Replay-only behavior descriptor. With manager-mode
             # conditioning this stores target id, four geometry values, and
             # mode id; otherwise it stores only target id.
-            rnn_size += (
-                1 + GEOMETRY_POLICY_SIZE + 1
-                if getattr(cfg, "hrl_behavior_mode_condition", False)
-                else 1
-            )
+            rnn_size += 1 + GEOMETRY_POLICY_SIZE + 1 if getattr(cfg, "hrl_behavior_mode_condition", False) else 1
         cfg.cli_args["rnn_size"] = rnn_size
         cfg.rnn_size = rnn_size
 
@@ -308,9 +311,7 @@ def maybe_overwrite_rnn_size(cfg):
         and getattr(cfg, "hrl_target_timing", "delayed") == "immediate"
     ):
         cfg.rnn_persistent_state_size = (
-            1 + GEOMETRY_POLICY_SIZE + 1
-            if getattr(cfg, "hrl_behavior_mode_condition", False)
-            else 1
+            1 + GEOMETRY_POLICY_SIZE + 1 if getattr(cfg, "hrl_behavior_mode_condition", False) else 1
         )
     else:
         cfg.rnn_persistent_state_size = 0

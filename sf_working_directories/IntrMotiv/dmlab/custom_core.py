@@ -4,6 +4,7 @@ from logging import warning
 
 import torch
 from torch import Tensor, nn
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 
 from sample_factory.model.core import ModelCore, ModelCoreIdentity, ModelCoreRNN
 from sample_factory.utils.typing import Config
@@ -22,8 +23,8 @@ from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
     split_hrl_option_state,
     split_hrl_state,
     target_one_hot,
-    update_option_state_from_policy_graph,
     update_hrl_state,
+    update_option_state_from_policy_graph,
 )
 from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
     ACTION_FEATURE_SIZE,
@@ -133,9 +134,6 @@ class FixedRNNSequenceCore(ModelCore):
             new_hidden = new_hidden.squeeze(0)  # (B, core_output_size)
             output = output.squeeze(0)  # (B, core_output_size)
             return output, new_hidden
-
-
-from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 
 
 class FixedRNNWithBypassCore(ModelCore):
@@ -379,7 +377,7 @@ class SimpleSequenceCore(ModelCore):
 
         new_rnn_states = rnn_states.clone()
 
-        ### tried to fast propagate hipposeq but it wouldn't work
+        # Tried to fast propagate hipposeq, but it would not work.
         # for i in range(len(lengths)):
         #     # rnn_states = rnn_states[:,i,:,:].roll(shifts=lengths[i], dims=-1).contiguous()
         #     # # propagate hipposeq
@@ -500,14 +498,10 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.hrl_bootstrap_horizon = int(getattr(cfg, "hrl_bootstrap_horizon", 64))
         self.hrl_min_target_visits = float(getattr(cfg, "hrl_min_target_visits", 1.0))
         self.hrl_persistent_fast_weights = bool(getattr(cfg, "hrl_persistent_fast_weights", False))
-        self.hrl_fast_weight_half_life_options = float(
-            getattr(cfg, "hrl_fast_weight_half_life_options", 10000.0)
-        )
+        self.hrl_fast_weight_half_life_options = float(getattr(cfg, "hrl_fast_weight_half_life_options", 10000.0))
         self.hrl_edge_confidence_threshold = float(getattr(cfg, "hrl_edge_confidence_threshold", 0.5))
         self.hrl_exploration_mode = bool(getattr(cfg, "hrl_exploration_mode", False))
-        self.hrl_manager_exploration_probability = float(
-            getattr(cfg, "hrl_manager_exploration_probability", 0.0)
-        )
+        self.hrl_manager_exploration_probability = float(getattr(cfg, "hrl_manager_exploration_probability", 0.0))
         self.hrl_exploration_horizon = int(getattr(cfg, "hrl_exploration_horizon", 64))
         self.hrl_manager_mode = getattr(cfg, "hrl_manager_mode", "visit_direct")
         self.hrl_control_outcome = getattr(cfg, "hrl_control_outcome", "target_hit")
@@ -554,9 +548,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             else hrl_state_size(self.Hippo_n_feature) if self.hrl_enabled else 0
         ) + self.topological_state_size
         immediate_policy_graph = (
-            self.hrl_enabled
-            and self.hrl_graph_memory == "policy_buffer"
-            and self.hrl_target_timing == "immediate"
+            self.hrl_enabled and self.hrl_graph_memory == "policy_buffer" and self.hrl_target_timing == "immediate"
         )
         self.behavior_goal_state_size = (
             1 + GEOMETRY_POLICY_SIZE + 1
@@ -575,9 +567,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             + self.behavior_goal_state_size
         )
         self.action_feature_size = ACTION_FEATURE_SIZE if self.action_path_integration else 0
-        self.policy_base_output_size = (
-            self.base_state_size - self.action_feature_size - self.context_action_count
-        )
+        self.policy_base_output_size = self.base_state_size - self.action_feature_size - self.context_action_count
         self.hrl_condition_size = self.Hippo_n_feature if self.hrl_enabled else 0
         if self.topological_enabled and self.motion_policy_input:
             self.hrl_condition_size += MOTION_POLICY_SIZE
@@ -626,17 +616,17 @@ class SimpleSequenceWithBypassCore(ModelCore):
 
     def _split_state(self, rnn_states):
         if self.behavior_goal_state_size:
-            rnn_states = rnn_states[:, :-self.behavior_goal_state_size]
+            rnn_states = rnn_states[:, : -self.behavior_goal_state_size]
         action_history = None
         if self.context_action_history_size:
             action_history = rnn_states[:, -self.context_action_history_size :].view(
                 rnn_states.size(0), self.R, self.context_action_count
             )
-            rnn_states = rnn_states[:, :-self.context_action_history_size]
+            rnn_states = rnn_states[:, : -self.context_action_history_size]
         recruitment_history = None
         if self.recruitment_history_size:
             recruitment_history = rnn_states[:, -self.recruitment_history_size :]
-            rnn_states = rnn_states[:, :-self.recruitment_history_size]
+            rnn_states = rnn_states[:, : -self.recruitment_history_size]
         if not self.hrl_enabled:
             return rnn_states, None, recruitment_history, action_history
         if self.hrl_graph_memory == "policy_buffer":
@@ -660,9 +650,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
         if not self.graph_recruitment:
             raise RuntimeError("Recruitment history requested while graph recruitment is disabled")
         if self.behavior_goal_state_size:
-            rnn_states = rnn_states[..., :-self.behavior_goal_state_size]
+            rnn_states = rnn_states[..., : -self.behavior_goal_state_size]
         if self.context_action_history_size:
-            rnn_states = rnn_states[..., :-self.context_action_history_size]
+            rnn_states = rnn_states[..., : -self.context_action_history_size]
         return rnn_states[..., -self.recruitment_history_size :]
 
     def _advance_context_action_history(self, history, current_action):
@@ -683,9 +673,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 "modulation_saturation_fraction": zero,
             }
             return visual_or_activity
-        activity, stats = self.context_feedback(
-            visual_or_activity, previous_ca3, action_history
-        )
+        activity, stats = self.context_feedback(visual_or_activity, previous_ca3, action_history)
         self.last_context_feedback_stats = stats
         return activity
 
@@ -741,9 +729,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     min_target_visits=self.hrl_min_target_visits,
                 )
                 target = condition[:, : self.Hippo_n_feature]
-                geometry = condition[
-                    :, self.Hippo_n_feature : self.Hippo_n_feature + GEOMETRY_POLICY_SIZE
-                ]
+                geometry = condition[:, self.Hippo_n_feature : self.Hippo_n_feature + GEOMETRY_POLICY_SIZE]
                 mode = condition[:, self.Hippo_n_feature + GEOMETRY_POLICY_SIZE :]
                 pieces = [target]
                 if self.motion_policy_input:
@@ -841,7 +827,11 @@ class SimpleSequenceWithBypassCore(ModelCore):
             # We'll store the flattened core outputs for each time step.
             out_core = torch.empty((T, B, self.core_output_size), device=padded.device)
 
-            hrl_seq = torch.empty((T, B, self.hrl_condition_size), device=padded.device, dtype=padded.dtype) if self.hrl_enabled else None
+            hrl_seq = (
+                torch.empty((T, B, self.hrl_condition_size), device=padded.device, dtype=padded.dtype)
+                if self.hrl_enabled
+                else None
+            )
             feedback_sums = {}
             feedback_count = 0
 
@@ -858,9 +848,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                         context_action_history[valid_idx], current_action
                     )
                     context_action_history[valid_idx] = action_history_valid
-                curr_core = self._contextualize_dg(
-                    curr_visual, prev_core_valid, action_history_valid
-                )
+                curr_core = self._contextualize_dg(curr_visual, prev_core_valid, action_history_valid)
                 for name, value in self.last_context_feedback_stats.items():
                     feedback_sums[name] = feedback_sums.get(name, value * 0.0) + value * int(batch_sizes[t])
                 feedback_count += int(batch_sizes[t])
@@ -925,9 +913,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 state_parts.append(context_action_history.reshape(B, -1))
             new_rnn_state = torch.cat(state_parts, dim=1)
             if self.behavior_goal_state_size:
-                final_condition = torch.stack(
-                    [hrl_seq[lengths[i] - 1, i] for i in range(B)], dim=0
-                )
+                final_condition = torch.stack([hrl_seq[lengths[i] - 1, i] for i in range(B)], dim=0)
                 new_rnn_state = torch.cat((new_rnn_state, self._behavior_descriptor(final_condition)), dim=-1)
 
             # For the output at each time step, the bypass features come directly from the current input.
@@ -963,12 +949,8 @@ class SimpleSequenceWithBypassCore(ModelCore):
             core_state = base_rnn_states[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
             if self.context_action_history_size:
                 current_action = head_output[:, -self.context_action_count :]
-                context_action_history = self._advance_context_action_history(
-                    context_action_history, current_action
-                )
-            core_input = self._contextualize_dg(
-                core_input, core_state, context_action_history
-            )
+                context_action_history = self._advance_context_action_history(context_action_history, current_action)
+            core_input = self._contextualize_dg(core_input, core_state, context_action_history)
             self.last_dg_activity = core_input
             # Roll the shift register and zero the new slot.
             if torch.nonzero(core_state).shape[0] != 0:
@@ -1051,6 +1033,7 @@ class FiniteMemoryCore(SimpleSequenceWithBypassCore):
         self.memory_base_size = self.total_state_size
         if self.intrinsic_goal:
             from .ca3_memory import GOAL_STATE_SIZE
+
             self.goal_detector_state_size = self.Hippo_n_feature if self.independent_goal_detector else 0
             self.total_state_size += self.goal_detector_state_size
             self.total_state_size += GOAL_STATE_SIZE
@@ -1058,30 +1041,30 @@ class FiniteMemoryCore(SimpleSequenceWithBypassCore):
 
     def _contextualize_dg(self, visual_or_activity, previous_ca3, action_history):
         from .ca3_memory import inhibit_reentry
+
         activity = super()._contextualize_dg(visual_or_activity, previous_ca3, action_history)
         self.last_raw_dg_activity = activity
         if self.intrinsic_goal:
             self._raw_dg_steps.append(activity)
         filtered = inhibit_reentry(activity, previous_ca3, self.memory_inhibition)
-        self.last_context_feedback_stats["suppressed_fraction"] = (
-            activity.gt(0) & filtered.eq(0)
-        ).float().mean()
+        self.last_context_feedback_stats["suppressed_fraction"] = (activity.gt(0) & filtered.eq(0)).float().mean()
         self.last_context_feedback_stats["modulation_abs_mean"] = (activity - filtered).abs().mean()
         return filtered
 
     def forward(self, head_output, rnn_states):
         from .ca3_memory import GOAL_STATE_SIZE, advance_goal, advance_reference_goal
+
         if not self.intrinsic_goal:
             return super().forward(head_output, rnn_states)
-        base = rnn_states[:, :self.memory_base_size]
-        detector_state = rnn_states[:, self.memory_base_size:self.memory_base_size + self.goal_detector_state_size]
+        base = rnn_states[:, : self.memory_base_size]
+        detector_state = rnn_states[:, self.memory_base_size : self.memory_base_size + self.goal_detector_state_size]
         goal_state = rnn_states[:, -GOAL_STATE_SIZE:].clone()
         reference_activity = None
         if self.goal_reference:
             if isinstance(head_output, PackedSequence):
                 data = head_output.data
-                reference_data = data[:, self.Hippo_n_feature:2 * self.Hippo_n_feature]
-                base_data = torch.cat((data[:, :self.Hippo_n_feature], data[:, 2 * self.Hippo_n_feature:]), -1)
+                reference_data = data[:, self.Hippo_n_feature : 2 * self.Hippo_n_feature]
+                base_data = torch.cat((data[:, : self.Hippo_n_feature], data[:, 2 * self.Hippo_n_feature :]), -1)
                 reference_activity = PackedSequence(
                     reference_data, head_output.batch_sizes, head_output.sorted_indices, head_output.unsorted_indices
                 )
@@ -1089,8 +1072,10 @@ class FiniteMemoryCore(SimpleSequenceWithBypassCore):
                     base_data, head_output.batch_sizes, head_output.sorted_indices, head_output.unsorted_indices
                 )
             else:
-                reference_activity = head_output[:, self.Hippo_n_feature:2 * self.Hippo_n_feature]
-                head_output = torch.cat((head_output[:, :self.Hippo_n_feature], head_output[:, 2 * self.Hippo_n_feature:]), -1)
+                reference_activity = head_output[:, self.Hippo_n_feature : 2 * self.Hippo_n_feature]
+                head_output = torch.cat(
+                    (head_output[:, : self.Hippo_n_feature], head_output[:, 2 * self.Hippo_n_feature :]), -1
+                )
         self._raw_dg_steps = []
         output, updated = super().forward(head_output, base)
         if isinstance(output, PackedSequence):
@@ -1104,38 +1089,53 @@ class FiniteMemoryCore(SimpleSequenceWithBypassCore):
             if self.independent_goal_detector and not self.goal_reference:
                 detector_padded = padded.new_zeros((*padded.shape[:2], self.Hippo_n_feature))
                 for t, raw_activity in enumerate(self._raw_dg_steps):
-                    valid_idx = output.sorted_indices[:output.batch_sizes[t]]
+                    valid_idx = output.sorted_indices[: output.batch_sizes[t]]
                     detector_padded[t, valid_idx] = raw_activity
-            previous = base[:, :self.core_output_size].reshape(-1, self.Hippo_n_feature, self.expanded_length)
+            previous = base[:, : self.core_output_size].reshape(-1, self.Hippo_n_feature, self.expanded_length)
             goals = padded.new_zeros((*padded.shape[:2], self.Hippo_n_feature))
             for t in range(padded.size(0)):
                 valid = lengths.to(padded.device).gt(t)
-                current = padded[t, valid, :self.core_output_size].reshape(-1, self.Hippo_n_feature, self.expanded_length)
+                current = padded[t, valid, : self.core_output_size].reshape(
+                    -1, self.Hippo_n_feature, self.expanded_length
+                )
                 if self.independent_goal_detector:
                     current_detector = detector_padded[t, valid]
-                    next_goal, condition = advance_reference_goal(goal_state[valid], detector_state[valid],
-                        current_detector, self.goal_horizon, self.goal_reward_max)
+                    next_goal, condition = advance_reference_goal(
+                        goal_state[valid],
+                        detector_state[valid],
+                        current_detector,
+                        self.goal_horizon,
+                        self.goal_reward_max,
+                    )
                     detector_state = detector_state.clone()
                     detector_state[valid] = current_detector.detach()
                 else:
-                    next_goal, condition = advance_goal(goal_state[valid], previous[valid], current.detach(),
-                        self.goal_horizon, self.goal_reward_max, self.R)
+                    next_goal, condition = advance_goal(
+                        goal_state[valid],
+                        previous[valid],
+                        current.detach(),
+                        self.goal_horizon,
+                        self.goal_reward_max,
+                        self.R,
+                    )
                 goal_state[valid] = next_goal
                 goals[t, valid] = condition
                 previous = previous.clone()
                 previous[valid] = current.detach()
             output = nn.utils.rnn.pack_padded_sequence(torch.cat((padded, goals), -1), lengths, enforce_sorted=False)
         else:
-            previous = base[:, :self.core_output_size].reshape(-1, self.Hippo_n_feature, self.expanded_length)
-            current = updated[:, :self.core_output_size].reshape_as(previous)
+            previous = base[:, : self.core_output_size].reshape(-1, self.Hippo_n_feature, self.expanded_length)
+            current = updated[:, : self.core_output_size].reshape_as(previous)
             if self.independent_goal_detector:
                 detector_activity = reference_activity if self.goal_reference else self.last_raw_dg_activity
-                goal_state, condition = advance_reference_goal(goal_state, detector_state,
-                    detector_activity, self.goal_horizon, self.goal_reward_max)
+                goal_state, condition = advance_reference_goal(
+                    goal_state, detector_state, detector_activity, self.goal_horizon, self.goal_reward_max
+                )
                 detector_state = detector_activity.detach()
             else:
-                goal_state, condition = advance_goal(goal_state, previous, current.detach(),
-                    self.goal_horizon, self.goal_reward_max, self.R)
+                goal_state, condition = advance_goal(
+                    goal_state, previous, current.detach(), self.goal_horizon, self.goal_reward_max, self.R
+                )
             output = torch.cat((output, condition), -1)
         return output, torch.cat((updated, detector_state, goal_state), -1)
 
@@ -1229,7 +1229,11 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
             # We'll store the flattened core outputs for each time step.
             out_core = torch.empty((T, B, self.core_output_size), device=padded.device)
 
-            hrl_seq = torch.empty((T, B, self.Hippo_n_feature), device=padded.device, dtype=padded.dtype) if self.hrl_enabled else None
+            hrl_seq = (
+                torch.empty((T, B, self.Hippo_n_feature), device=padded.device, dtype=padded.dtype)
+                if self.hrl_enabled
+                else None
+            )
 
             # Process each time step updating only the valid (sorted) indices.
             for t in range(T):
@@ -1282,7 +1286,9 @@ class SimpleSequenceWithBypassCore_binary(ModelCore):
                 base_new_rnn_state = final_core
 
             base_new_rnn_state = straight_through_binary(base_new_rnn_state)
-            new_rnn_state = torch.cat([base_new_rnn_state, hrl_state], dim=1) if self.hrl_enabled else base_new_rnn_state
+            new_rnn_state = (
+                torch.cat([base_new_rnn_state, hrl_state], dim=1) if self.hrl_enabled else base_new_rnn_state
+            )
 
             # For the output at each time step, the bypass features come directly from the current input.
             # We can concatenate the core output computed in the loop with the bypass part from the padded sequence.
@@ -1668,8 +1674,6 @@ class SS_Bypass_Forget_Core(ModelCore):
         # core state is stored flattened; reshape into (B, Hippo_n_feature, expanded_length)
         core_state_flat = rnn_states[:, : self.core_output_size]
         core_state = core_state_flat.view(-1, self.Hippo_n_feature, self.expanded_length)
-        # Bypass state: previous bypass input.
-        bypass_state = rnn_states[:, self.core_output_size : self.core_output_size + self.bypass_size]
         # Forget RNN hidden state.
         forget_hidden = rnn_states[:, self.core_output_size + self.bypass_size :]
 
@@ -1972,8 +1976,10 @@ def make_hipposlam_core(cfg: Config, core_input_size: int) -> ModelCore:
         elif cfg.core_name == "BypassFixedRNN":
             core = FixedRNNWithBypassCore(cfg, core_input_size)
         elif cfg.core_name == "BypassSS":
-            memory = (getattr(cfg, "intrinsic_goal_mode", "none") != "none"
-                      or getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none")
+            memory = (
+                getattr(cfg, "intrinsic_goal_mode", "none") != "none"
+                or getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
+            )
             core = (FiniteMemoryCore if memory else SimpleSequenceWithBypassCore)(cfg, core_input_size)
         elif cfg.core_name == "BypassSS_binary":
             core = SimpleSequenceWithBypassCore_binary(cfg, core_input_size)

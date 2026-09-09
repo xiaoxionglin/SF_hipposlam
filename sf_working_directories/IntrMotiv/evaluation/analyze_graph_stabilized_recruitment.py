@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-
 RUN_RE = re.compile(r"GSR_(C05|C13|C15)_D(4|8)_H(5|10)K_S(8|99|123)$")
 BACKBONES = ("C05", "C13", "C15")
 SEEDS = (8, 99, 123)
@@ -132,7 +131,8 @@ def aggregate_conditions(frame: pd.DataFrame) -> pd.DataFrame:
     keys = ["backbone", "redundancy_max_steps", "half_life_k"]
     grouped = frame.groupby(keys, sort=True)[metrics]
     return (
-        grouped.mean().add_suffix("__mean")
+        grouped.mean()
+        .add_suffix("__mean")
         .join(grouped.std(ddof=1).add_suffix("__sd"))
         .join(grouped.count().add_suffix("__n"))
         .reset_index()
@@ -144,12 +144,11 @@ def paired_factor_effects(frame: pd.DataFrame) -> pd.DataFrame:
 
     rows: list[dict[str, object]] = []
     for backbone in BACKBONES:
-        subset = frame[frame.backbone == backbone].set_index(
-            ["seed", "redundancy_max_steps", "half_life_k"]
-        )
+        subset = frame[frame.backbone == backbone].set_index(["seed", "redundancy_max_steps", "half_life_k"])
         for metric in list(WINDOW_METRICS) + list(CUMULATIVE_METRICS):
             by_seed: dict[int, dict[str, float]] = {}
             for seed in SEEDS:
+
                 def value(d_value: int, h_value: int) -> float:
                     return float(subset.loc[(seed, d_value, h_value), metric])
 
@@ -160,15 +159,17 @@ def paired_factor_effects(frame: pd.DataFrame) -> pd.DataFrame:
             for effect in ("D8_minus_D4", "H10k_minus_H5k", "interaction"):
                 values = np.asarray([by_seed[seed][effect] for seed in SEEDS], dtype=float)
                 finite = values[np.isfinite(values)]
-                rows.append({
-                    "backbone": backbone,
-                    "metric": metric,
-                    "effect": effect,
-                    "mean": float(np.mean(finite)) if len(finite) else np.nan,
-                    "sd": float(np.std(finite, ddof=1)) if len(finite) > 1 else np.nan,
-                    "n": int(len(finite)),
-                    **{f"seed_{seed}": by_seed[seed][effect] for seed in SEEDS},
-                })
+                rows.append(
+                    {
+                        "backbone": backbone,
+                        "metric": metric,
+                        "effect": effect,
+                        "mean": float(np.mean(finite)) if len(finite) else np.nan,
+                        "sd": float(np.std(finite, ddof=1)) if len(finite) > 1 else np.nan,
+                        "n": int(len(finite)),
+                        **{f"seed_{seed}": by_seed[seed][effect] for seed in SEEDS},
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -179,18 +180,20 @@ def _configure_matplotlib() -> None:
     font_path = font_manager.findfont("DejaVu Sans", fallback_to_default=False)
     if not font_path.lower().endswith((".ttf", ".otf")):
         raise RuntimeError(f"No scalable DejaVu Sans font resolved: {font_path}")
-    mpl.rcParams.update({
-        "font.family": "DejaVu Sans",
-        "font.size": 18,
-        "axes.labelsize": 20,
-        "axes.titlesize": 20,
-        "xtick.labelsize": 18,
-        "ytick.labelsize": 18,
-        "legend.fontsize": 18,
-        "axes.linewidth": 1.2,
-        "lines.linewidth": 2.0,
-        "savefig.dpi": 120,
-    })
+    mpl.rcParams.update(
+        {
+            "font.family": "DejaVu Sans",
+            "font.size": 18,
+            "axes.labelsize": 20,
+            "axes.titlesize": 20,
+            "xtick.labelsize": 18,
+            "ytick.labelsize": 18,
+            "legend.fontsize": 18,
+            "axes.linewidth": 1.2,
+            "lines.linewidth": 2.0,
+            "savefig.dpi": 120,
+        }
+    )
 
 
 def plot_condition_grid(aggregate: pd.DataFrame, output_dir: Path) -> None:
@@ -212,13 +215,19 @@ def plot_condition_grid(aggregate: pd.DataFrame, output_dir: Path) -> None:
     offsets = {"C05": -0.18, "C13": 0.0, "C15": 0.18}
     for panel_label, ax, (metric, ylabel) in zip("abcdef", axes.flat, panels):
         for backbone in BACKBONES:
-            subset = aggregate[aggregate.backbone == backbone].set_index(
-                ["redundancy_max_steps", "half_life_k"]
-            )
+            subset = aggregate[aggregate.backbone == backbone].set_index(["redundancy_max_steps", "half_life_k"])
             mean = np.asarray([subset.loc[cell, f"{metric}__mean"] for cell in PARAMETER_CELLS], dtype=float)
             sd = np.asarray([subset.loc[cell, f"{metric}__sd"] for cell in PARAMETER_CELLS], dtype=float)
-            ax.errorbar(x + offsets[backbone], mean, yerr=sd, fmt="o", capsize=4,
-                        markersize=7, color=colors[backbone], label=backbone)
+            ax.errorbar(
+                x + offsets[backbone],
+                mean,
+                yerr=sd,
+                fmt="o",
+                capsize=4,
+                markersize=7,
+                color=colors[backbone],
+                label=backbone,
+            )
         ax.set_xticks(x, labels)
         ax.set_ylabel(ylabel)
         ax.grid(axis="y", color="#d0d0d0", linewidth=0.8)
@@ -258,13 +267,8 @@ def main() -> None:
     args = parser.parse_args()
 
     event_paths = sorted(args.batch_root.glob("*/*/.summary/0/events.out.tfevents.*"))
-    rows = [
-        parse_run(path, args.terminal_width, args.window_low, args.window_high)
-        for path in event_paths
-    ]
-    frame = pd.DataFrame(rows).sort_values(
-        ["backbone", "redundancy_max_steps", "half_life_k", "seed"]
-    )
+    rows = [parse_run(path, args.terminal_width, args.window_low, args.window_high) for path in event_paths]
+    frame = pd.DataFrame(rows).sort_values(["backbone", "redundancy_max_steps", "half_life_k", "seed"])
     validate(frame)
     aggregate = aggregate_conditions(frame)
     effects = paired_factor_effects(frame)

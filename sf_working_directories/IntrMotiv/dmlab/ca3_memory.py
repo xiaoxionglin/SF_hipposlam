@@ -1,4 +1,5 @@
 """Finite CA3 novelty, re-entry inhibition, and graph-free intrinsic goals."""
+
 import torch
 from torch.nn import functional as F
 

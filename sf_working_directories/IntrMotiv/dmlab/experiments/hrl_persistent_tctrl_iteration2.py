@@ -1,6 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
 
-
 BATCH_NAME = "intrmotiv_hrl_persistent_tctrl_20260821"
 SEEDS = [8, 99, 123]
 HALF_LIVES = [5000, 10000, 20000]

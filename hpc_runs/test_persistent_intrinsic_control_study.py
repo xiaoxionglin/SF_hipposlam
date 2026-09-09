@@ -1,8 +1,7 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
-
 
 ROOT = Path(__file__).resolve().parent
 
@@ -25,7 +24,9 @@ class PersistentIntrinsicControlStudyTests(unittest.TestCase):
         references = [run for run in runs if run.metadata["family"] == "warm_reference"]
         self.assertEqual(len(references), 6)
         self.assertEqual({run.metadata["gradient"] for run in references}, {"stop", "joint"})
-        self.assertTrue(all(any(arg.startswith("--intrinsic_goal_reference_checkpoint=") for arg in run.args) for run in references))
+        self.assertTrue(
+            all(any(arg.startswith("--intrinsic_goal_reference_checkpoint=") for arg in run.args) for run in references)
+        )
 
     def test_c15_continuations_are_exact_three_seed_supplements(self):
         study = load_study(ROOT / "studies/persistent_intrinsic_control_c15.study.json")

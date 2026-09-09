@@ -1,28 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import csv
 import json
 import math
-from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 from hpc_runs.graph_stabilized_recruitment_manifest import rows as legacy_rows
-from hpc_runs.intrmotiv_study import SCHEMA_ID, SpecError, WORKFLOW_VERSION, load_study
+from hpc_runs.intrmotiv_study import SCHEMA_ID, WORKFLOW_VERSION, SpecError, load_study
 from hpc_runs.intrmotiv_study.analysis import linear_contrasts, summarize_records
 from hpc_runs.intrmotiv_study.sample_factory import build_run_description
-from hpc_runs.intrmotiv_study.submission import audit_submission
-from hpc_runs.intrmotiv_study.telemetry import (
-    MANIFEST_COLUMNS,
-    CheckpointRecord,
-    build_place_field_manifests,
-    build_intervention_manifest,
-    selected_intervention_runs,
-)
-from hpc_runs.intrmotiv_study.tensorboard import latest_at_or_before, mean_in_window
 from hpc_runs.intrmotiv_study.spatial import (
     collect_spatial_detail_records,
     collect_spatial_records,
@@ -33,19 +24,24 @@ from hpc_runs.intrmotiv_study.spatial_contract import (
     OnlineSpatialWindow,
     SpatialBounds,
     SpatialContractError,
-    calculate_spatial_metrics,
     calculate_graph_diagnostics,
     calculate_place_field_details,
+    calculate_spatial_metrics,
     load_spatial_snapshot,
     spatial_rate_maps,
     write_spatial_snapshot_atomic,
 )
-
-
-SPEC_PATH = (
-    Path(__file__).with_name("studies")
-    / "graph_stabilized_recruitment.study.json"
+from hpc_runs.intrmotiv_study.submission import audit_submission
+from hpc_runs.intrmotiv_study.telemetry import (
+    MANIFEST_COLUMNS,
+    CheckpointRecord,
+    build_intervention_manifest,
+    build_place_field_manifests,
+    selected_intervention_runs,
 )
+from hpc_runs.intrmotiv_study.tensorboard import latest_at_or_before, mean_in_window
+
+SPEC_PATH = Path(__file__).with_name("studies") / "graph_stabilized_recruitment.study.json"
 
 
 @dataclass(frozen=True)
@@ -82,16 +78,20 @@ class StudySpecTests(unittest.TestCase):
         study = load_study(SPEC_PATH.with_name("ca3_memory_novelty_goal.study.json"))
         selected = selected_intervention_runs(study)
         self.assertEqual(len(selected), 10)
-        inventory = [CheckpointRecord(run.name, t, t, Path(study.workspace_root) / (run.name + ".pth"),
-                     Path(study.workspace_root) / run.name) for run in study.expand_runs()
-                     for t in study.telemetry["target_frames"]]
+        inventory = [
+            CheckpointRecord(
+                run.name, t, t, Path(study.workspace_root) / (run.name + ".pth"), Path(study.workspace_root) / run.name
+            )
+            for run in study.expand_runs()
+            for t in study.telemetry["target_frames"]
+        ]
         rows, _ = build_place_field_manifests(study, inventory, require_checkpoint_files=False)
         interventions = build_intervention_manifest(study, rows)
         self.assertEqual(len(interventions), 10)
-        self.assertEqual({int(row['seed']) for row in interventions}, set(study.seeds))
+        self.assertEqual({int(row["seed"]) for row in interventions}, set(study.seeds))
         with self.assertRaises(SpecError):
             build_intervention_manifest(study, [row for row in rows if row != interventions[0]])
-        study.telemetry['intervention']['where'] = {'misspelled': 'goal'}
+        study.telemetry["intervention"]["where"] = {"misspelled": "goal"}
         with self.assertRaises(SpecError):
             selected_intervention_runs(study)
 
@@ -100,11 +100,14 @@ class StudySpecTests(unittest.TestCase):
         self.assertEqual(len(rows), 36)
         self.assertEqual(rows[0]["name"], "GSR_C05_D4_H5K_S8")
         self.assertNotIn("--seed=8", rows[0]["args"])
-        self.assertEqual(rows[0]["context_controls"], [
-            "original_C05_seed8",
-            "original_C05_seed99",
-            "original_C05_seed123",
-        ])
+        self.assertEqual(
+            rows[0]["context_controls"],
+            [
+                "original_C05_seed8",
+                "original_C05_seed99",
+                "original_C05_seed123",
+            ],
+        )
 
     def test_incorrect_expected_product_is_rejected(self):
         raw = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
@@ -136,13 +139,15 @@ class AnalysisTests(unittest.TestCase):
         for run in self.study.expand_runs():
             distance = int(run.factors["redundancy_max_steps"])
             half_life = int(run.factors["half_life_events"])
-            self.records.append({
-                "run_name": run.name,
-                "base": run.base,
-                "seed": run.seed,
-                **run.factors,
-                "score": distance + half_life / 10_000 + run.seed / 1_000,
-            })
+            self.records.append(
+                {
+                    "run_name": run.name,
+                    "base": run.base,
+                    "seed": run.seed,
+                    **run.factors,
+                    "score": distance + half_life / 10_000 + run.seed / 1_000,
+                }
+            )
 
     def test_group_summary_has_mean_sd_and_count(self):
         summary = summarize_records(
@@ -170,10 +175,12 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(by_name["interaction"]["n"], 3)
 
     def test_contrast_refuses_ambiguous_terms(self):
-        bad = [{
-            "name": "ambiguous",
-            "terms": [{"weight": 1, "where": {"redundancy_max_steps": 8}}],
-        }]
+        bad = [
+            {
+                "name": "ambiguous",
+                "terms": [{"weight": 1, "where": {"redundancy_max_steps": 8}}],
+            }
+        ]
         with self.assertRaisesRegex(SpecError, "selected 2 rows"):
             linear_contrasts(self.records, ["score"], ["base"], ["seed"], bad)
 
@@ -187,18 +194,16 @@ class TelemetryTests(unittest.TestCase):
         targets = self.study.telemetry["target_frames"]
         for run in self.study.expand_runs():
             for target in targets:
-                inventory.append(CheckpointRecord(
-                    run_name=run.name,
-                    target_frames=target,
-                    checkpoint_frames=target + run.seed,
-                    checkpoint=Path(
-                        f"/work/classic/fr_xl1014-train/checkpoints/{run.name}/{target}.pth"
-                    ),
-                    run_dir=Path(f"/work/classic/fr_xl1014-train/runs/{run.name}"),
-                ))
-        rows, trajectory = build_place_field_manifests(
-            self.study, inventory, require_checkpoint_files=False
-        )
+                inventory.append(
+                    CheckpointRecord(
+                        run_name=run.name,
+                        target_frames=target,
+                        checkpoint_frames=target + run.seed,
+                        checkpoint=Path(f"/work/classic/fr_xl1014-train/checkpoints/{run.name}/{target}.pth"),
+                        run_dir=Path(f"/work/classic/fr_xl1014-train/runs/{run.name}"),
+                    )
+                )
+        rows, trajectory = build_place_field_manifests(self.study, inventory, require_checkpoint_files=False)
         self.assertEqual(len(rows), 84)
         self.assertEqual(len(trajectory), 60)
         self.assertEqual(tuple(rows[0]), MANIFEST_COLUMNS)
@@ -207,17 +212,18 @@ class TelemetryTests(unittest.TestCase):
 
     def test_nonworkspace_checkpoint_is_rejected(self):
         run = self.study.expand_runs()[0]
-        inventory = [CheckpointRecord(
-            run_name=run.name,
-            target_frames=target,
-            checkpoint_frames=target,
-            checkpoint=Path(f"/home/fr/fr_xl1014/{target}.pth"),
-            run_dir=Path("/home/fr/fr_xl1014/run"),
-        ) for target in self.study.telemetry["target_frames"]]
-        with self.assertRaisesRegex(SpecError, "outside the workspace"):
-            build_place_field_manifests(
-                self.study, inventory, require_checkpoint_files=False
+        inventory = [
+            CheckpointRecord(
+                run_name=run.name,
+                target_frames=target,
+                checkpoint_frames=target,
+                checkpoint=Path(f"/home/fr/fr_xl1014/{target}.pth"),
+                run_dir=Path("/home/fr/fr_xl1014/run"),
             )
+            for target in self.study.telemetry["target_frames"]
+        ]
+        with self.assertRaisesRegex(SpecError, "outside the workspace"):
+            build_place_field_manifests(self.study, inventory, require_checkpoint_files=False)
 
 
 class SubmissionAuditTests(unittest.TestCase):
@@ -226,8 +232,14 @@ class SubmissionAuditTests(unittest.TestCase):
 
     def _write_jobs(self, path: Path, remove_first_arg: bool = False) -> None:
         fields = [
-            "job_id", "status", "experiment", "train_root", "sbatch_file",
-            "stdout", "stderr", "command",
+            "job_id",
+            "status",
+            "experiment",
+            "train_root",
+            "sbatch_file",
+            "stdout",
+            "stderr",
+            "command",
         ]
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t")
@@ -237,20 +249,24 @@ class SubmissionAuditTests(unittest.TestCase):
                 if remove_first_arg and index == 1000:
                     args.pop(0)
                 root = "/work/classic/fr_xl1014-train/study"
-                writer.writerow({
-                    "job_id": str(index),
-                    "status": "submitted",
-                    "experiment": f"00_{run.name}",
-                    "train_root": f"batch/{run.name}",
-                    "sbatch_file": f"{root}/sbatch_{run.name}.sh",
-                    "stdout": f"{root}/{run.name}-%j.out",
-                    "stderr": f"{root}/{run.name}-%j.err",
-                    "command": " ".join([
-                        *args,
-                        f"--experiment=00_{run.name}",
-                        f"--train_dir={root}/{run.name}",
-                    ]),
-                })
+                writer.writerow(
+                    {
+                        "job_id": str(index),
+                        "status": "submitted",
+                        "experiment": f"00_{run.name}",
+                        "train_root": f"batch/{run.name}",
+                        "sbatch_file": f"{root}/sbatch_{run.name}.sh",
+                        "stdout": f"{root}/{run.name}-%j.out",
+                        "stderr": f"{root}/{run.name}-%j.err",
+                        "command": " ".join(
+                            [
+                                *args,
+                                f"--experiment=00_{run.name}",
+                                f"--train_dir={root}/{run.name}",
+                            ]
+                        ),
+                    }
+                )
 
     def test_submission_audit_matches_matrix_commands_and_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -323,9 +339,9 @@ class SpatialContractTests(unittest.TestCase):
         for rate_map in maps:
             mean_rate = (rate_map * probability).sum()
             positive = (rate_map > 0) & (probability > 0)
-            reference.append(float((rate_map[positive] * probability[positive] * np.log2(
-                rate_map[positive] / mean_rate
-            )).sum()))
+            reference.append(
+                float((rate_map[positive] * probability[positive] * np.log2(rate_map[positive] / mean_rate)).sum())
+            )
         self.assertAlmostEqual(metrics["active_unit_mean_spatial_information"], np.mean(reference))
         self.assertEqual(metrics["active_unit_fraction"], 1.0)
         self.assertEqual(metrics["unique_active_peak_bins"], 2.0)
@@ -366,12 +382,13 @@ class SpatialContractTests(unittest.TestCase):
         for name, (adjacency, expected) in graphs.items():
             adjacency = np.asarray(adjacency, dtype=np.float32)
             diagnostics = calculate_graph_diagnostics(
-                adjacency, adjacency, adjacency,
-                confidence_threshold=0.5, reliability_threshold=0.5,
+                adjacency,
+                adjacency,
+                adjacency,
+                confidence_threshold=0.5,
+                reliability_threshold=0.5,
             )
-            self.assertAlmostEqual(
-                float(diagnostics["graph_reliable_global_efficiency"]), expected, msg=name
-            )
+            self.assertAlmostEqual(float(diagnostics["graph_reliable_global_efficiency"]), expected, msg=name)
 
     def test_grounded_controllability_multiplies_prospective_and_endpoint_factors(self):
         adjacency = np.asarray(((0, 1, 0), (0, 0, 1), (0, 0, 0)), dtype=np.float32)
@@ -489,9 +506,7 @@ class SpatialContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_spatial_snapshot_atomic(root / "arbitrary" / "policy_00", self._payload())
-            records, inventory, manifest = collect_spatial_records(
-                study, root, require_workspace=False
-            )
+            records, inventory, manifest = collect_spatial_records(study, root, require_workspace=False)
         self.assertEqual(records[0]["seed"], 8)
         self.assertEqual(records[0]["base"], "C05")
         self.assertEqual(len(inventory), 1)
@@ -507,45 +522,52 @@ class SpatialContractTests(unittest.TestCase):
         details = calculate_place_field_details(payload["pose"], payload["dg_activity"])
         payload.update(details)
         matrix = np.zeros((2, 2), dtype=np.float32)
-        payload.update({
-            "control_node_visits": np.ones(2, dtype=np.float32),
-            "control_tctrl": matrix.copy(),
-            "control_edge_confidence": matrix.copy(),
-            "control_attempts": matrix.copy(),
-            "control_prospective_attempts": matrix.copy(),
-            "control_prospective_successes": matrix.copy(),
-            "control_prospective_probability_sum": matrix.copy(),
-            "control_prospective_brier_sum": matrix.copy(),
-            "control_prospective_timing_count": matrix.copy(),
-            "control_prospective_timing_sum": matrix.copy(),
-            "control_prospective_predicted_timing_sum": matrix.copy(),
-            "control_prospective_timing_absolute_error_sum": matrix.copy(),
-            "control_passive_confidence": matrix.copy(),
-            "control_passive_time": matrix.copy(),
-            "control_passive_path_length": matrix.copy(),
-            "control_passive_dx": matrix.copy(),
-            "control_passive_dy": matrix.copy(),
-            "control_passive_dtheta_sin": matrix.copy(),
-            "control_passive_dtheta_cos": matrix.copy(),
-            "control_frontier_attempts": np.zeros(2, dtype=np.float32),
-            "control_frontier_discoveries": np.zeros(2, dtype=np.float32),
-            "control_landmark_pose": np.zeros((2, 3), dtype=np.float32),
-            "control_pose_valid": np.zeros(2, dtype=bool),
-            "control_pose_stress": np.asarray(0.0, dtype=np.float32),
-            "control_representation_generation": np.asarray(0, dtype=np.int64),
-            "control_confidence_threshold": np.asarray(0.5, dtype=np.float32),
-            "control_reliability_threshold": np.asarray(0.5, dtype=np.float32),
-        })
-        payload.update(calculate_graph_diagnostics(
-            matrix, matrix, matrix, matrix, matrix,
-            details["field_mono"], details["field_dominant_peak_xy"],
-        ))
+        payload.update(
+            {
+                "control_node_visits": np.ones(2, dtype=np.float32),
+                "control_tctrl": matrix.copy(),
+                "control_edge_confidence": matrix.copy(),
+                "control_attempts": matrix.copy(),
+                "control_prospective_attempts": matrix.copy(),
+                "control_prospective_successes": matrix.copy(),
+                "control_prospective_probability_sum": matrix.copy(),
+                "control_prospective_brier_sum": matrix.copy(),
+                "control_prospective_timing_count": matrix.copy(),
+                "control_prospective_timing_sum": matrix.copy(),
+                "control_prospective_predicted_timing_sum": matrix.copy(),
+                "control_prospective_timing_absolute_error_sum": matrix.copy(),
+                "control_passive_confidence": matrix.copy(),
+                "control_passive_time": matrix.copy(),
+                "control_passive_path_length": matrix.copy(),
+                "control_passive_dx": matrix.copy(),
+                "control_passive_dy": matrix.copy(),
+                "control_passive_dtheta_sin": matrix.copy(),
+                "control_passive_dtheta_cos": matrix.copy(),
+                "control_frontier_attempts": np.zeros(2, dtype=np.float32),
+                "control_frontier_discoveries": np.zeros(2, dtype=np.float32),
+                "control_landmark_pose": np.zeros((2, 3), dtype=np.float32),
+                "control_pose_valid": np.zeros(2, dtype=bool),
+                "control_pose_stress": np.asarray(0.0, dtype=np.float32),
+                "control_representation_generation": np.asarray(0, dtype=np.int64),
+                "control_confidence_threshold": np.asarray(0.5, dtype=np.float32),
+                "control_reliability_threshold": np.asarray(0.5, dtype=np.float32),
+            }
+        )
+        payload.update(
+            calculate_graph_diagnostics(
+                matrix,
+                matrix,
+                matrix,
+                matrix,
+                matrix,
+                details["field_mono"],
+                details["field_dominant_peak_xy"],
+            )
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_spatial_snapshot_atomic(root / "policy_00", payload)
-            units, fields, edges = collect_spatial_detail_records(
-                study, root, require_workspace=False
-            )
+            units, fields, edges = collect_spatial_detail_records(study, root, require_workspace=False)
         self.assertEqual(len(units), 2)
         self.assertEqual(fields, [])
         self.assertEqual(len(edges), 2)

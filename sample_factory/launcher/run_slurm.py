@@ -114,10 +114,7 @@ def _write_submission(path, run_description, args, template_text, jobs, created_
         "launcher_args": vars(args),
         "template_sha256": hashlib.sha256(template_text.encode("utf-8")).hexdigest(),
         "git": git_metadata,
-        "jobs": [
-            {"job_id": job["job_id"], "status": job["status"], "experiment": job["experiment"]}
-            for job in jobs
-        ],
+        "jobs": [{"job_id": job["job_id"], "status": job["status"], "experiment": job["experiment"]} for job in jobs],
     }
     with open(path, "w", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2, default=str)
@@ -208,9 +205,7 @@ def run_slurm(run_description, args):
             job["status"] = "submission_failed"
             job["command"] += f"\n# sbatch stderr: {result.stderr.strip()}"
             _write_jobs(jobs_path, jobs)
-            _write_submission(
-                submission_path, run_description, args, sbatch_template, jobs, created_at, git_metadata
-            )
+            _write_submission(submission_path, run_description, args, sbatch_template, jobs, created_at, git_metadata)
             log.error("sbatch failed for %s: %s", job["experiment"], result.stderr.strip())
             return 1
 
@@ -218,9 +213,7 @@ def run_slurm(run_description, args):
         if not job_id:
             job["status"] = "submission_failed"
             _write_jobs(jobs_path, jobs)
-            _write_submission(
-                submission_path, run_description, args, sbatch_template, jobs, created_at, git_metadata
-            )
+            _write_submission(submission_path, run_description, args, sbatch_template, jobs, created_at, git_metadata)
             log.error("sbatch returned no job ID for %s", job["experiment"])
             return 1
         job["job_id"] = job_id

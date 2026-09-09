@@ -12,7 +12,6 @@ from statistics import fmean
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.spec import SpecError
 
-
 STEP_TAG = "train/env_steps"
 MODE_TAGS = {
     "free": "intrmotiv/hrl/mode/free_fraction",
@@ -58,7 +57,7 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
         experiment = job["experiment"]
         if not experiment.startswith("00_PF_"):
             raise SpecError(f"unexpected preflight experiment {experiment!r}")
-        run_name = experiment[len("00_PF_"):]
+        run_name = experiment[len("00_PF_") :]
         if run_name not in expected:
             raise SpecError(f"unexpected preflight run {run_name!r}")
         run = expected[run_name]
@@ -173,9 +172,7 @@ def analyze(study, jobs_tsv: Path, train_root: Path) -> dict:
     mode_means = {}
     for mode in MODE_TAGS:
         values = [
-            result[f"mode_{mode}_max"]
-            for result in results
-            if math.isfinite(result.get(f"mode_{mode}_max", math.nan))
+            result[f"mode_{mode}_max"] for result in results if math.isfinite(result.get(f"mode_{mode}_max", math.nan))
         ]
         mode_means[mode] = fmean(values) if values else math.nan
     return {
@@ -205,10 +202,7 @@ def main() -> None:
         parser.error(str(error))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(
-        f"preflight cells passed: {payload['passed_cells']}/{payload['expected_cells']}; "
-        f"report: {args.output}"
-    )
+    print(f"preflight cells passed: {payload['passed_cells']}/{payload['expected_cells']}; " f"report: {args.output}")
     if not payload["all_cells_pass"]:
         raise SystemExit(1)
 

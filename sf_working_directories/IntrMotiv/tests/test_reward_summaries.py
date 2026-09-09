@@ -35,7 +35,6 @@ def test_intrmotiv_metrics_are_grouped_and_removed_from_train_stats():
         ("intrmotiv/reward/environment_mean", 0.0, 123),
     ]
 
-
     assert msg[TRAIN_STATS] == {}
 
 

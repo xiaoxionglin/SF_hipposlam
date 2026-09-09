@@ -1,13 +1,11 @@
 """Workspace-routing smoke test for the final structural-diversity code."""
 
 from sample_factory.launcher.run_description import RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.dg_structural_diversity import (
     BACKGROUNDS,
     BATCH_NAME,
     make_experiment,
 )
-
 
 RUN_DESCRIPTION = RunDescription(
     f"{BATCH_NAME}_preflight4",

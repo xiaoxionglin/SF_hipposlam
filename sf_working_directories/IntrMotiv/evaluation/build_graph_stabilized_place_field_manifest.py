@@ -22,10 +22,8 @@ from sf_working_directories.IntrMotiv.evaluation.build_place_field_sweep import 
     select_checkpoints,
 )
 
-
 RUN_RE = re.compile(
-    r"^00_GSR_(?P<backbone>C05|C13|C15)_D(?P<distance>4|8)_"
-    r"H(?P<half_life>5|10)K_S(?P<seed>8|99|123)$"
+    r"^00_GSR_(?P<backbone>C05|C13|C15)_D(?P<distance>4|8)_" r"H(?P<half_life>5|10)K_S(?P<seed>8|99|123)$"
 )
 BACKBONES = ("C05", "C13", "C15")
 DISTANCES = (4, 8)
@@ -70,13 +68,10 @@ def main() -> None:
         )
 
     latest_by_run = {
-        key: checkpoint_frames(checkpoints[max(TARGET_FRAMES)])
-        for key, (_, checkpoints) in discovered.items()
+        key: checkpoint_frames(checkpoints[max(TARGET_FRAMES)]) for key, (_, checkpoints) in discovered.items()
     }
     largest_shared_upper_bound = min(latest_by_run.values())
-    reached_targets = [
-        target for target in TARGET_FRAMES if all(latest >= target for latest in latest_by_run.values())
-    ]
+    reached_targets = [target for target in TARGET_FRAMES if all(latest >= target for latest in latest_by_run.values())]
     if not reached_targets:
         raise RuntimeError("No standard telemetry target has been reached by every run")
     largest_shared_target = max(reached_targets)
@@ -93,9 +88,7 @@ def main() -> None:
         checkpoint = checkpoints[target]
         actual = checkpoint_frames(checkpoint)
         if checkpoint.parent.name != "milestones":
-            raise RuntimeError(
-                f"Shared-target checkpoint is not a stable milestone for {run_dir}: {checkpoint}"
-            )
+            raise RuntimeError(f"Shared-target checkpoint is not a stable milestone for {run_dir}: {checkpoint}")
         condition = f"gsr_{backbone.lower()}_d{distance}_h{half_life_k}k"
         row = {
             "condition": condition,
@@ -147,9 +140,7 @@ def main() -> None:
         "max_absolute_checkpoint_offset": max(abs(frame - target) for frame in selected_frames),
         "selection": "select_checkpoints(run_dir), nearest retained milestone to target_frames",
     }
-    (args.output_root / "alignment_summary.json").write_text(
-        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
-    )
+    (args.output_root / "alignment_summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
 

@@ -1,9 +1,7 @@
 """One-job Slurm smoke test for scalar W&B and workspace snapshot telemetry."""
 
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.flat_intrinsic_iterative_baseline import BASE_CLI
-
 
 BATCH_NAME = "intrmotiv_online_spatial_graph_telemetry_preflight_20260904_r6"
 PROJECT = "SF_IntrMotiv_OnlineSpatialTelemetry"
@@ -48,12 +46,11 @@ PREFLIGHT_CLI += (
 
 RUN_DESCRIPTION = RunDescription(
     BATCH_NAME,
-    experiments=[Experiment(
-        "ONLINE_SPATIAL_GRAPH_PREFLIGHT_R6_S20260904",
-        PREFLIGHT_CLI
-        + "--seed=20260904 "
-        + "--encoder_reward_method=punish "
-        + "--iterative_update=False ",
-        [{}],
-    )],
+    experiments=[
+        Experiment(
+            "ONLINE_SPATIAL_GRAPH_PREFLIGHT_R6_S20260904",
+            PREFLIGHT_CLI + "--seed=20260904 " + "--encoder_reward_method=punish " + "--iterative_update=False ",
+            [{}],
+        )
+    ],
 )

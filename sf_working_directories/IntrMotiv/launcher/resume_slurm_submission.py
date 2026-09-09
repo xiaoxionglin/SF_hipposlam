@@ -12,7 +12,6 @@ import tempfile
 import time
 from pathlib import Path
 
-
 JOB_FIELDS = ["job_id", "status", "experiment", "train_root", "sbatch_file", "stdout", "stderr", "command"]
 
 
@@ -34,7 +33,6 @@ def atomic_write(path: Path, content: str, mode: int | None = None) -> None:
 
 
 def write_manifest(workdir: Path, jobs: list[dict[str, str]], submission: dict) -> None:
-    rows: list[str] = []
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=workdir, newline="", delete=False) as stream:
         writer = csv.DictWriter(stream, fieldnames=JOB_FIELDS, delimiter="\t", extrasaction="ignore")
         writer.writeheader()

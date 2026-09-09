@@ -1,6 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
 
-
 BATCH_NAME = "intrmotiv_flat_iterative_baseline_nopbt_20260820"
 SEEDS = [8, 99, 123]
 ENCODER_REWARD_METHODS = ["punish", "encourage", "mean"]

@@ -1,7 +1,5 @@
 from sample_factory.launcher.run_description import Experiment, RunDescription
-
 from sf_working_directories.IntrMotiv.dmlab.experiments.flat_intrinsic_iterative_baseline import BASE_CLI
-
 
 BATCH_NAME = "intrmotiv_flat_iterative_baseline_nopbt_preflight_20260820"
 
@@ -34,10 +32,7 @@ for old, new in (
 def experiment(mode_tag: str, iterative: bool) -> Experiment:
     return Experiment(
         f"FB_NOPBT_PREFLIGHT_{mode_tag}",
-        PREFLIGHT_CLI
-        + "--seed=20260820 "
-        + "--encoder_reward_method=punish "
-        + f"--iterative_update={iterative} ",
+        PREFLIGHT_CLI + "--seed=20260820 " + "--encoder_reward_method=punish " + f"--iterative_update={iterative} ",
         [{}],
     )
 

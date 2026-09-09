@@ -7,7 +7,6 @@ import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from sample_factory.algo.learning.rnn_utils import reset_rnn_states_on_episode_boundary
-
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
     control_outcome_labels,
@@ -27,14 +26,14 @@ from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
     hrl_persistent_state_size,
     hrl_state_size,
     initial_hrl_state,
-    option_target_one_hot,
     option_deadline,
+    option_target_one_hot,
     select_target_for_layout,
+    source_from_trace,
     split_hrl_option_state,
     split_hrl_state,
-    source_from_trace,
-    update_option_state_from_policy_graph,
     update_hrl_state,
+    update_option_state_from_policy_graph,
 )
 
 
@@ -167,7 +166,8 @@ class ControllableGraphHRLTest(unittest.TestCase):
     def test_old_policy_graph_checkpoint_loads_without_generation(self):
         graph = PolicyControllableGraph(3)
         old_state = {
-            key: value for key, value in graph.state_dict().items()
+            key: value
+            for key, value in graph.state_dict().items()
             if key != "representation_generation" and not key.startswith("prospective_")
         }
         restored = PolicyControllableGraph(3)
@@ -276,8 +276,11 @@ class ControllableGraphHRLTest(unittest.TestCase):
         states[0, 1, layout.completion_elapsed] = 5.0
 
         graph.update_from_option_rollout(
-            states, torch.tensor([[True]]), half_life_options=10000,
-            confidence_threshold=0.5, reliability_threshold=0.5,
+            states,
+            torch.tensor([[True]]),
+            half_life_options=10000,
+            confidence_threshold=0.5,
+            reliability_threshold=0.5,
         )
 
         self.assertEqual(graph.prospective_attempts[0, 1].item(), 1.0)
@@ -326,9 +329,7 @@ class ControllableGraphHRLTest(unittest.TestCase):
         states[0, 1, layout.option_expired] = 1.0
         states[0, 1, layout.completion_elapsed] = -64.0
 
-        result = graph.update_from_option_rollout(
-            states, torch.tensor([[True, False]]), half_life_options=10000
-        )
+        result = graph.update_from_option_rollout(states, torch.tensor([[True, False]]), half_life_options=10000)
 
         self.assertEqual(result["completion_count"].item(), 1.0)
         self.assertEqual(result["success_count"].item(), 0.0)
@@ -443,8 +444,13 @@ class ControllableGraphHRLTest(unittest.TestCase):
         tctrl[0, 0, 1] = 5.0
         tctrl[0, 1, 2] = 5.0
         deadline, learned = option_deadline(
-            state, torch.tensor([0]), torch.tensor([2]), layout,
-            fallback_horizon=64, margin_ratio=0.20, margin_steps=2,
+            state,
+            torch.tensor([0]),
+            torch.tensor([2]),
+            layout,
+            fallback_horizon=64,
+            margin_ratio=0.20,
+            margin_steps=2,
         )
         self.assertEqual(deadline.item(), 14.0)
         self.assertTrue(learned.item())
@@ -669,9 +675,7 @@ class ControllableGraphHRLTest(unittest.TestCase):
         self.assertTrue(torch.allclose(gated, torch.tensor([[0.2, 0.0]])))
 
         success = target_success_worker_reward(internal, hit, 7.0, 0.1, "hit", 1.0, 0.1)
-        success_distance = target_success_worker_reward(
-            internal, hit, 7.0, 0.1, "hit_distance", 1.0, 0.5
-        )
+        success_distance = target_success_worker_reward(internal, hit, 7.0, 0.1, "hit_distance", 1.0, 0.5)
         self.assertTrue(torch.allclose(success, torch.tensor([[1.0, 0.0]])))
         self.assertTrue(torch.all(success_distance >= success))
         self.assertTrue(torch.all(success_distance >= 0))
@@ -765,9 +769,7 @@ class ControllableGraphHRLTest(unittest.TestCase):
         states[2, 2, layout.completion_elapsed] = 64.0
         states[4, 2, layout.option_expired] = 1.0
         states[4, 2, layout.completion_elapsed] = -64.0
-        labels = control_outcome_labels(
-            states, torch.tensor([[False], [False], [False], [True], [False]]), layout
-        )
+        labels = control_outcome_labels(states, torch.tensor([[False], [False], [False], [True], [False]]), layout)
 
         self.assertEqual(labels["correct"].flatten().tolist(), [True, False, False, False, False])
         self.assertEqual(labels["wrong"].flatten().tolist(), [False, True, False, False, False])
@@ -786,9 +788,7 @@ class ControllableGraphHRLTest(unittest.TestCase):
         states[0, 1, layout.option_expired] = 1.0
         states[0, 1, layout.completion_elapsed] = -4.0
 
-        result = graph.update_from_option_rollout(
-            states, torch.tensor([[True]]), half_life_options=5000
-        )
+        result = graph.update_from_option_rollout(states, torch.tensor([[True]]), half_life_options=5000)
 
         self.assertEqual(result["wrong_outcome_count"].item(), 1.0)
         self.assertEqual(result["timeout_count"].item(), 0.0)
@@ -796,12 +796,8 @@ class ControllableGraphHRLTest(unittest.TestCase):
         self.assertEqual(graph.edge_confidence[0, 1].item(), 0.0)
 
     def test_future_target_labels_respect_episode_boundaries(self):
-        target = torch.tensor(
-            [[[0.0, 1.0], [0.0, 1.0], [1.0, 0.0], [1.0, 0.0]]]
-        )
-        dg = torch.tensor(
-            [[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 0.0]]]
-        )
+        target = torch.tensor([[[0.0, 1.0], [0.0, 1.0], [1.0, 0.0], [1.0, 0.0]]])
+        dg = torch.tensor([[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 0.0]]])
         dones = torch.tensor([[False, True, False, False]])
         hit, hit_time, valid = future_target_labels(target, dg, dones, horizon=3)
         self.assertTrue(valid.all())

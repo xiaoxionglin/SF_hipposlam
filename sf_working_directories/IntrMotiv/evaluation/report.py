@@ -10,12 +10,22 @@ import pandas as pd
 
 from .schema import EVALUATION_SCHEMA_VERSION, METRICS
 
-
 OUTCOME_COLUMNS = [
-    "max_step", "training_progress", "coverage_auc", "coverage_unique_cells", "coverage_entropy",
-    "dg_density", "dg_silent_unit_fraction", "dg_multi_activation_fraction",
-    "intrinsic_reward_mean", "intrinsic_reward_nonzero_fraction", "target_hit_rate",
-    "option_timeout_rate", "option_success_fraction", "known_edge_fraction", "tctrl_update_rate",
+    "max_step",
+    "training_progress",
+    "coverage_auc",
+    "coverage_unique_cells",
+    "coverage_entropy",
+    "dg_density",
+    "dg_silent_unit_fraction",
+    "dg_multi_activation_fraction",
+    "intrinsic_reward_mean",
+    "intrinsic_reward_nonzero_fraction",
+    "target_hit_rate",
+    "option_timeout_rate",
+    "option_success_fraction",
+    "known_edge_fraction",
+    "tctrl_update_rate",
 ]
 
 
@@ -83,20 +93,48 @@ def write_outputs(frame: pd.DataFrame, output_dir: Path, batch_roots: list[Path]
 
 def _write_markdown(frame: pd.DataFrame, family: pd.DataFrame, path: Path, manifest: dict[str, object]) -> None:
     lines = [
-        "# IntrMotiv Retrospective Diagnostic Report", "",
-        f"Schema: `{manifest['schema_version']}`.", "",
-        "## Scope", "",
-        "This report uses existing TensorBoard scalars only. It can establish training progress, external coverage, DG minibatch health, and the observable HRL option funnel. It cannot retrospectively establish DG place fields, chance-corrected target control, target-conditioned policy sensitivity, or graph calibration because the required trajectory-level records were not collected.", "",
-        "## Run Validity", "",
-        _markdown_table(frame.groupby(["batch", "family", "run_status"], dropna=False).size().reset_index(name="runs"), ["batch", "family", "run_status", "runs"]),
-        "## Family Terminal Summary", "",
-        _markdown_table(family, ["batch", "family", "graph_scope", "max_step__mean", "training_progress__mean", "coverage_auc__mean", "coverage_unique_cells__mean", "dg_density__mean", "dg_silent_unit_fraction__mean", "target_hit_rate__mean", "option_success_fraction__mean", "known_edge_fraction__mean"]),
-        "## Interpretation Guards", "",
+        "# IntrMotiv Retrospective Diagnostic Report",
+        "",
+        f"Schema: `{manifest['schema_version']}`.",
+        "",
+        "## Scope",
+        "",
+        "This report uses existing TensorBoard scalars only. It can establish training progress, external coverage, DG minibatch health, and the observable HRL option funnel. It cannot retrospectively establish DG place fields, chance-corrected target control, target-conditioned policy sensitivity, or graph calibration because the required trajectory-level records were not collected.",
+        "",
+        "## Run Validity",
+        "",
+        _markdown_table(
+            frame.groupby(["batch", "family", "run_status"], dropna=False).size().reset_index(name="runs"),
+            ["batch", "family", "run_status", "runs"],
+        ),
+        "## Family Terminal Summary",
+        "",
+        _markdown_table(
+            family,
+            [
+                "batch",
+                "family",
+                "graph_scope",
+                "max_step__mean",
+                "training_progress__mean",
+                "coverage_auc__mean",
+                "coverage_unique_cells__mean",
+                "dg_density__mean",
+                "dg_silent_unit_fraction__mean",
+                "target_hit_rate__mean",
+                "option_success_fraction__mean",
+                "known_edge_fraction__mean",
+            ],
+        ),
+        "## Interpretation Guards",
+        "",
         "- Compare coverage only within the same measurement scope. `physical_episode` and `telemetry_window` are not interchangeable.",
         "- A nonzero target-hit rate includes incidental DG matches; it is not evidence of target following without a chance baseline and trajectory probe.",
         "- A nonzero known-edge fraction only says that graph entries passed the logged criterion. It does not demonstrate calibrated or causal reachability.",
-        "- DG density and minibatch silent-unit fraction are health checks, not spatial place-field measurements.", "",
-        "## Metrics Still Required For Causal Diagnosis", "",
+        "- DG density and minibatch silent-unit fraction are health checks, not spatial place-field measurements.",
+        "",
+        "## Metrics Still Required For Causal Diagnosis",
+        "",
         "Checkpoint evaluation should add position/DG traces, option-event records, target marginal activation frequencies, selected-target versus shuffled-target policy probes, and predicted-versus-realized arrival times. These are intentionally listed as missing rather than estimated from current scalars.",
     ]
     path.write_text("\n".join(lines) + "\n")
