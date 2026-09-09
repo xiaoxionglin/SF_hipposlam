@@ -75,7 +75,7 @@ class ActorState:
 
         self.last_obs = None
         self.last_rnn_state = None
-        if self.cfg.double_value:
+        if getattr(self.cfg, "double_value", False):
             self.last_value_external = None
             self.last_value_internal = None
         else:
@@ -502,7 +502,7 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
 
                     # this is an rnn state for the next iteration in the rollout
                     actor_state.last_rnn_state = policy_outputs_dict["new_rnn_states"]
-                    if self.cfg.double_value:
+                    if getattr(self.cfg, "double_value", False):
                         actor_state.last_value_external = policy_outputs_dict["values_external"].item()
                         actor_state.last_value_internal = policy_outputs_dict["values_internal"].item()
                     else:
