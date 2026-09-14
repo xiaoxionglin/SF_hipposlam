@@ -1,0 +1,103 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.7.0",
+  "study_id": "offpolicy_goal_baselines_parallel_production_20260911",
+  "description": "Throughput-gated matched three-seed 10M-frame production screen of GPU-vectorized CRL+ and graph-gated L3P+ with the frozen IntrMotiv visual trunk.",
+  "expected_runs": 6,
+  "metadata": {
+    "visual_encoder": "layer2_resnet18_imagenet_frozen_batched",
+    "policy_pose_input": false,
+    "action_set": "navigation8",
+    "action_repeat": 4,
+    "collector_envs": 32,
+    "learner_device": "l40s",
+    "training_backend": "async_vector_offpolicy_replay",
+    "stage": "production_screen",
+    "throughput_gate_fps": 2500,
+    "throughput_reference_fps": 3267
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "intrmotiv_offpolicy_goal_baselines_parallel_production_20260911",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_offpolicy_goal_baselines_parallel_production_20260911",
+    "run_name_template": "OP10MP_{base_label}_S{seed}",
+    "condition_name_template": "OP10MP_{base_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+      "--device=gpu",
+      "--dmlab_renderer=software",
+      "--dmlab_extended_action_set=False",
+      "--dmlab_reduced_action_set=False",
+      "--dmlab_navigation_action_set=True",
+      "--dmlab_use_level_cache=False",
+      "--dmlab_one_task_per_worker=True",
+      "--env_frameskip=4",
+      "--depth_sensor=True",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--with_pos_obs=False",
+      "--normalize_input=False",
+      "--encoder_conv_architecture=layer2_resnet18",
+      "--exploration_coverage_telemetry=True",
+      "--exploration_coverage_grid_size=100",
+      "--exploration_window_steps=10000",
+      "--online_spatial_telemetry=True",
+      "--baseline-num-envs=32",
+      "--baseline-vector-context=forkserver",
+      "--baseline-total-frames=10000000",
+      "--baseline-replay-capacity=200000",
+      "--baseline-replay-min=5000",
+      "--baseline-batch-size=128",
+      "--baseline-max-future=64",
+      "--baseline-discount=0.99",
+      "--baseline-goal-horizon=64",
+      "--baseline-updates-per-step=1",
+      "--baseline-update-every-steps=16",
+      "--baseline-entropy-coeff=0.1",
+      "--baseline-target-entropy-fraction=0.5",
+      "--baseline-checkpoint-frames=1000000",
+      "--baseline-planner-rebuild-frames=250000",
+      "--baseline-landmark-local-horizon=16",
+      "--baseline-torch-threads=8"
+    ]
+  },
+  "bases": [
+    {
+      "name": "CRL_PLUS",
+      "label": "CRL_PLUS",
+      "args": ["--baseline-method=crl"],
+      "metadata": {"family": "crl", "planner": "none"}
+    },
+    {
+      "name": "L3P_PLUS",
+      "label": "L3P_PLUS",
+      "args": ["--baseline-method=l3p"],
+      "metadata": {"family": "l3p", "planner": "landmark_medoids_floyd_warshall"}
+    }
+  ],
+  "factors": [],
+  "seeds": [8, 99, 123],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 1000000,
+    "synchronized_steps": [1000000, 2500000, 5000000, 7500000, 10000000],
+    "max_workers": 6,
+    "group_by": ["base"],
+    "contrast_group_by": [],
+    "replicate_by": ["seed"],
+    "window_metrics": {
+      "throughput_fps": "offpolicy/throughput_fps",
+      "coverage_auc": "z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "coverage_unique_cells": "z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_unique_cells",
+      "coverage_entropy": "z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_entropy",
+      "option_success": "offpolicy/option_success_rate",
+      "critic_accuracy": "offpolicy/critic_accuracy",
+      "policy_entropy": "offpolicy/policy_entropy"
+    },
+    "cumulative_metrics": {},
+    "contrasts": []
+  },
+  "telemetry": {}
+}
