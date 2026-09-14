@@ -520,6 +520,150 @@ def _geometry_condition(graph, source: int, target: int, dtype: torch.dtype, dev
     return torch.stack((dx / 32.0, dy / 32.0, torch.sin(dtheta), torch.cos(dtheta))).to(dtype=dtype)
 
 
+def _advance_options_without_probes(
+    option, topo, current, exclusive, graph, dist, next_hop, hop_count, scores,
+    option_layout, topo_layout, fallback_horizon, margin_ratio, margin_steps, confidence_threshold,
+    reliability_threshold, exploration_horizon, waypoint_planning, common_manager,
+    geometry, control_outcome, direct_target_selection, min_target_visits,
+):
+    """Batch option transitions when directed-edge probing is disabled.
+
+    All decisions are tensor masks with fixed shapes, on the recurrent state's
+    device. The same code runs on CPU and CUDA. Probing retains its separate
+    return/validation planner in the caller; no scientific setting is changed.
+    """
+    n_nodes = graph.n_nodes
+    target = decode_node(option[:, option_layout.target])
+    source = decode_node(option[:, option_layout.source])
+    mode = topo[:, topo_layout.mode].long()
+    node = torch.where(exclusive, current, source)
+    safe_node = node.clamp(0, n_nodes - 1)
+    normal = (target >= 0) & (target < n_nodes)
+    hit = exclusive & normal & (current == target)
+    wrong = (control_outcome == "first_distinct") & exclusive & normal & (current != source) & (current != target)
+    expired = ~hit & (normal | (target == n_nodes)) & (option[:, option_layout.countdown] <= 1)
+    elapsed = option[:, option_layout.age] + 1
+    final = decode_node(topo[:, topo_layout.final_goal])
+    pending = decode_node(topo[:, topo_layout.pending_destination])
+
+    def put(state, field, mask, value):
+        state[:, field] = torch.where(mask, value, state[:, field])
+
+    def start(mask, src, dst, new_mode, goal, cost, explore=False):
+        if explore:
+            deadline = torch.full_like(elapsed, float(exploration_horizon))
+        else:
+            valid_cost = torch.isfinite(cost) & (cost > 0)
+            deadline = torch.where(
+                valid_cost, (torch.ceil(cost * (1 + margin_ratio)) + margin_steps).clamp_min(1),
+                float(fallback_horizon),
+            )
+        for field, value in ((option_layout.target, dst + 1), (option_layout.source, src + 1), (option_layout.age, 0.0),
+                             (option_layout.countdown, deadline), (option_layout.option_reset, 1.0),
+                             (option_layout.selected_deadline, deadline)):
+            put(option, field, mask, value)
+        put(topo, topo_layout.mode, mask, float(new_mode))
+        put(topo, topo_layout.final_goal, mask, goal + 1)
+        condition = option.new_zeros((option.size(0), GEOMETRY_POLICY_SIZE))
+        if geometry == "se2" and not explore:
+            src_safe, dst_safe = src.clamp(0, n_nodes - 1), dst.clamp(0, n_nodes - 1)
+            valid = (src >= 0) & (dst >= 0) & graph.pose_valid[src_safe] & graph.pose_valid[dst_safe]
+            a, b = graph.landmark_pose[src_safe], graph.landmark_pose[dst_safe]
+            delta = b[:, :2] - a[:, :2]
+            c, s = a[:, 2].cos(), a[:, 2].sin()
+            angle = b[:, 2] - a[:, 2]
+            condition = torch.stack(((c * delta[:, 0] + s * delta[:, 1]) / 32,
+                                     (-s * delta[:, 0] + c * delta[:, 1]) / 32,
+                                     angle.sin(), angle.cos()), dim=-1).to(option.dtype)
+            condition = torch.where(valid[:, None], condition, 0.0)
+        old = topo[:, topo_layout.geometry_start:topo_layout.geometry_end]
+        old.copy_(torch.where(mask[:, None], condition, old))
+
+    def explore(mask, score):
+        start(mask, node, torch.full_like(node, n_nodes), MODE_EXPLORE, node, elapsed, explore=True)
+        put(topo, topo_layout.frontier_selected, mask, 1.0)
+        put(topo, topo_layout.frontier_score, mask, score)
+        if direct_target_selection == "local_successor":
+            put(topo, topo_layout.local_candidate_count, mask, 0.0)
+
+    def choose(mask):
+        invalid = mask & (node < 0)
+        put(option, option_layout.target, invalid, 0.0)
+        put(topo, topo_layout.mode, invalid, float(MODE_NONE))
+        mask = mask & (node >= 0)
+        node_score = scores[safe_node]
+        fallback_score = torch.where(torch.isfinite(node_score), node_score, 0.0)
+        ids = torch.arange(n_nodes, device=option.device)
+        if direct_target_selection in ("least_tested", "local_successor"):
+            if direct_target_selection == "local_successor":
+                eligible = graph.passive_confidence[safe_node] > 0
+            else:
+                eligible = (graph.node_visits >= min_target_visits)[None, :].expand(option.size(0), -1)
+            eligible = eligible & (ids[None, :] != node[:, None])
+            attempts = graph.control_attempts[safe_node].masked_fill(~eligible, torch.inf)
+            destination = attempts.argmin(dim=-1)
+            has_candidate = eligible.any(dim=-1)
+            reliable = reliable_edges(graph, confidence_threshold, reliability_threshold)
+            cost = torch.where(reliable[safe_node, destination], graph.tctrl[safe_node, destination], torch.inf)
+            start(mask & has_candidate, node, destination, MODE_NAVIGATE, destination, cost)
+            if direct_target_selection == "local_successor":
+                put(topo, topo_layout.local_candidate_count, mask & has_candidate, eligible.sum(dim=-1).to(topo.dtype))
+            explore(mask & ~has_candidate, fallback_score)
+            return
+        eligible = (graph.node_visits > 0)[None, :].expand(option.size(0), -1)
+        if waypoint_planning or common_manager:
+            eligible = eligible & torch.isfinite(dist[safe_node])
+        candidate_scores = scores[None, :].expand_as(eligible).masked_fill(~eligible, -torch.inf)
+        frontier = candidate_scores.argmax(dim=-1)
+        has_candidate = eligible.any(dim=-1)
+        hop = next_hop[safe_node, frontier] if waypoint_planning else frontier
+        navigate = mask & has_candidate & (frontier != node) & (hop >= 0)
+        put(topo, topo_layout.route_available, navigate, 1.0)
+        put(topo, topo_layout.plan_hops, navigate, hop_count[safe_node, frontier])
+        put(topo, topo_layout.frontier_selected, navigate, 1.0)
+        put(topo, topo_layout.frontier_score, navigate, scores[frontier])
+        start(navigate, node, hop, MODE_NAVIGATE, frontier, dist[safe_node, hop.clamp_min(0)])
+        explore(mask & ~navigate, fallback_score)
+
+    # Snapshot masks before writes: a hit takes precedence over wrong outcome,
+    # which takes precedence over timeout, matching the scalar state machine.
+    wrong = wrong & ~hit
+    timed_out = expired & ~wrong
+    no_target = (target < 0) & ~hit & ~wrong & ~timed_out
+    keep = ~(hit | wrong | timed_out | no_target)
+    put(option, option_layout.target_hit, hit, 1.0)
+    put(option, option_layout.completion_elapsed, hit, elapsed)
+    put(option, option_layout.option_expired, wrong | timed_out, 1.0)
+    signed_elapsed = torch.where(wrong | (mode == MODE_EXPLORE), -elapsed, elapsed)
+    put(option, option_layout.completion_elapsed, wrong | timed_out, signed_elapsed)
+    validation_timeout = timed_out & ((mode == MODE_RETURN) | (mode == MODE_VALIDATE))
+    put(topo, topo_layout.validation_timeout, validation_timeout, 1.0)
+    put(topo, topo_layout.validation_defer_countdown, validation_timeout, float(exploration_horizon))
+
+    returning = hit & (mode == MODE_RETURN)
+    put(topo, topo_layout.return_success, returning, 1.0)
+    passive_time = graph.passive_time[safe_node, pending.remainder(n_nodes)]
+    return_time = torch.where(passive_time <= 0, float(fallback_horizon), passive_time)
+    start(returning, node, pending, MODE_VALIDATE, pending, return_time)
+    validating = hit & (mode == MODE_VALIDATE)
+    put(topo, topo_layout.validation_success, validating, 1.0)
+    put(topo, topo_layout.validation_defer_countdown, validating, float(exploration_horizon))
+
+    navigating = hit & (mode == MODE_NAVIGATE)
+    reached = node == final
+    start(navigating & reached & (pending >= 0), node, pending, MODE_VALIDATE, pending, passive_time)
+    completed = navigating & reached & (pending < 0)
+    put(topo, topo_layout.final_reached, completed, 1.0)
+    explore(completed, scores[safe_node])
+    hop = next_hop[safe_node, final.remainder(n_nodes)] if waypoint_planning else final
+    continuing = navigating & ~reached & (hop >= 0)
+    start(continuing, node, hop, MODE_NAVIGATE, final, dist[safe_node, hop.clamp_min(0)])
+    other_hit = hit & (mode != MODE_RETURN) & (mode != MODE_VALIDATE) & (mode != MODE_NAVIGATE)
+    choose(wrong | timed_out | no_target | validating | other_hit | (navigating & ~reached & (hop < 0)))
+    put(option, option_layout.age, keep, elapsed)
+    put(option, option_layout.countdown, keep, (option[:, option_layout.countdown] - 1).clamp_min(0))
+
+
 def advance_topological_manager(
     prev_option_state: Tensor,
     prev_topological_state: Tensor,
@@ -567,17 +711,18 @@ def advance_topological_manager(
     generation = graph.representation_generation.to(device=option.device, dtype=option.dtype)
     has_option = (option[:, option_layout.target] > 0) | (option[:, option_layout.source] > 0)
     stale = has_option & (option[:, option_layout.persistent_start] != generation)
-    if stale.any():
-        option[stale, : option_layout.persistent_start] = 0.0
-        topo[stale] = 0.0
+    option_prefix = option[:, : option_layout.persistent_start]
+    option_prefix.copy_(torch.where(stale[:, None], 0.0, option_prefix))
+    topo = torch.where(stale[:, None], 0.0, topo)
     option[:, option_layout.diag_start : option_layout.persistent_start] = 0.0
     topo[:, topo_layout.diag_start : topo_layout.size] = 0.0
     deferred = topo[:, topo_layout.validation_defer_countdown] > 0
-    topo[deferred, topo_layout.validation_defer_countdown] -= 1.0
+    topo[:, topo_layout.validation_defer_countdown] -= deferred.to(topo.dtype)
     mode_now = topo[:, topo_layout.mode].long()
     inactive_validation = (mode_now != MODE_NAVIGATE) & (mode_now != MODE_RETURN) & (mode_now != MODE_VALIDATE)
     clear_deferred = (topo[:, topo_layout.validation_defer_countdown] <= 0) & inactive_validation
-    topo[clear_deferred, topo_layout.pending_source : topo_layout.pending_destination + 1] = 0.0
+    pending = topo[:, topo_layout.pending_source : topo_layout.pending_destination + 1]
+    pending.copy_(torch.where(clear_deferred[:, None], 0.0, pending))
 
     # Apply the action that produced the current observation.
     for prefix in ("segment", "episode"):
@@ -605,65 +750,47 @@ def advance_topological_manager(
     option[:, option_layout.active_dg] = encode_node(current, option.dtype)
     option[:, option_layout.multi_activation] = (n_active > 1).to(option.dtype)
 
-    # Episode-local DG anchors are set once; far reactivations remain measured from the original anchor.
-    for row in range(topo.size(0)):
-        if not exclusive[row]:
-            continue
-        node = int(current[row].item())
-        anchor = topo_layout.anchors_start + 3 * node
-        if topo[row, anchor + 2] <= 0:
-            topo[row, anchor] = topo[row, topo_layout.episode_x]
-            topo[row, anchor + 1] = topo[row, topo_layout.episode_y]
-            topo[row, anchor + 2] = 1.0
+    # Fixed-shape indexing keeps landmark bookkeeping on the input device.
+    # Boolean indexing and Python scalar reads here serialize CUDA per stream.
+    rows = torch.arange(topo.size(0), device=topo.device)
+    anchor = topo_layout.anchors_start + 3 * current.clamp_min(0)
+    new_anchor = exclusive & (topo[rows, anchor + 2] <= 0)
+    for offset, value in enumerate((topo[:, topo_layout.episode_x], topo[:, topo_layout.episode_y],
+                                     torch.ones_like(current, dtype=topo.dtype))):
+        topo[rows, anchor + offset] = torch.where(new_anchor, value, topo[rows, anchor + offset])
 
-    # Emit stable, local passive transitions.
     last = decode_node(topo[:, topo_layout.last_landmark])
-    for row in range(topo.size(0)):
-        if not exclusive[row]:
-            if n_active[row] > 1 and last[row] >= 0:
-                topo[row, topo_layout.passive_reject_nonexclusive] = 1.0
-            topo[row, topo_layout.last_landmark_age] += 1.0
-            continue
-        node = int(current[row].item())
-        old = int(last[row].item())
-        if old < 0:
-            topo[row, topo_layout.last_landmark] = float(node + 1)
-            topo[row, topo_layout.last_landmark_age] = 0.0
-            topo[row, topo_layout.segment_x : topo_layout.segment_turn + 1] = 0.0
-            continue
-        if old == node:
-            topo[row, topo_layout.last_landmark_age] += 1.0
-            continue
-        dx = float(topo[row, topo_layout.segment_x].item())
-        dy = float(topo[row, topo_layout.segment_y].item())
-        path = float(topo[row, topo_layout.segment_path].item())
-        displacement = math.hypot(dx, dy)
-        elapsed = float(topo[row, topo_layout.last_landmark_age].item() + 1.0)
-        elapsed_ok = 0.0 < elapsed <= passive_max_length
-        if use_motion_filter:
-            path_ok = path <= passive_max_length
-            motion_ok = displacement >= passive_min_displacement
-        else:
-            path = elapsed
-            path_ok = True
-            motion_ok = True
-        accepted = elapsed_ok and path_ok and motion_ok
-        if accepted:
-            topo[row, topo_layout.passive_event] = 1.0
-            topo[row, topo_layout.passive_source] = float(old + 1)
-            topo[row, topo_layout.passive_destination] = float(node + 1)
-            topo[row, topo_layout.passive_elapsed] = elapsed
-            topo[row, topo_layout.passive_path_length] = path
-            topo[row, topo_layout.passive_dx] = dx
-            topo[row, topo_layout.passive_dy] = dy
-            topo[row, topo_layout.passive_dtheta] = topo[row, topo_layout.segment_heading]
-        else:
-            topo[row, topo_layout.passive_reject_time] = float(not elapsed_ok)
-            topo[row, topo_layout.passive_reject_path] = float(not path_ok)
-            topo[row, topo_layout.passive_reject_motion] = float(not motion_ok)
-        topo[row, topo_layout.last_landmark] = float(node + 1)
-        topo[row, topo_layout.last_landmark_age] = 0.0
-        topo[row, topo_layout.segment_x : topo_layout.segment_turn + 1] = 0.0
+    transition = exclusive & (last >= 0) & (last != current)
+    reset_segment = exclusive & ((last < 0) | (last != current))
+    elapsed = topo[:, topo_layout.last_landmark_age] + 1.0
+    dx = topo[:, topo_layout.segment_x]
+    dy = topo[:, topo_layout.segment_y]
+    path = topo[:, topo_layout.segment_path] if use_motion_filter else elapsed
+    elapsed_ok = (elapsed > 0) & (elapsed <= passive_max_length)
+    path_ok = (path <= passive_max_length) if use_motion_filter else torch.ones_like(exclusive)
+    motion_ok = (torch.hypot(dx, dy) >= passive_min_displacement) if use_motion_filter else torch.ones_like(exclusive)
+    accepted = transition & elapsed_ok & path_ok & motion_ok
+    passive_values = {
+        topo_layout.passive_event: torch.ones_like(elapsed),
+        topo_layout.passive_source: last + 1,
+        topo_layout.passive_destination: current + 1,
+        topo_layout.passive_elapsed: elapsed,
+        topo_layout.passive_path_length: path,
+        topo_layout.passive_dx: dx,
+        topo_layout.passive_dy: dy,
+        topo_layout.passive_dtheta: topo[:, topo_layout.segment_heading],
+    }
+    for field, value in passive_values.items():
+        topo[:, field] = torch.where(accepted, value, 0.0)
+    topo[:, topo_layout.passive_reject_nonexclusive] = ((n_active > 1) & (last >= 0)).to(topo.dtype)
+    for field, valid in ((topo_layout.passive_reject_time, elapsed_ok),
+                         (topo_layout.passive_reject_path, path_ok),
+                         (topo_layout.passive_reject_motion, motion_ok)):
+        topo[:, field] = (transition & ~valid).to(topo.dtype)
+    topo[:, topo_layout.last_landmark] = torch.where(reset_segment, current + 1, last + 1)
+    topo[:, topo_layout.last_landmark_age] = torch.where(reset_segment, 0.0, elapsed)
+    segment = topo[:, topo_layout.segment_x : topo_layout.segment_turn + 1]
+    segment.copy_(torch.where(reset_segment[:, None], 0.0, segment))
 
     dist, next_hop, hop_count = validated_paths(graph, confidence_threshold, reliability_threshold)
     # The common controllability manager's node objective is exactly visit-rank
@@ -780,102 +907,111 @@ def advance_topological_manager(
                     return
         start_exploration(row, source, float(scores[source].item()) if torch.isfinite(scores[source]) else 0.0)
 
-    target = decode_node(option[:, option_layout.target])
-    source = decode_node(option[:, option_layout.source])
-    mode = topo[:, topo_layout.mode].long()
-    normal_target = (target >= 0) & (target < n_nodes)
-    exploring = target == n_nodes
-    hit = exclusive & normal_target & (current == target)
-    wrong = (
-        (control_outcome == "first_distinct") & exclusive & normal_target & (current != source) & (current != target)
-    )
-    expired = (~hit) & (normal_target | exploring) & (option[:, option_layout.countdown] <= 1.0)
-    elapsed = option[:, option_layout.age] + 1.0
+    if not edge_exploration:
+        _advance_options_without_probes(
+            option, topo, current, exclusive, graph, dist, next_hop, hop_count, scores,
+            option_layout, topo_layout, fallback_horizon, margin_ratio, margin_steps,
+            confidence_threshold, reliability_threshold, exploration_horizon,
+            waypoint_planning, common_manager, geometry, control_outcome,
+            direct_target_selection, min_target_visits,
+        )
+    else:
+        target = decode_node(option[:, option_layout.target])
+        source = decode_node(option[:, option_layout.source])
+        mode = topo[:, topo_layout.mode].long()
+        normal_target = (target >= 0) & (target < n_nodes)
+        exploring = target == n_nodes
+        hit = exclusive & normal_target & (current == target)
+        wrong = (
+            (control_outcome == "first_distinct") & exclusive & normal_target & (current != source) & (current != target)
+        )
+        expired = (~hit) & (normal_target | exploring) & (option[:, option_layout.countdown] <= 1.0)
+        elapsed = option[:, option_layout.age] + 1.0
 
-    for row in range(option.size(0)):
-        current_node = int(current[row].item()) if exclusive[row] else int(source[row].item())
-        row_mode = int(mode[row].item())
-        passive_event = topo[row, topo_layout.passive_event] > 0
-        if row_mode == MODE_EXPLORE and passive_event and edge_exploration:
-            pending_source = int(topo[row, topo_layout.passive_source].item()) - 1
-            pending_destination = int(topo[row, topo_layout.passive_destination].item()) - 1
-            if common_manager:
-                # Passive evidence is committed after learner acceptance.  Do
-                # not infer reverse reachability or travel back over an
-                # unvalidated edge; the normal actionable-probe selector will
-                # revisit this directed candidate once its source is current
-                # or reachable through reliable edges.
-                choose_task(row, pending_destination)
-                continue
-            previous_confidence = float(graph.passive_confidence[pending_source, pending_destination].item())
-            if previous_confidence < 1.0:
-                topo[row, topo_layout.discovery] = 1.0
-            if previous_confidence + 1.0 >= passive_threshold:
-                topo[row, topo_layout.pending_source] = float(pending_source + 1)
-                topo[row, topo_layout.pending_destination] = float(pending_destination + 1)
-                topo[row, topo_layout.validation_defer_countdown] = 0.0
-                reverse_time = float(topo[row, topo_layout.passive_elapsed].item())
-                start_target(row, pending_destination, pending_source, MODE_RETURN, pending_source, reverse_time)
-            else:
-                choose_task(row, pending_destination)
-            continue
-        if hit[row]:
-            option[row, option_layout.target_hit] = 1.0
-            option[row, option_layout.completion_elapsed] = elapsed[row]
-            if row_mode == MODE_RETURN:
-                topo[row, topo_layout.return_success] = 1.0
-                destination = int(topo[row, topo_layout.pending_destination].item()) - 1
-                passive_time = float(graph.passive_time[current_node, destination].item())
-                if passive_time <= 0:
-                    passive_time = float(fallback_horizon)
-                start_target(row, current_node, destination, MODE_VALIDATE, destination, passive_time)
-            elif row_mode == MODE_VALIDATE:
-                topo[row, topo_layout.validation_success] = 1.0
-                topo[row, topo_layout.validation_defer_countdown] = float(exploration_horizon)
-                choose_task(row, current_node)
-            elif row_mode == MODE_NAVIGATE:
-                final = int(topo[row, topo_layout.final_goal].item()) - 1
-                pending_destination = int(topo[row, topo_layout.pending_destination].item()) - 1
-                if current_node == final and pending_destination >= 0:
-                    passive_time = float(graph.passive_time[current_node, pending_destination].item())
-                    start_target(
-                        row, current_node, pending_destination, MODE_VALIDATE, pending_destination, passive_time
-                    )
-                elif current_node == final:
-                    topo[row, topo_layout.final_reached] = 1.0
-                    start_exploration(row, current_node, float(scores[current_node].item()))
+        for row in range(option.size(0)):
+            current_node = int(current[row].item()) if exclusive[row] else int(source[row].item())
+            row_mode = int(mode[row].item())
+            passive_event = topo[row, topo_layout.passive_event] > 0
+            if row_mode == MODE_EXPLORE and passive_event and edge_exploration:
+                pending_source = int(topo[row, topo_layout.passive_source].item()) - 1
+                pending_destination = int(topo[row, topo_layout.passive_destination].item()) - 1
+                if common_manager:
+                    # Passive evidence is committed after learner acceptance.  Do
+                    # not infer reverse reachability or travel back over an
+                    # unvalidated edge; the normal actionable-probe selector will
+                    # revisit this directed candidate once its source is current
+                    # or reachable through reliable edges.
+                    choose_task(row, pending_destination)
+                    continue
+                previous_confidence = float(graph.passive_confidence[pending_source, pending_destination].item())
+                if previous_confidence < 1.0:
+                    topo[row, topo_layout.discovery] = 1.0
+                if previous_confidence + 1.0 >= passive_threshold:
+                    topo[row, topo_layout.pending_source] = float(pending_source + 1)
+                    topo[row, topo_layout.pending_destination] = float(pending_destination + 1)
+                    topo[row, topo_layout.validation_defer_countdown] = 0.0
+                    reverse_time = float(topo[row, topo_layout.passive_elapsed].item())
+                    start_target(row, pending_destination, pending_source, MODE_RETURN, pending_source, reverse_time)
                 else:
-                    hop = int(next_hop[current_node, final].item()) if waypoint_planning else final
-                    if hop >= 0:
+                    choose_task(row, pending_destination)
+                continue
+            if hit[row]:
+                option[row, option_layout.target_hit] = 1.0
+                option[row, option_layout.completion_elapsed] = elapsed[row]
+                if row_mode == MODE_RETURN:
+                    topo[row, topo_layout.return_success] = 1.0
+                    destination = int(topo[row, topo_layout.pending_destination].item()) - 1
+                    passive_time = float(graph.passive_time[current_node, destination].item())
+                    if passive_time <= 0:
+                        passive_time = float(fallback_horizon)
+                    start_target(row, current_node, destination, MODE_VALIDATE, destination, passive_time)
+                elif row_mode == MODE_VALIDATE:
+                    topo[row, topo_layout.validation_success] = 1.0
+                    topo[row, topo_layout.validation_defer_countdown] = float(exploration_horizon)
+                    choose_task(row, current_node)
+                elif row_mode == MODE_NAVIGATE:
+                    final = int(topo[row, topo_layout.final_goal].item()) - 1
+                    pending_destination = int(topo[row, topo_layout.pending_destination].item()) - 1
+                    if current_node == final and pending_destination >= 0:
+                        passive_time = float(graph.passive_time[current_node, pending_destination].item())
                         start_target(
-                            row, current_node, hop, MODE_NAVIGATE, final, float(dist[current_node, hop].item())
+                            row, current_node, pending_destination, MODE_VALIDATE, pending_destination, passive_time
                         )
+                    elif current_node == final:
+                        topo[row, topo_layout.final_reached] = 1.0
+                        start_exploration(row, current_node, float(scores[current_node].item()))
                     else:
-                        choose_task(row, current_node)
-            else:
+                        hop = int(next_hop[current_node, final].item()) if waypoint_planning else final
+                        if hop >= 0:
+                            start_target(
+                                row, current_node, hop, MODE_NAVIGATE, final, float(dist[current_node, hop].item())
+                            )
+                        else:
+                            choose_task(row, current_node)
+                else:
+                    choose_task(row, current_node)
+                continue
+            if wrong[row]:
+                # Reuse the unsuccessful-completion pulse. A negative elapsed time
+                # under a normal target distinguishes a wrong first outcome from a
+                # deadline timeout without changing recurrent-state shape.
+                option[row, option_layout.option_expired] = 1.0
+                option[row, option_layout.completion_elapsed] = -elapsed[row]
                 choose_task(row, current_node)
-            continue
-        if wrong[row]:
-            # Reuse the unsuccessful-completion pulse. A negative elapsed time
-            # under a normal target distinguishes a wrong first outcome from a
-            # deadline timeout without changing recurrent-state shape.
-            option[row, option_layout.option_expired] = 1.0
-            option[row, option_layout.completion_elapsed] = -elapsed[row]
-            choose_task(row, current_node)
-            continue
-        if expired[row]:
-            option[row, option_layout.option_expired] = 1.0
-            option[row, option_layout.completion_elapsed] = -elapsed[row] if row_mode == MODE_EXPLORE else elapsed[row]
-            if row_mode in (MODE_RETURN, MODE_VALIDATE):
-                topo[row, topo_layout.validation_timeout] = 1.0
-                topo[row, topo_layout.validation_defer_countdown] = float(exploration_horizon)
-            choose_task(row, current_node)
-            continue
-        if target[row] < 0:
-            choose_task(row, current_node)
-            continue
-        option[row, option_layout.age] += 1.0
-        option[row, option_layout.countdown] = torch.clamp(option[row, option_layout.countdown] - 1.0, min=0.0)
+                continue
+            if expired[row]:
+                option[row, option_layout.option_expired] = 1.0
+                option[row, option_layout.completion_elapsed] = -elapsed[row] if row_mode == MODE_EXPLORE else elapsed[row]
+                if row_mode in (MODE_RETURN, MODE_VALIDATE):
+                    topo[row, topo_layout.validation_timeout] = 1.0
+                    topo[row, topo_layout.validation_defer_countdown] = float(exploration_horizon)
+                choose_task(row, current_node)
+                continue
+            if target[row] < 0:
+                choose_task(row, current_node)
+                continue
+            option[row, option_layout.age] += 1.0
+            option[row, option_layout.countdown] = torch.clamp(option[row, option_layout.countdown] - 1.0, min=0.0)
 
     option[:, option_layout.persistent_start] = generation
     if target_timing == "immediate":
