@@ -1,0 +1,19 @@
+{
+  ".gitignore": "0c261ab48ad10e7de699260befc9bb6ec5b7c6012be003a46c0c18ac66a1634f",
+  "INTEGRATION.md": "e36872cc80d705ae5099c4cfca7c9cde9a9a0aedc7fa4ecf06bf5fe18e0748b7",
+  "PROVENANCE.json": "c481c03d4dc347d0de4f1cf4c48cf88b89012812795874ea49f5e6e94667e5b4",
+  "README.md": "ceee905299b98db498f35eea9d4c94fd0e025a4732b9d8ac268e639813c1f2be",
+  "STUDENT_TASK.md": "aeb30756744f26a89d6ace11479605b969b37dc5722f0cd48784a03ecb749958",
+  "VALIDATION.md": "bfeb584037a1e2f9f2918b80d895082b35bd47056edbabfabbec891166f7b63c",
+  "examples/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "examples/shadow_training.py": "36a15eaf863a2b16040f127d0e7ab236b8b840943e75b204924165cb1b6d4224",
+  "intrmotiv_transfer/__init__.py": "66b05088f07e7e57620480279f5a5f8ce7d8371d61f7cabc6a8a8fb73c46b7db",
+  "intrmotiv_transfer/contextual_dg.py": "6f8ca9107c6302efee6ebddf00cc3c7f85c88023525bcc83904d756181fb5f44",
+  "intrmotiv_transfer/labels.py": "5fbff7adf4016bc5a1d076a46d0e10e27f4aaab0ea2a96ca1160883fd084ba81",
+  "intrmotiv_transfer/losses.py": "94b5652db3f7df78bf559cf6c24cf9a2c0cef931665727e25eda426d3eb59c1b",
+  "intrmotiv_transfer/shadow.py": "3ead725e652b959d214e22f49999e630a54e937d89ae3118410cdd094f6ecfd9",
+  "intrmotiv_transfer/state.py": "c7397a59bfbfa0ff245521f5776631caeb5031c3317052a0f3d586c4618027b0",
+  "pyproject.toml": "2faed83a3f56e246cfef655ea0d4bf8bedc50bff68a0d28fca0ac34c0876eff7",
+  "tests/test_handoff_contracts.py": "4afa60647da523a76c9650ae73c6687ffba2d8db3223c82514ee6b42d8735d6a",
+  "tests/test_upstream_predictors.py": "08d29cc2fce1dd1a39f3721043fb4aec93ce759a1cf3a4fc2d7ca4a3925b7a59"
+}

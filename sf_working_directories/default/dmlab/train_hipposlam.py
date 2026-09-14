@@ -13,6 +13,7 @@ from sample_factory.envs.env_utils import register_env
 from sample_factory.train import make_runner
 from sample_factory.utils.typing import Config, Env, PolicyID
 from sample_factory.utils.utils import experiment_dir
+from sf_xxl.dmlab.world_model_learner import add_world_model_args, make_world_model_learner
 from sf_working_directories.default.dmlab.custom_core import make_hipposlam_core
 from sf_working_directories.default.dmlab.custom_decoder import make_hipposlam_decoder
 from sf_working_directories.default.dmlab.custom_encoder import make_hipposlam_encoder
@@ -53,7 +54,7 @@ def register_dmlab_components(level_caches: Optional[DmlabLevelCaches] = None):
 
     # global_model_factory().register_actor_critic_factory(make_hipposlam_actor_critic)
 
-    # global_learner_factory().register_learner_factory(make_hipposlam_learner)
+    global_learner_factory().register_learner_factory(make_world_model_learner)
 
 
 class DmlabExtraSummariesObserver(AlgoObserver):
@@ -93,6 +94,7 @@ def maybe_overwrite_rnn_size(cfg):
 def parse_dmlab_args(argv=None, evaluation=False):
     parser, cfg = parse_sf_args(argv, evaluation=evaluation)
     add_hipposlam_env_args(parser)
+    add_world_model_args(parser)
     add_dmlab_env_args(parser)
     hipposlam_override_defaults(parser)
     cfg = parse_full_cfg(parser, argv)
