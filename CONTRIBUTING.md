@@ -91,3 +91,29 @@ If you would like to work on any of the open Issues:
    ```
 
 10. Once you are satisfied, go the webpage of your fork on GitHub. Click on "Pull request" to send your to the project maintainers for review.
+
+
+## Synchronizing NEMO2 and desktop source
+
+Before synchronizing, inspect both worktrees and fetch the remote. Preserve local
+uncommitted work on a separate local branch; never overwrite it to match NEMO2.
+Archive NEMO2's original changed and untracked files in the allocated workspace
+before formatting or organizing commits. Keep loose applied recovery patches in
+that archive, rather than publishing them alongside their resulting source.
+
+Group commits by dependency: shared study workflow, runtime and its tests,
+evaluation and its tests, declarative studies, then independent baselines. Retain
+existing launcher paths so queued jobs and recorded commands remain valid.
+Run the pinned `python -m pre_commit run --all-files` hooks; an environment's
+standalone isort version may produce a different import order. Rerun hooks after
+automatic fixes. Use focused study and IntrMotiv tests before pushing. On NEMO2,
+put pytest temporary files under `/work/classic/fr_xl1014-train/`; storage rejection
+tests must use an explicit forbidden path instead of assuming `tmp_path` is outside
+the workspace. Keep CPU thread counts bounded and do not run training or DMLab
+telemetry as part of this source synchronization on the login node.
+
+Push a new branch without rewriting shared history, then fetch and check out its
+tracking branch on desktop. Verify equal commit IDs and clean worktrees on both
+machines. The desktop `SF_git` environment uses an editable installation at
+`/home/xiaoxiong/SFgit/SF_hipposlam`; verify imports using its Python executable
+and repeat the focused tests there. No reinstall is needed for source-only changes.
