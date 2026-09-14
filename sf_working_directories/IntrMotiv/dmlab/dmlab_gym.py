@@ -44,6 +44,17 @@ REDUCED_ACTION_SET = (
     # (0, 0, 0, 0, 1, 0, 0),  # Fire.
 )
 
+NAVIGATION_ACTION_SET = (
+    (0, 0, 0, 1, 0, 0, 0),  # Forward
+    (0, 0, 0, -1, 0, 0, 0),  # Backward
+    (0, 0, -1, 0, 0, 0, 0),  # Strafe Left
+    (0, 0, 1, 0, 0, 0, 0),  # Strafe Right
+    (-20, 0, 0, 0, 0, 0, 0),  # Look Left
+    (20, 0, 0, 0, 0, 0, 0),  # Look Right
+    (-20, 0, 0, 1, 0, 0, 0),  # Look Left + Forward
+    (20, 0, 0, 1, 0, 0, 0),  # Look Right + Forward
+)
+
 EXTENDED_ACTION_SET = (
     (0, 0, 0, 1, 0, 0, 0),  # Forward
     (0, 0, 0, -1, 0, 0, 0),  # Backward
@@ -299,6 +310,7 @@ class DmlabGymEnv_custom(gym.Env):
         render_mode: Optional[str] = None,
         depth_sensor=True,
         reduced_action_set=False,
+        navigation_action_set=False,
         with_number_instruction=True,
         with_pos_obs=False,
         with_pos_telemetry=False,
@@ -386,6 +398,9 @@ class DmlabGymEnv_custom(gym.Env):
         if reduced_action_set:
             log.info("using reduced action set!")
             self.action_set = REDUCED_ACTION_SET
+        if navigation_action_set:
+            log.info("using eight-action navigation set!")
+            self.action_set = NAVIGATION_ACTION_SET
         self.action_list = np.array(self.action_set, dtype=np.intc)  # DMLAB requires intc type for actions
 
         self.last_observation = None

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from math import cos, hypot, radians, sin, tanh
 
 import gymnasium as gym

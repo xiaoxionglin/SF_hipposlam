@@ -487,6 +487,14 @@ class SimpleSequenceWithBypassCore(ModelCore):
         # Total output dimension when bypass features are concatenated.
         self.base_state_size = self.core_output_size + self.bypass_size
         self.hrl_enabled = bool(getattr(cfg, "hrl_controllable_graph", False))
+        self.fixed_task_conditioning = bool(getattr(cfg, "fixed_task_conditioning", False))
+        if self.fixed_task_conditioning and self.hrl_enabled:
+            raise ValueError("fixed task conditioning bypasses HRL and requires hrl_controllable_graph=False")
+        self.fixed_task_target = (
+            nn.Parameter(torch.full((self.Hippo_n_feature,), 1.0 / float(self.Hippo_n_feature)))
+            if self.fixed_task_conditioning
+            else None
+        )
         self.hrl_graph_memory = getattr(cfg, "hrl_graph_memory", "episode")
         if self.hrl_graph_memory not in ("episode", "policy_buffer"):
             raise ValueError(f"Unknown hrl_graph_memory={self.hrl_graph_memory}")
@@ -568,7 +576,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
         )
         self.action_feature_size = ACTION_FEATURE_SIZE if self.action_path_integration else 0
         self.policy_base_output_size = self.base_state_size - self.action_feature_size - self.context_action_count
-        self.hrl_condition_size = self.Hippo_n_feature if self.hrl_enabled else 0
+        self.hrl_condition_size = self.Hippo_n_feature if (self.hrl_enabled or self.fixed_task_conditioning) else 0
         if self.topological_enabled and self.motion_policy_input:
             self.hrl_condition_size += MOTION_POLICY_SIZE
         if self.topological_enabled and self.landmark_geometry == "se2":
@@ -929,6 +937,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 out_total = out_core
             if self.hrl_enabled:
                 out_total = torch.cat([out_total, hrl_seq], dim=2)
+            elif self.fixed_task_conditioning:
+                fixed_target = self.fixed_task_target.view(1, 1, -1).expand(T, B, -1)
+                out_total = torch.cat([out_total, fixed_target], dim=2)
 
             # Repack the output using the original lengths.
             if feedback_count:
@@ -996,6 +1007,8 @@ class SimpleSequenceWithBypassCore(ModelCore):
             else:
                 hidden_action_features = self.action_feature_size + self.context_action_count
                 out = base_out[:, :-hidden_action_features] if hidden_action_features else base_out
+                if self.fixed_task_conditioning:
+                    out = torch.cat([out, self.fixed_task_target.unsqueeze(0).expand(B, -1)], dim=1)
                 state_parts = [base_out]
                 if self.graph_recruitment:
                     state_parts.append(recruitment_history)
@@ -1980,7 +1993,12 @@ def make_hipposlam_core(cfg: Config, core_input_size: int) -> ModelCore:
                 getattr(cfg, "intrinsic_goal_mode", "none") != "none"
                 or getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
             )
-            core = (FiniteMemoryCore if memory else SimpleSequenceWithBypassCore)(cfg, core_input_size)
+            if getattr(cfg, "dg_goal_input", "none") == "write":
+                from sf_working_directories.IntrMotiv.dmlab.goal_conditioned_dg import GoalConditionedDGCore
+
+                core = GoalConditionedDGCore(cfg, core_input_size)
+            else:
+                core = (FiniteMemoryCore if memory else SimpleSequenceWithBypassCore)(cfg, core_input_size)
         elif cfg.core_name == "BypassSS_binary":
             core = SimpleSequenceWithBypassCore_binary(cfg, core_input_size)
         elif cfg.core_name == "Default":

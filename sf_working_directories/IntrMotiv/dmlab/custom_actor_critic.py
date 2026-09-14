@@ -225,7 +225,12 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
         # bypass, target, geometry, and manager-mode features retain their
         # existing PPO gradient paths.
         ca3_size = int(getattr(self.core, "core_output_size", 0))
-        controller_output = controller_core_view(core_output, ca3_size, getattr(self, "ppo_dg_gradient", "stop"))
+        if getattr(self.core, "dg_goal_modulation", None) is not None:
+            # The worker trace is differentiated only through goal modulation;
+            # canonical CA3 remains in core_output for representation losses.
+            controller_output = self.core.worker_view(core_output)
+        else:
+            controller_output = controller_core_view(core_output, ca3_size, getattr(self, "ppo_dg_gradient", "stop"))
         if getattr(self, "separate_goal_controllers", False):
             start = self.core.target_condition_start
             target = controller_output[:, start : start + int(self.cfg.Hippo_n_feature)]

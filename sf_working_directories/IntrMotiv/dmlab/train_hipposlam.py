@@ -207,8 +207,8 @@ def maybe_overwrite_rnn_size(cfg):
         raise ValueError("Motion policy input requires action path integration")
     if getattr(cfg, "hrl_landmark_geometry", "none") != "none" and not topological:
         raise ValueError("Landmark geometry requires a topological frontier manager")
-    if getattr(cfg, "hrl_edge_exploration", False) and manager_mode != "control_graph":
-        raise ValueError("Connectivity-aware edge exploration requires hrl_manager_mode=control_graph")
+    if getattr(cfg, "hrl_edge_exploration", False) and manager_mode not in ("control_graph", "frontier_waypoint"):
+        raise ValueError("Edge exploration requires a waypoint or control_graph manager")
     goal_conditioning = getattr(cfg, "hrl_goal_conditioning", "legacy")
     intrinsic_goal = getattr(cfg, "intrinsic_goal_mode", "none") != "none"
     memory_inhibition = getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
@@ -227,8 +227,19 @@ def maybe_overwrite_rnn_size(cfg):
             raise ValueError("Intrinsic goals require additive/FiLM target identity and a positive horizon")
         if getattr(cfg, "decoder_reward_gate", "none") != "none":
             raise ValueError("Goal cells use their own arrival reward")
+    fixed_task_conditioning = bool(getattr(cfg, "fixed_task_conditioning", False))
+    transfer_path = getattr(cfg, "transfer_model_path", None)
+    transfer_scope = getattr(cfg, "transfer_scope", "none")
+    if bool(transfer_path) != (transfer_scope != "none"):
+        raise ValueError("transfer_model_path and a non-none transfer_scope must be supplied together")
+    if getattr(cfg, "transfer_freeze_dg", False) and transfer_scope not in ("dg", "policy"):
+        raise ValueError("transfer_freeze_dg requires transferred DG weights")
+    if fixed_task_conditioning and (getattr(cfg, "hrl_controllable_graph", False) or intrinsic_goal):
+        raise ValueError("Fixed task conditioning requires graph-free, non-intrinsic training")
+    if fixed_task_conditioning and goal_conditioning != "target_id_film":
+        raise ValueError("Fixed task conditioning requires hrl_goal_conditioning=target_id_film")
     if goal_conditioning in ("target_trace", "target_id_film"):
-        if not getattr(cfg, "hrl_controllable_graph", False) and not intrinsic_goal:
+        if not getattr(cfg, "hrl_controllable_graph", False) and not intrinsic_goal and not fixed_task_conditioning:
             raise ValueError("Custom goal conditioning requires controllable-graph HRL")
         if getattr(cfg, "hrl_target_timing", "delayed") != "immediate":
             raise ValueError("Custom goal conditioning requires immediate behavior targets")
@@ -296,6 +307,19 @@ def maybe_overwrite_rnn_size(cfg):
             # conditioning this stores target id, four geometry values, and
             # mode id; otherwise it stores only target id.
             rnn_size += 1 + GEOMETRY_POLICY_SIZE + 1 if getattr(cfg, "hrl_behavior_mode_condition", False) else 1
+        if getattr(cfg, "dg_goal_input", "none") == "write":
+            if (
+                cfg.core_name != "BypassSS"
+                or not getattr(cfg, "hrl_controllable_graph", False)
+                or getattr(cfg, "hrl_target_timing", "delayed") != "immediate"
+                or getattr(cfg, "hrl_graph_memory", "episode") != "policy_buffer"
+                or getattr(cfg, "dg_context_feedback", "none") != "none"
+                or getattr(cfg, "ppo_dg_gradient", "stop") != "stop"
+            ):
+                raise ValueError(
+                    "DG goal writes require immediate policy-buffer BypassSS, no context feedback, and PPO STOP"
+                )
+            rnn_size += hippo_n_feature * (R + L - 1)
         cfg.cli_args["rnn_size"] = rnn_size
         cfg.rnn_size = rnn_size
 

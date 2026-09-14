@@ -3,6 +3,8 @@ Gym env wrappers that make the environment suitable for the RL algorithms.
 
 """
 
+from __future__ import annotations
+
 import json
 import os
 from os.path import join

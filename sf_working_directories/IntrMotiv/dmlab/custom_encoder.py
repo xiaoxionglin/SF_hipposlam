@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # from asyncio.sslproto import add_flowcontrol_defaults
 import copy
 from contextlib import contextmanager
@@ -291,6 +293,7 @@ class DGProjection_batchnorm_relu(nn.Module):
         # It deliberately defaults to false so actor inference, value bootstrap,
         # and decoder-only phases can never mutate the shared statistics.
         self._running_stats_update_enabled = False
+        self.freeze_running_stats = False
         self.last_running_stats_updated = False
         self.last_poststep_calibration_updated = False
         self.last_raw_logits: torch.Tensor | None = None
@@ -462,7 +465,19 @@ class DGProjection_batchnorm_relu(nn.Module):
             self._cached_projection_input = x.detach()
         x = self.project_logits(x)  # Shape: [batch_size, out_features]
         self.last_raw_logits = x
-        if self.batchnorm_semantics == "running_consistent":
+        if self.freeze_running_stats:
+            self.last_running_stats_updated = False
+            x = F.batch_norm(
+                x,
+                self.batchnorm1d.running_mean,
+                self.batchnorm1d.running_var,
+                weight=None,
+                bias=None,
+                training=False,
+                momentum=0.0,
+                eps=self.batchnorm1d.eps,
+            )
+        elif self.batchnorm_semantics == "running_consistent":
             x = self._running_consistent_normalize(x)
         elif self.batchnorm_semantics in ("running_poststep_atomic", "input_centered_atomic"):
             self.last_running_stats_updated = False
@@ -901,6 +916,7 @@ class HipposlamEncoder(Encoder):
                 intercept=intercept,
                 batchnorm_semantics=getattr(cfg, "dg_batchnorm_semantics", "legacy_batch"),
             )
+            self.DG_projection.freeze_running_stats = bool(getattr(cfg, "transfer_freeze_dg", False))
         elif cfg.DG_name == "batchnorm_relu_fixed":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
             self.DG_projection = DGProjection_batchnorm_relu_fixed(
@@ -969,6 +985,9 @@ class HipposlamEncoder(Encoder):
             else:
                 self.context_action_count = 9
             self.encoder_out_size += self.context_action_count
+        self.dg_goal_write = getattr(cfg, "dg_goal_input", "none") == "write"
+        if self.dg_goal_write:
+            self.encoder_out_size += int(cfg.Hippo_n_feature)
         self.cpu_device = torch.device("cpu")
 
         # log.info("=================================== memory=========================")
@@ -1044,7 +1063,11 @@ class HipposlamEncoder(Encoder):
         # feature stream is a controller bypass and is not part of DG credit.
         # Detaching here keeps encoder-only updates local to DG while the
         # unchanged bypass below remains differentiable for PPO.
-        if self.context_feedback == "none":
+        goal_preactivation = None
+        if self.dg_goal_write:
+            goal_preactivation = self.DG_projection.preactivation(x.detach())
+            tmp_out = self.DG_projection.activation(goal_preactivation - self.DG_projection.intercept)
+        elif self.context_feedback == "none":
             tmp_out = self.DG_projection(x.detach())
         else:
             if not isinstance(self.DG_projection, DGProjection_batchnorm_relu):
@@ -1092,6 +1115,8 @@ class HipposlamEncoder(Encoder):
             action_onehot = action_onehot * valid_action.unsqueeze(1).to(dtype=tmp_out.dtype)
             tmp_out = torch.cat((tmp_out, action_onehot), dim=1)
 
+        if goal_preactivation is not None:
+            tmp_out = torch.cat((tmp_out, goal_preactivation.detach()), dim=1)
         return tmp_out
 
     def get_out_size(self) -> int:

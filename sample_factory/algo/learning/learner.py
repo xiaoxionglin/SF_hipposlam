@@ -577,6 +577,10 @@ class BaseLearner(Configurable):
             if head_only:
                 return outputs
 
+        replay_head = getattr(self, "_prepare_recurrent_replay_head", None)
+        if replay_head is not None:
+            head_outputs = replay_head(head_outputs, mb)
+
         # initial rnn states
         with self.timing.add_time("bptt_initial"):
             if self.cfg.use_rnn:

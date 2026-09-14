@@ -713,6 +713,17 @@ class BaseDistanceRecorder(BaseLearner):
         BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
         self._online_spatial = None
 
+    def init(self):
+        result = super().init()
+        if getattr(self.cfg, "save_initial_checkpoint", False) and self.env_steps == 0 and self.train_step == 0:
+            self._save_impl("initial", "", 1)
+        return result
+
+    def _save_crossed_frame_targets(self, previous_frames):
+        targets = [int(x) for x in getattr(self.cfg, "checkpoint_frame_targets", "").split(",") if x.strip()]
+        if any(previous_frames < target <= self.env_steps for target in targets):
+            self.save_milestone()
+
     def _capture_online_spatial(self, buff: TensorDict) -> None:
         if not bool(getattr(self.cfg, "online_spatial_telemetry", False)):
             return
@@ -733,7 +744,9 @@ class BaseDistanceRecorder(BaseLearner):
         self._maybe_update_cfg()
         self._maybe_load_policy()
         self._capture_online_spatial(batch)
+        previous_frames = self.env_steps
         stats = super().train(batch)
+        self._save_crossed_frame_targets(previous_frames)
         if stats is None or getattr(self, "_online_spatial", None) is None:
             return stats
         spatial_stats = self._online_spatial.on_env_steps(self.env_steps)
@@ -886,6 +899,12 @@ class BaseDistanceRecorder(BaseLearner):
         stored = option_state[..., self._hrl_layout().persistent_start]
         current = self._policy_graph().representation_generation.to(device=stored.device, dtype=stored.dtype)
         return stored.eq(current)
+
+    def _prepare_recurrent_replay_head(self, head_outputs, mb):
+        if getattr(self.cfg, "dg_goal_input", "none") != "write":
+            return head_outputs
+        target = self._behavior_targets_from_states(mb.rnn_states)
+        return torch.cat((head_outputs, target.to(head_outputs.dtype)), dim=-1)
 
     def _override_core_outputs_for_replay(self, core_outputs: Tensor, mb: AttrDict) -> Tensor:
         """Teacher-force the behavior target before PPO evaluates the decoder."""
@@ -1101,6 +1120,49 @@ class BaseDistanceRecorder(BaseLearner):
         # return checkpoint_path
         return re.sub(r"see_\d+", f"see_{self.cfg.seed}", checkpoint_path)
 
+    def _initialize_transfer_weights(self) -> None:
+        path = getattr(self.cfg, "transfer_model_path", None)
+        scope = getattr(self.cfg, "transfer_scope", "none")
+        if not path or scope == "none":
+            return
+        checkpoint = self.load_checkpoint([path], self.device)
+        if checkpoint is None or "model" not in checkpoint:
+            raise RuntimeError(f"Could not load transfer checkpoint: {path}")
+        source = checkpoint["model"]
+        destination = self.actor_critic.state_dict()
+        dg_prefixes = (
+            "encoder.DG_projection.linear.",
+            "encoder.DG_projection.batchnorm1d.",
+        )
+        prefixes = dg_prefixes
+        if scope == "policy":
+            prefixes += ("decoder.", "action_parameterization.")
+        selected = {k: v for k, v in source.items() if k.startswith(prefixes)}
+        expected = {k for k in destination if k.startswith(prefixes)}
+        if set(selected) != expected:
+            missing = sorted(expected - set(selected))
+            unexpected = sorted(set(selected) - expected)
+            raise RuntimeError(f"Transfer tensor inventory mismatch: missing={missing}, unexpected={unexpected}")
+        mismatched = {
+            k: (tuple(selected[k].shape), tuple(destination[k].shape))
+            for k in expected
+            if selected[k].shape != destination[k].shape
+        }
+        if mismatched:
+            raise RuntimeError(f"Transfer tensor shape mismatch: {mismatched}")
+        destination.update(selected)
+        self.actor_critic.load_state_dict(destination, strict=True)
+        log.info("Initialized %d %s transfer tensors from %s", len(selected), scope, path)
+
+    def _apply_transfer_freeze(self) -> None:
+        if not bool(getattr(self.cfg, "transfer_freeze_dg", False)):
+            return
+        projection = self.actor_critic.encoder.DG_projection
+        projection.freeze_running_stats = True
+        for parameter in projection.parameters():
+            parameter.requires_grad = False
+        log.info("Froze DG weights and normalization statistics for transfer")
+
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
         """
         Docstring for load_from_checkpoint
@@ -1119,7 +1181,9 @@ class BaseDistanceRecorder(BaseLearner):
             checkpoints.append(self._replace_checkpoint_policy_id(self.cfg.load_model_path, policy_id))
         checkpoint_dict = self.load_checkpoint(checkpoints, self.device)
         if checkpoint_dict is None:
-            log.debug("Did not load from checkpoint, starting from scratch!")
+            log.debug("Did not load a downstream checkpoint, starting a new run")
+            if load_progress:
+                self._initialize_transfer_weights()
         else:
             log.debug("Loading model from checkpoint")
             # if we're replacing our policy with another policy (under PBT), let's not reload the env_steps
@@ -1127,6 +1191,8 @@ class BaseDistanceRecorder(BaseLearner):
             if load_progress:  # see above
                 self._maybe_reset_critic()
                 self._maybe_reset_decoder()
+        if load_progress:
+            self._apply_transfer_freeze()
 
     def _calculate_sequence_core(self, rnn_state: Tensor, minibatch_size: int | tuple):
         """
@@ -3182,7 +3248,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             return 0
 
     def _calculate_losses(
-        self, mb: AttrDict, num_invalids: int, iterative_phase: str
+        self, mb: AttrDict, num_invalids: int, iterative_phase: str, *, record_goal_diagnostics: bool = True
     ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
         additional_stats = AttrDict()
         with torch.no_grad(), self.timing.add_time("losses_init"):
@@ -3199,7 +3265,9 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 raise RuntimeError("Learner update invariant violated: fewer than two valid decisions reached PPO")
 
         projection = self.actor_critic.encoder.DG_projection
-        update_running_stats = iterative_phase in (SIMULTANEOUS, ENCODER)
+        update_running_stats = iterative_phase in (SIMULTANEOUS, ENCODER) and not bool(
+            getattr(self.cfg, "transfer_freeze_dg", False)
+        )
         stats_context = getattr(projection, "running_stats_update", None)
         if stats_context is None:
             outputs = self._forward_pass(mb=mb, recurrence=recurrence, valids=valids, return_outputs=[True, True, True])
@@ -3364,41 +3432,43 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             additional_stats["empirical_her_ratio"] = empirical_her_ratio
             additional_stats["empirical_her_clip_fraction"] = empirical_her_clip_fraction
             additional_stats["empirical_her_valid_fraction"] = empirical_her_valid_fraction
-            with torch.no_grad():
-                if self._uses_policy_graph():
-                    behavior_target = self._behavior_targets_from_states(mb.rnn_states)
-                    alternate_target = behavior_target.roll(1, dims=0)
-                    alternate = self.actor_critic.forward_tail(
-                        self._with_worker_target(outputs.core_outputs.detach(), alternate_target),
-                        values_only=False,
-                        sample_actions=False,
-                    )
-                    goal_valid = behavior_target.sum(dim=-1).gt(0)
-                    action_delta = (
-                        (outputs.result["action_logits"].detach() - alternate["action_logits"]).abs().mean(dim=-1)
-                    )
-                    action_probability_tv = categorical_action_total_variation(
-                        outputs.result["action_logits"].detach(), alternate["action_logits"]
-                    )
-                    value_delta = (outputs.result["values"].detach() - alternate["values"]).abs()
-                    additional_stats["goal_condition_target_valid_fraction"] = goal_valid.float().mean()
-                    additional_stats["goal_condition_action_sensitivity"] = (
-                        action_delta[goal_valid].mean() if goal_valid.any() else action_delta.sum() * 0.0
-                    )
-                    additional_stats["goal_condition_action_probability_tv"] = (
-                        action_probability_tv[goal_valid].mean()
-                        if goal_valid.any()
-                        else action_probability_tv.sum() * 0.0
-                    )
-                    additional_stats["goal_condition_value_span"] = (
-                        value_delta[goal_valid].mean() if goal_valid.any() else value_delta.sum() * 0.0
-                    )
-                else:
-                    goal_zero = outputs.core_outputs.detach().sum() * 0.0
-                    additional_stats["goal_condition_target_valid_fraction"] = goal_zero
-                    additional_stats["goal_condition_action_sensitivity"] = goal_zero
-                    additional_stats["goal_condition_action_probability_tv"] = goal_zero
-                    additional_stats["goal_condition_value_span"] = goal_zero
+            # Evaluate the alternate target only when this minibatch will be summarized.
+            if record_goal_diagnostics:
+                with torch.no_grad():
+                    if self._uses_policy_graph():
+                        behavior_target = self._behavior_targets_from_states(mb.rnn_states)
+                        alternate_target = behavior_target.roll(1, dims=0)
+                        alternate = self.actor_critic.forward_tail(
+                            self._with_worker_target(outputs.core_outputs.detach(), alternate_target),
+                            values_only=False,
+                            sample_actions=False,
+                        )
+                        goal_valid = behavior_target.sum(dim=-1).gt(0)
+                        action_delta = (
+                            (outputs.result["action_logits"].detach() - alternate["action_logits"]).abs().mean(dim=-1)
+                        )
+                        action_probability_tv = categorical_action_total_variation(
+                            outputs.result["action_logits"].detach(), alternate["action_logits"]
+                        )
+                        value_delta = (outputs.result["values"].detach() - alternate["values"]).abs()
+                        additional_stats["goal_condition_target_valid_fraction"] = goal_valid.float().mean()
+                        additional_stats["goal_condition_action_sensitivity"] = (
+                            action_delta[goal_valid].mean() if goal_valid.any() else action_delta.sum() * 0.0
+                        )
+                        additional_stats["goal_condition_action_probability_tv"] = (
+                            action_probability_tv[goal_valid].mean()
+                            if goal_valid.any()
+                            else action_probability_tv.sum() * 0.0
+                        )
+                        additional_stats["goal_condition_value_span"] = (
+                            value_delta[goal_valid].mean() if goal_valid.any() else value_delta.sum() * 0.0
+                        )
+                    else:
+                        goal_zero = outputs.core_outputs.detach().sum() * 0.0
+                        additional_stats["goal_condition_target_valid_fraction"] = goal_zero
+                        additional_stats["goal_condition_action_sensitivity"] = goal_zero
+                        additional_stats["goal_condition_action_probability_tv"] = goal_zero
+                        additional_stats["goal_condition_value_span"] = goal_zero
 
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
@@ -3656,7 +3726,14 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                         extra_decoder_loss,
                         encoder_loss,
                         loss_summaries,
-                    ) = self._calculate_losses(mb, num_invalids, iterative_phase)
+                    ) = self._calculate_losses(
+                        mb,
+                        num_invalids,
+                        iterative_phase,
+                        record_goal_diagnostics=(
+                            with_summaries and epoch == summaries_epoch and batch_num == summaries_batch
+                        ),
+                    )
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
@@ -3747,7 +3824,9 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
                     with self.param_server.policy_lock:
                         self.optimizer.step()
-                        if iterative_phase in (SIMULTANEOUS, ENCODER):
+                        if iterative_phase in (SIMULTANEOUS, ENCODER) and not bool(
+                            getattr(self.cfg, "transfer_freeze_dg", False)
+                        ):
                             projection = self.actor_critic.encoder.DG_projection
                             normalize_dg_projection_rows(projection.linear)
                             poststep_update = getattr(projection, "post_step_update_running_stats", None)
@@ -4719,16 +4798,12 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             stats[f"dg_transition_prediction_{name}"] = (
                 var.additional_stats[f"dg_transition_prediction_{name}"].detach().float()
             )
-        stats.hrl_goal_condition_target_valid_fraction = (
-            var.additional_stats["goal_condition_target_valid_fraction"].detach().float()
-        )
-        stats.hrl_goal_condition_action_sensitivity = (
-            var.additional_stats["goal_condition_action_sensitivity"].detach().float()
-        )
-        stats.hrl_goal_condition_action_probability_tv = (
-            var.additional_stats["goal_condition_action_probability_tv"].detach().float()
-        )
-        stats.hrl_goal_condition_value_span = var.additional_stats["goal_condition_value_span"].detach().float()
+        # Unexpected high-loss summaries may not have requested the diagnostic.
+        # Omit missing measurements instead of logging zeros or stale values.
+        for name in ("target_valid_fraction", "action_sensitivity", "action_probability_tv", "value_span"):
+            key = f"goal_condition_{name}"
+            if key in var.additional_stats:
+                stats[f"hrl_{key}"] = var.additional_stats[key].detach().float()
         stats.hrl_behavior_replay_mismatch = var.additional_stats["behavior_replay_mismatch"].detach().float()
         for branch in ("goal", "free"):
             stats[f"hrl_{branch}_policy_loss"] = var.additional_stats[f"{branch}_policy_loss"].detach().float()
@@ -4863,6 +4938,34 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.dg_recruitment_goal_adapter_reset_count = float(self._last_recruitment_stats["goal_adapter_reset_count"])
         stats.dg_recruitment_goal_adapter_reset_total = float(self._goal_adapter_reset_count)
         decoder = self.actor_critic.decoder
+        dg_modulation = getattr(self.actor_critic.core, "dg_goal_modulation", None)
+        if dg_modulation is not None:
+            stats.dg_goal_modulation_norm = dg_modulation.detach().norm().float()
+            grad = dg_modulation.grad
+            stats.dg_goal_modulation_gradient_norm = grad.norm().detach().float() if grad is not None else 0.0
+            for goal_id in range(int(self.cfg.Hippo_n_feature)):
+                stats[f"dg_goal_gradient_{goal_id:03d}"] = (
+                    grad[goal_id].norm().detach().float() if grad is not None else 0.0
+                )
+        if self._uses_policy_graph():
+            goals = self._behavior_targets_from_states(var.mb.rnn_states).detach()
+            decision_counts = (goals * var.mb.valids.unsqueeze(-1)).sum(0)
+            probabilities = decision_counts / decision_counts.sum().clamp_min(1)
+            stats.goal_command_entropy = -(probabilities * probabilities.clamp_min(1e-12).log()).sum()
+            stats.goal_commanded_count = (decision_counts > 0).sum().float()
+            stats.goal_eligible_count = (self._policy_graph().node_visits > 0).sum().float()
+            raw_hrl = self._hrl_state_from_rnn(var.mb.rnn_states)
+            new_attempt = (raw_hrl[:, self._hrl_layout().option_reset] > 0) & var.mb.valids
+            for goal_id in range(int(self.cfg.Hippo_n_feature)):
+                stats[f"goal_decisions_{goal_id:03d}"] = decision_counts[goal_id]
+                stats[f"goal_attempts_{goal_id:03d}"] = (goals[:, goal_id] * new_attempt).sum()
+                commanded = var.mb["hrl_control_command_target"].long() == goal_id
+                stats[f"goal_successes_{goal_id:03d}"] = (
+                    (commanded & var.mb["hrl_control_correct_outcome"].bool() & var.mb.valids).sum().float()
+                )
+                stats[f"goal_timeouts_{goal_id:03d}"] = (
+                    (commanded & var.mb["hrl_control_target_timeout"].bool() & var.mb.valids).sum().float()
+                )
         stats.hrl_goal_decoder_parameter_count = float(sum(parameter.numel() for parameter in decoder.parameters()))
         target_modulation = getattr(decoder, "target_modulation", None)
         if torch.is_tensor(target_modulation):

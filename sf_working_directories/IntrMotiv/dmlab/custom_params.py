@@ -51,6 +51,22 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--encoder_name", default=None, type=str, help="actually using dmlab encoders")
     p.add_argument("--encoder_load_path", default=None, type=str, help="if loading encoder, the path")
+    p.add_argument(
+        "--transfer_model_path", default=None, type=str, help="checkpoint used only to initialize transfer weights"
+    )
+    p.add_argument(
+        "--transfer_scope",
+        default="none",
+        choices=["none", "dg", "policy"],
+        help="weights initialized from transfer_model_path without restoring optimizer or progress",
+    )
+    p.add_argument("--transfer_freeze_dg", default=False, type=str2bool)
+    p.add_argument(
+        "--fixed_task_conditioning",
+        default=False,
+        type=str2bool,
+        help="bypass waypoint selection and expose one learned constant target vector to the policy",
+    )
 
     p.add_argument("--DG_lr", default=None, type=float, help="Dentate Gyrus Pattern separation learning rate")
     p.add_argument("--DG_temperature", default=None, type=float, help="Dentate Gyrus output temperature")
@@ -77,7 +93,13 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")
     p.add_argument(
-        "--dmlab_reduced_action_set", default=False, type=bool, help="reduced action set to facilitate learning"
+        "--dmlab_reduced_action_set", default=False, type=str2bool, help="reduced action set to facilitate learning"
+    )
+    p.add_argument(
+        "--dmlab_navigation_action_set",
+        default=False,
+        type=str2bool,
+        help="eight-action navigation set with backward and pure yaw actions, excluding fire",
     )
     p.add_argument(
         "--with_number_instruction", default=True, type=str2bool, help="instruction input is number, e.g. 1-3"
@@ -518,6 +540,24 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         default=False,
         type=str2bool,
         help="Alternate encoder and decoder updates using the baseline single optimizer/checkpoint format.",
+    )
+    p.add_argument(
+        "--checkpoint_frame_targets",
+        type=str,
+        default="",
+        help="Comma-separated frame targets retained as permanent milestones",
+    )
+    p.add_argument(
+        "--save_initial_checkpoint",
+        type=str2bool,
+        default=False,
+        help="Preserve initialized model and optimizer before training",
+    )
+    p.add_argument(
+        "--dg_goal_input",
+        choices=["none", "write"],
+        default="none",
+        help="Condition worker DG writes while keeping landmark evidence unconditioned",
     )
     p.add_argument(
         "--ppo_dg_gradient",

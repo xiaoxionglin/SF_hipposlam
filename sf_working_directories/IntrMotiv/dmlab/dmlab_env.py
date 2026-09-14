@@ -164,6 +164,7 @@ def make_dmlab_env_impl(
         render_mode,
         depth_sensor=depth_sensor,
         reduced_action_set=cfg.dmlab_reduced_action_set,
+        navigation_action_set=cfg.dmlab_navigation_action_set,
         with_number_instruction=cfg.with_number_instruction,
         with_pos_obs=cfg.with_pos_obs,
         with_pos_telemetry=cfg.exploration_coverage_telemetry,
