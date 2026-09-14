@@ -714,8 +714,8 @@ def advance_topological_manager(
     option_prefix = option[:, : option_layout.persistent_start]
     option_prefix.copy_(torch.where(stale[:, None], 0.0, option_prefix))
     topo = torch.where(stale[:, None], 0.0, topo)
-    option[:, option_layout.diag_start : option_layout.persistent_start] = 0.0
-    topo[:, topo_layout.diag_start : topo_layout.size] = 0.0
+    option[:, option_layout.diag_start : option_layout.persistent_start].zero_()
+    topo[:, topo_layout.diag_start : topo_layout.size].zero_()
     deferred = topo[:, topo_layout.validation_defer_countdown] > 0
     topo[:, topo_layout.validation_defer_countdown] -= deferred.to(topo.dtype)
     mode_now = topo[:, topo_layout.mode].long()
