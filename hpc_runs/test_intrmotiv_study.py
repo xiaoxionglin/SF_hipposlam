@@ -13,6 +13,7 @@ import numpy as np
 from hpc_runs.graph_stabilized_recruitment_manifest import rows as legacy_rows
 from hpc_runs.intrmotiv_study import SCHEMA_ID, WORKFLOW_VERSION, SpecError, load_study
 from hpc_runs.intrmotiv_study.analysis import linear_contrasts, summarize_records
+from hpc_runs.intrmotiv_study.discovery import discover_run_directories
 from hpc_runs.intrmotiv_study.sample_factory import build_run_description
 from hpc_runs.intrmotiv_study.spatial import (
     collect_spatial_detail_records,
@@ -55,6 +56,29 @@ class StudySpecTests(unittest.TestCase):
     def setUp(self) -> None:
         self.study = load_study(SPEC_PATH)
 
+    def test_nested_launcher_container_is_not_duplicate_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for run in self.study.expand_runs():
+                actual = root / f"{run.name}_" / f"00_{run.name}"
+                actual.mkdir(parents=True)
+                (actual / "config.json").write_text("{}")
+            found = discover_run_directories(self.study, root)
+            self.assertTrue(all(path.name.startswith("00_") for path in found.values()))
+            first = self.study.expand_runs()[0]
+            (root / f"{first.name}_" / "config.json").write_text("{}")
+            with self.assertRaises(SpecError):
+                discover_run_directories(self.study, root)
+
+    def test_distinct_duplicate_experiments_remain_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for run in self.study.expand_runs():
+                (root / run.name).mkdir()
+            (root / "copy" / self.study.expand_runs()[0].name).mkdir(parents=True)
+            with self.assertRaises(SpecError):
+                discover_run_directories(self.study, root)
+
     def test_real_factorial_study_expands_to_unique_runs(self):
         runs = self.study.expand_runs()
         self.assertEqual(self.study.expected_runs, 36)
@@ -65,7 +89,7 @@ class StudySpecTests(unittest.TestCase):
         self.assertIn("--seed=8", runs[0].args)
         self.assertEqual(self.study.raw["schema"], SCHEMA_ID)
         self.assertEqual(self.study.declared_workflow_version, "1.0.0")
-        self.assertEqual(WORKFLOW_VERSION, "1.5.0")
+        self.assertEqual(WORKFLOW_VERSION, "1.7.1")
         self.assertEqual(len(self.study.fingerprint), 64)
 
     def test_machine_readable_schema_is_valid_json(self):
@@ -73,6 +97,16 @@ class StudySpecTests(unittest.TestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(schema["$id"], SCHEMA_ID)
         self.assertIn("training", schema["properties"])
+
+    def test_discovery_accepts_launcher_separator_suffix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            expected = self.study.expand_runs()
+            for run in expected:
+                (root / f"{run.name}_").mkdir()
+            found = discover_run_directories(self.study, root)
+        self.assertEqual(set(found), {run.name for run in expected})
+        self.assertTrue(all(path.name.endswith("_") for path in found.values()))
 
     def test_goal_subset_interventions_include_all_five_seeds(self):
         study = load_study(SPEC_PATH.with_name("ca3_memory_novelty_goal.study.json"))

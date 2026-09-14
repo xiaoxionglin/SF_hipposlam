@@ -170,7 +170,7 @@ def build_intervention_manifest(
     study: StudySpec,
     rows: Iterable[Mapping[str, str]],
 ) -> list[dict[str, str]]:
-    """Select the declared intervention checkpoint once for every study run.
+    """Select every declared intervention checkpoint once per selected study run.
 
     The intervention manifest deliberately reuses the checkpoint inventory and
     row contract of the standard place-field manifest.  This prevents an
@@ -187,21 +187,22 @@ def build_intervention_manifest(
     target_frames = intervention.get("target_frames")
     if (
         not isinstance(target_frames, list)
-        or len(target_frames) != 1
-        or not isinstance(target_frames[0], int)
-        or target_frames[0] <= 0
+        or not target_frames
+        or any(type(value) is not int or value <= 0 for value in target_frames)
+        or sorted(set(target_frames)) != target_frames
     ):
-        raise SpecError("telemetry.intervention.target_frames must contain one positive integer")
-    target = str(target_frames[0])
-    expected = {(run.condition, str(run.seed)) for run in selected_intervention_runs(study)}
+        raise SpecError("telemetry.intervention.target_frames must contain sorted unique positive integers")
+    expected = {
+        (run.condition, str(run.seed), str(target))
+        for run in selected_intervention_runs(study)
+        for target in target_frames
+    }
     selected = [
-        dict(row)
-        for row in rows
-        if row.get("target_frames") == target and (row.get("condition"), row.get("seed")) in expected
+        dict(row) for row in rows if (row.get("condition"), row.get("seed"), row.get("target_frames")) in expected
     ]
-    observed = [(row.get("condition"), row.get("seed")) for row in selected]
+    observed = [(row.get("condition"), row.get("seed"), row.get("target_frames")) for row in selected]
     if len(observed) != len(set(observed)):
-        raise SpecError("intervention manifest contains duplicate condition/seed rows")
+        raise SpecError("intervention manifest contains duplicate condition/seed/target rows")
     if set(observed) != expected:
         missing = sorted(expected - set(observed))
         unexpected = sorted(set(observed) - expected)

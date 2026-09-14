@@ -29,6 +29,7 @@ def collect_online_records(
     study: StudySpec,
     batch_root: Path,
     fixed_window: tuple[int, int] | None = None,
+    latest_common: bool = False,
 ) -> list[dict[str, Any]]:
     """Collect standardized per-run rows from TensorBoard event directories."""
 
@@ -36,6 +37,9 @@ def collect_online_records(
         from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
     except ImportError as error:
         raise RuntimeError("TensorBoard is required for collect-online") from error
+
+    if latest_common and fixed_window is not None:
+        raise SpecError("latest-common and a fixed window are mutually exclusive")
 
     analysis = study.analysis
     window_metrics = analysis.get("window_metrics", {})
@@ -59,17 +63,42 @@ def collect_online_records(
 
     run_directories = discover_run_directories(study, batch_root)
 
-    def collect_run(run: Any) -> dict[str, Any]:
+    def load_run(run: Any) -> tuple[Path, dict[str, list[Any]]]:
         run_dir = run_directories[run.name]
         summary_dir = run_dir / ".summary" / "0"
         if not summary_dir.is_dir():
             raise SpecError(f"missing TensorBoard summary directory: {summary_dir}")
-        accumulator = EventAccumulator(str(summary_dir), size_guidance={"scalars": scalar_size_guidance})
+        accumulator = EventAccumulator(
+            str(summary_dir), size_guidance={"scalars": 0 if latest_common else scalar_size_guidance}
+        )
         accumulator.Reload()
         available = set(accumulator.Tags().get("scalars", []))
         if step_tag not in available:
             raise SpecError(f"run {run.name!r} is missing step tag {step_tag!r}")
-        max_step = max(int(event.step) for event in accumulator.Scalars(step_tag))
+        required = {step_tag, *window_metrics.values(), *cumulative_metrics.values()}
+        histories = {tag: accumulator.Scalars(tag) for tag in required & available}
+        if not histories[step_tag]:
+            raise SpecError(f"run {run.name!r} has an empty step history")
+        if latest_common:
+            missing = [tag for tag in required if not histories.get(tag)]
+            if missing:
+                raise SpecError(f"run {run.name!r} is missing required histories: {missing}")
+        return run_dir, histories
+
+    runs = study.expand_runs()
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(runs))) as executor:
+        # Retain only study-declared histories; each event directory is read once.
+        loaded = list(executor.map(load_run, runs))
+    if latest_common:
+        high = min(max(int(event.step) for event in events) for _, histories in loaded for events in histories.values())
+        low = max(0, high - terminal_width)
+        if low >= high:
+            raise SpecError("no positive latest-common window is available")
+        fixed_window = (low, high)
+
+    records = []
+    for run, (run_dir, histories) in zip(runs, loaded):
+        max_step = max(int(event.step) for event in histories[step_tag])
         if fixed_window is None:
             low, high = max(0, max_step - terminal_width), max_step
         else:
@@ -89,19 +118,18 @@ def collect_online_records(
             "run_dir": str(run_dir),
         }
         for metric, tag in window_metrics.items():
-            if tag not in available:
+            if tag not in histories:
                 row[metric], row[f"{metric}__n"] = math.nan, 0
             else:
-                row[metric], row[f"{metric}__n"] = mean_in_window(accumulator.Scalars(tag), low, high)
+                row[metric], row[f"{metric}__n"] = mean_in_window(histories[tag], low, high)
         for metric, tag in cumulative_metrics.items():
-            if tag not in available:
+            if tag not in histories:
                 row[metric], row[f"{metric}__step"] = math.nan, 0
             else:
-                row[metric], row[f"{metric}__step"] = latest_at_or_before(accumulator.Scalars(tag), high)
-        return row
-
-    runs = study.expand_runs()
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(runs))) as executor:
-        # executor.map preserves StudySpec order while loading independent event
-        # directories concurrently.
-        return list(executor.map(collect_run, runs))
+                row[metric], row[f"{metric}__step"] = latest_at_or_before(histories[tag], high)
+        if latest_common:
+            for metric in window_metrics:
+                if row[f"{metric}__n"] == 0 or not math.isfinite(row[metric]):
+                    raise SpecError(f"run {run.name!r} has no finite {metric!r} mean in {low}--{high}")
+        records.append(row)
+    return records

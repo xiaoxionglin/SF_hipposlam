@@ -158,10 +158,23 @@ def command_collect_online(args: argparse.Namespace) -> None:
         if args.window_low is None or args.window_high is None:
             raise SpecError("--window-low and --window-high must be supplied together")
         fixed_window = (args.window_low, args.window_high)
-    records = collect_online_records(study, args.batch_root, fixed_window=fixed_window)
+    records = collect_online_records(
+        study, args.batch_root, fixed_window=fixed_window, latest_common=args.latest_common
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "per_run.csv", records)
     _analyze(study, records, args.output_dir)
+    manifest_path = args.output_dir / "analysis_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["collection"] = {
+        "mode": "latest_common" if args.latest_common else "fixed" if fixed_window else "per_run_terminal",
+        "step_tag": study.analysis.get("step_tag", "train/env_steps"),
+        "windows": sorted({(row["window_low"], row["window_high"]) for row in records}),
+        "scalar_size_guidance": 0 if args.latest_common else study.analysis.get("scalar_size_guidance", 30000),
+    }
+    _write_json(manifest_path, manifest)
+    if args.latest_common:
+        print(f"Latest common window: {records[0]['window_low']}--{records[0]['window_high']} ({len(records)} runs)")
 
 
 def command_analyze_csv(args: argparse.Namespace) -> None:
@@ -289,6 +302,11 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("output_dir", type=Path)
     collect.add_argument("--window-low", type=int)
     collect.add_argument("--window-high", type=int)
+    collect.add_argument(
+        "--latest-common",
+        action="store_true",
+        help="align all runs to the latest shared metric step using analysis.terminal_width; read histories once",
+    )
     collect.set_defaults(func=command_collect_online)
 
     analyze = subparsers.add_parser("analyze-csv", help="analyze an existing per-run CSV")
