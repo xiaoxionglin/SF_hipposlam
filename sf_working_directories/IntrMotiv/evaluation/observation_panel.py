@@ -35,7 +35,7 @@ def save_panel(path, records):
     np.savez_compressed(path, **{key: np.stack(value) for key, value in records.items()})
 
 
-def replay_observations(actor, cfg, path, device):
+def replay_observations(actor, cfg, path, device, goal_id=None, include_worker=False):
     # NPZ indexing decompresses the whole member: materialize once, not once
     # per observation (which becomes quadratic for a long image trajectory).
     with np.load(path, allow_pickle=False) as archive:
@@ -48,14 +48,24 @@ def replay_observations(actor, cfg, path, device):
         raise ValueError("Panel arrays must have identical temporal lengths")
     batch = data["dones"].shape[1]
     state = torch.zeros(batch, get_rnn_size(cfg), device=device)
-    activity, logits, rows = [], [], []
+    activity, logits, rows, worker_activity = [], [], [], []
+    n = int(cfg.Hippo_n_feature)
+    if goal_id is not None and not 0 <= goal_id < n:
+        raise ValueError("Panel goal is outside the landmark vocabulary")
     episode = np.zeros(batch, dtype=int)
     with torch.no_grad():
         for t in range(count):
             obs = {key[4:]: torch.as_tensor(data[key][t], device=device) for key in keys}
             normalized = prepare_and_normalize_obs(actor, obs)
             head = actor.forward_head(normalized)
+            if goal_id is not None and getattr(cfg, "dg_goal_input", "none") == "write":
+                goal = torch.zeros(head.size(0), n, device=device, dtype=head.dtype)
+                goal[:, goal_id] = 1
+                head = torch.cat((head, goal), -1)
             core, state = actor.forward_core(head, state)
+            worker = getattr(getattr(actor, "core", None), "last_worker_dg_activity", None)
+            if worker is not None:
+                worker_activity.append(worker.cpu().numpy().copy())
             n, e = int(cfg.Hippo_n_feature), int(cfg.Hippo_R + cfg.Hippo_L - 1)
             # Keep snapshots independent of the in-place episode-state reset.
             activity.append(core[:, : n * e : e].cpu().numpy().copy())
@@ -78,4 +88,7 @@ def replay_observations(actor, cfg, path, device):
             done = torch.as_tensor(data["dones"][t], device=device).bool()
             state[done] = 0
             episode += data["dones"][t].astype(int)
-    return pd.DataFrame(rows), np.concatenate(activity), np.concatenate(logits)
+    result = (pd.DataFrame(rows), np.concatenate(activity), np.concatenate(logits))
+    if include_worker:
+        return result + ({"worker_dg_activity": np.concatenate(worker_activity)} if worker_activity else {},)
+    return result

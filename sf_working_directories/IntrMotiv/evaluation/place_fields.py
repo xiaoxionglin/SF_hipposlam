@@ -48,6 +48,12 @@ def parse_args():
     panel = parser.add_mutually_exclusive_group()
     panel.add_argument("--record-observation-panel", type=pathlib.Path)
     panel.add_argument("--replay-observation-panel", type=pathlib.Path)
+    parser.add_argument(
+        "--panel-goal",
+        type=int,
+        default=None,
+        help="Force one landmark command during a common observation-panel replay",
+    )
     return parser.parse_args()
 
 
@@ -204,6 +210,37 @@ def spatial_information(rate_map, occupancy):
     return float(np.nansum(rate_map[valid] * p_occ[valid] * np.log2(ratio[valid])))
 
 
+def goal_behavior_diagnostics(pose, goals, timeouts):
+    """Measure uninterrupted commands within physical episodes, not option timers."""
+    goals = np.asarray(goals).reshape(-1)
+    timeouts = np.asarray(timeouts).reshape(-1).astype(bool)
+    segments = []
+    for (_, _), group in pose.groupby(["agent", "num_traj"], sort=False):
+        previous = -1
+        duration = 0
+        repeats = 0
+        for index in group.index:
+            goal = int(goals[index])
+            if goal == previous and goal >= 0:
+                duration += 1
+                repeats += int(timeouts[index])
+            else:
+                if previous >= 0:
+                    segments.append(dict(goal=previous, decisions=duration, same_goal_timeouts=repeats))
+                previous = goal
+                duration = int(goal >= 0)
+                repeats = 0
+        if previous >= 0:
+            segments.append(dict(goal=previous, decisions=duration, same_goal_timeouts=repeats))
+    return dict(
+        segments=segments,
+        max_uninterrupted_decisions=max((s["decisions"] for s in segments), default=0),
+        max_same_goal_timeouts=max((s["same_goal_timeouts"] for s in segments), default=0),
+        timeout_reselections=sum(s["same_goal_timeouts"] for s in segments),
+        window_censored=True,
+    )
+
+
 def rollout_dg(
     run_dir: pathlib.Path,
     max_num_frames: int,
@@ -212,6 +249,7 @@ def rollout_dg(
     checkpoint_path: pathlib.Path | None = None,
     record_panel: pathlib.Path | None = None,
     replay_panel: pathlib.Path | None = None,
+    panel_goal: int | None = None,
 ):
     cfg, env, env_info, actor_critic, checkpoint, device = load_policy_env(
         run_dir, max_num_frames, deterministic, checkpoint_rank, checkpoint_path
@@ -220,17 +258,39 @@ def rollout_dg(
         from sf_working_directories.IntrMotiv.evaluation.observation_panel import replay_observations
 
         env.close()
-        pose, dg, logits = replay_observations(actor_critic, cfg, replay_panel, device)
-        return cfg, checkpoint, pose, dg, logits, optional_graph_arrays(actor_critic)
+        pose, dg, logits, worker = replay_observations(
+            actor_critic, cfg, replay_panel, device, goal_id=panel_goal, include_worker=True
+        )
+        arrays = optional_graph_arrays(actor_critic)
+        arrays.update(worker)
+        arrays["panel_goal"] = -1 if panel_goal is None else panel_goal
+        return cfg, checkpoint, pose, dg, logits, arrays
     panel_records = defaultdict(list)
 
     core_buffers = []
+    worker_buffers = []
+    goal_buffers, timeout_buffers = [], []
     pre_threshold_buffers = []
 
     def core_hook(_module, _inp, out):
+        if isinstance(out, (tuple, list)) and getattr(_module, "hrl_enabled", False):
+            from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import HRLStateLayout
+
+            output, state = out
+            start = _module.target_condition_start
+            goal = output[:, start : start + _module.Hippo_n_feature]
+            goal_id = torch.where(goal.sum(-1) > 0, goal.argmax(-1), torch.full_like(goal.argmax(-1), -1))
+            hrl = _module._split_state(state)[1]
+            goal_buffers.append(goal_id.detach().cpu().clone())
+            timeout_buffers.append(
+                hrl[:, HRLStateLayout(_module.Hippo_n_feature).option_expired].detach().cpu().clone()
+            )
         if isinstance(out, (tuple, list)):
             out = out[0]
         core_buffers.append(out.detach().cpu().clone())
+        worker = getattr(_module, "last_worker_dg_activity", None)
+        if worker is not None:
+            worker_buffers.append(worker.detach().cpu().clone())
 
     dict(actor_critic.named_modules())["core"].register_forward_hook(core_hook)
 
@@ -336,7 +396,13 @@ def rollout_dg(
         if pre_threshold_logits.shape[1] != n_feature:
             raise ValueError(f"Pre-threshold DG logits {pre_threshold_logits.shape} do not match F={n_feature}")
     pose = pd.DataFrame(pose_records).iloc[: dg.shape[0]].reset_index(drop=True)
-    return cfg, checkpoint, pose, dg, pre_threshold_logits, optional_graph_arrays(actor_critic)
+    arrays = optional_graph_arrays(actor_critic)
+    if goal_buffers:
+        arrays["behavior_goal_ids"] = torch.cat(goal_buffers).numpy()
+        arrays["option_timeouts"] = torch.cat(timeout_buffers).numpy()
+    if worker_buffers:
+        arrays["worker_dg_activity"] = torch.cat(worker_buffers).numpy()
+    return cfg, checkpoint, pose, dg, pre_threshold_logits, arrays
 
 
 def _occupancy_corrected_maps(pose: pd.DataFrame, values: np.ndarray, grain: int):
@@ -488,6 +554,7 @@ def main():
             checkpoint_path=args.checkpoint,
             record_panel=args.record_observation_panel,
             replay_panel=args.replay_observation_panel,
+            panel_goal=args.panel_goal,
         )
         occupancy, rate_maps, si, active_fraction = compute_place_fields(pose, dg, args.grain)
         artifact = {
@@ -504,6 +571,28 @@ def main():
             "observation_panel": str(args.replay_observation_panel or ""),
         }
         artifact.update(graph_arrays)
+        if "behavior_goal_ids" in graph_arrays:
+            (run_out / "goal_behavior_diagnostics.json").write_text(
+                json.dumps(
+                    goal_behavior_diagnostics(pose, graph_arrays["behavior_goal_ids"], graph_arrays["option_timeouts"]),
+                    indent=2,
+                )
+                + "\n"
+            )
+        if "worker_dg_activity" in graph_arrays:
+            worker = graph_arrays["worker_dg_activity"]
+            _, worker_maps, worker_si, worker_fraction = compute_place_fields(pose, worker, args.grain)
+            artifact.update(
+                worker_rate_maps=worker_maps,
+                worker_spatial_information=worker_si,
+                worker_active_fraction=worker_fraction,
+            )
+            artifact.update(
+                {
+                    "worker_" + key: value
+                    for key, value in spatial_details_for_artifact(pose, worker, args.grain).items()
+                }
+            )
         pre_threshold_summary = {}
         if pre_threshold_logits is not None:
             _, pre_threshold_maps, pre_threshold_mean, pre_threshold_std = compute_pre_threshold_maps(
