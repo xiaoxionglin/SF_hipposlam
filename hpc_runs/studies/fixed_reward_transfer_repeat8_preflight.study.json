@@ -1,0 +1,262 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.5.0",
+  "study_id": "fixed_reward_transfer_repeat8_preflight_20260910",
+  "description": "Matched-repeat-8 five-action downstream transfer; original sources, scopes, and learning settings retained.",
+  "expected_runs": 7,
+  "metadata": {
+    "project": "SF_IntrMotiv_FixedRewardTransfer",
+    "training_seconds": 3600,
+    "design_cells": 7,
+    "source_checkpoint_frames": 75038720,
+    "physical_training_signal": true,
+    "selected_checkpoint_pilot": true,
+    "action_repeat": 8,
+    "require_source_interface_match": true,
+    "timing_parent_study": "fixed_reward_transfer_20260910"
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "intrmotiv_fixed_reward_transfer_repeat8_preflight_20260910",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_fixed_reward_transfer_repeat8_preflight_20260910",
+    "run_name_template": "FRT8PF_{base_label}_S{seed}",
+    "condition_name_template": "FRT8PF_{base_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3",
+      "--train_for_seconds=3600",
+      "--algo=APPO",
+      "--gamma=0.99",
+      "--gae_lambda=0.95",
+      "--learning_rate=0.0002",
+      "--exploration_loss_coeff=0.005",
+      "--value_loss_coeff=0.3",
+      "--ppo_clip_ratio=0.25",
+      "--num_workers=32",
+      "--num_envs_per_worker=8",
+      "--worker_num_splits=8",
+      "--num_epochs=1",
+      "--rollout=64",
+      "--recurrence=64",
+      "--batch_size=2048",
+      "--num_batches_per_epoch=2",
+      "--decorrelate_experience_max_seconds=120",
+      "--max_grad_norm=0.0",
+      "--dmlab_renderer=software",
+      "--dmlab_extended_action_set=False",
+      "--dmlab_navigation_action_set=False",
+      "--dmlab_reduced_action_set=True",
+      "--dmlab_one_task_per_worker=True",
+      "--dmlab_use_level_cache=True",
+      "--dmlab_level_cache_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/dmlab_cache",
+      "--set_workers_cpu_affinity=False",
+      "--force_envs_single_thread=True",
+      "--num_policies=1",
+      "--with_pbt=False",
+      "--max_policy_lag=35",
+      "--use_record_episode_statistics=True",
+      "--keep_checkpoints=100",
+      "--save_every_sec=120",
+      "--save_milestones_sec=5400",
+      "--save_best_every_sec=120",
+      "--save_best_after=1200",
+      "--save_best_metric=avg_z_00_openfield_map2_fixed_loc3_lenweighted_score",
+      "--env_frameskip=8",
+      "--core_name=BypassSS",
+      "--DG_name=batchnorm_relu",
+      "--DG_BN_intercept=2.43",
+      "--dg_batchnorm_semantics=legacy_batch",
+      "--Hippo_n_feature=16",
+      "--Hippo_R=8",
+      "--Hippo_L=64",
+      "--depth_sensor=True",
+      "--normalize_input=False",
+      "--encoder_conv_architecture=layer2_resnet18",
+      "--encoder_conv_mlp_layers=512",
+      "--use_rnn=True",
+      "--rnn_type=gru",
+      "--rnn_size=0",
+      "--nonlinearity=relu",
+      "--actor_critic_share_weights=True",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--with_pos_obs=False",
+      "--fixed_task_conditioning=True",
+      "--hrl_goal_conditioning=target_id_film",
+      "--hrl_target_timing=immediate",
+      "--hrl_controllable_graph=False",
+      "--intrinsic_goal_mode=none",
+      "--intrinsic_goal_controller=shared",
+      "--dg_orthogonal_recruitment=False",
+      "--dg_orthogonal_recruitment_max_per_rollout=0",
+      "--decoder_reward_gate=none",
+      "--dg_ca3_reentry_inhibition=none",
+      "--dg_ca3_temporal_exclusion_coeff=0.0",
+      "--dg_context_feedback=none",
+      "--dg_context_history=ca3",
+      "--dg_context_gradient=direct",
+      "--dg_transition_prediction=none",
+      "--rec_distances=True",
+      "--distance_learning=False",
+      "--masked_distance_matrix=False",
+      "--normalize_advantage=True",
+      "--advantage_reward_source=external",
+      "--use_internal=False",
+      "--use_external=True",
+      "--extra_encoder_losses=False",
+      "--encoder_batch_loss=False",
+      "--encoder_multi_activation_loss=False",
+      "--encoder_unused_sequence_loss=False",
+      "--extra_decoder_loss=False",
+      "--encoder_population_usage_loss=False",
+      "--encoder_density_loss_coeff=0.0",
+      "--encoder_collision_loss_coeff=0.0",
+      "--dg_global_punishment_coeff=0.0",
+      "--dg_row_repulsion_coeff=0.0",
+      "--dg_path_scatter_coeff=0.0",
+      "--iterative_update=False",
+      "--ca3_predictor_shadow=False",
+      "--metric=sum",
+      "--reward_scale=1.0",
+      "--double_value=False",
+      "--reset_critic=False",
+      "--reset_decoder=False",
+      "--device=cpu",
+      "--benchmark=False",
+      "--with_wandb=True",
+      "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
+      "--wandb_project=SF_IntrMotiv_FixedRewardTransfer",
+      "--wandb_group=intrmotiv_fixed_reward_transfer_repeat8_preflight_20260910",
+      "--wandb_dir=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb",
+      "--train_for_env_steps=2000000"
+    ]
+  },
+  "bases": [
+    {
+      "name": "SCRATCH",
+      "label": "SCRATCH",
+      "args": [
+        "--transfer_scope=none",
+        "--ppo_dg_gradient=joint",
+        "--transfer_freeze_dg=False"
+      ],
+      "metadata": {
+        "source": "scratch",
+        "scope": "scratch",
+        "dg": "trainable"
+      }
+    },
+    {
+      "name": "SCR_DG_FROZEN",
+      "label": "SCR_DG_FROZEN",
+      "args": [
+        "--transfer_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_source_credit_retirement_20260904/SCR_C15_ARR_DIRS_S123_/00_SCR_C15_ARR_DIRS_S123/checkpoint_p0/checkpoint_000004580_75038720.pth",
+        "--transfer_scope=dg",
+        "--ppo_dg_gradient=stop",
+        "--transfer_freeze_dg=True"
+      ],
+      "metadata": {
+        "source": "SCR_C15_ARR_DIRS_S123",
+        "scope": "dg",
+        "dg": "frozen"
+      }
+    },
+    {
+      "name": "SCR_DG_TUNE",
+      "label": "SCR_DG_TUNE",
+      "args": [
+        "--transfer_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_source_credit_retirement_20260904/SCR_C15_ARR_DIRS_S123_/00_SCR_C15_ARR_DIRS_S123/checkpoint_p0/checkpoint_000004580_75038720.pth",
+        "--transfer_scope=dg",
+        "--ppo_dg_gradient=joint",
+        "--transfer_freeze_dg=False"
+      ],
+      "metadata": {
+        "source": "SCR_C15_ARR_DIRS_S123",
+        "scope": "dg",
+        "dg": "trainable"
+      }
+    },
+    {
+      "name": "SCR_POLICY_TUNE",
+      "label": "SCR_POLICY_TUNE",
+      "args": [
+        "--transfer_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_source_credit_retirement_20260904/SCR_C15_ARR_DIRS_S123_/00_SCR_C15_ARR_DIRS_S123/checkpoint_p0/checkpoint_000004580_75038720.pth",
+        "--transfer_scope=policy",
+        "--ppo_dg_gradient=joint",
+        "--transfer_freeze_dg=False"
+      ],
+      "metadata": {
+        "source": "SCR_C15_ARR_DIRS_S123",
+        "scope": "policy",
+        "dg": "trainable"
+      }
+    },
+    {
+      "name": "SAT_DG_FROZEN",
+      "label": "SAT_DG_FROZEN",
+      "args": [
+        "--transfer_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_saturday_batch_20260905/SAT_C15_ARR_DIRO_FILM_S8_/00_SAT_C15_ARR_DIRO_FILM_S8/checkpoint_p0/checkpoint_000004580_75038720.pth",
+        "--transfer_scope=dg",
+        "--ppo_dg_gradient=stop",
+        "--transfer_freeze_dg=True"
+      ],
+      "metadata": {
+        "source": "SAT_C15_ARR_DIRO_FILM_S8",
+        "scope": "dg",
+        "dg": "frozen"
+      }
+    },
+    {
+      "name": "SAT_DG_TUNE",
+      "label": "SAT_DG_TUNE",
+      "args": [
+        "--transfer_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_saturday_batch_20260905/SAT_C15_ARR_DIRO_FILM_S8_/00_SAT_C15_ARR_DIRO_FILM_S8/checkpoint_p0/checkpoint_000004580_75038720.pth",
+        "--transfer_scope=dg",
+        "--ppo_dg_gradient=joint",
+        "--transfer_freeze_dg=False"
+      ],
+      "metadata": {
+        "source": "SAT_C15_ARR_DIRO_FILM_S8",
+        "scope": "dg",
+        "dg": "trainable"
+      }
+    },
+    {
+      "name": "SAT_POLICY_TUNE",
+      "label": "SAT_POLICY_TUNE",
+      "args": [
+        "--transfer_model_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_saturday_batch_20260905/SAT_C15_ARR_DIRO_FILM_S8_/00_SAT_C15_ARR_DIRO_FILM_S8/checkpoint_p0/checkpoint_000004580_75038720.pth",
+        "--transfer_scope=policy",
+        "--ppo_dg_gradient=joint",
+        "--transfer_freeze_dg=False"
+      ],
+      "metadata": {
+        "source": "SAT_C15_ARR_DIRO_FILM_S8",
+        "scope": "policy",
+        "dg": "trainable"
+      }
+    }
+  ],
+  "factors": [],
+  "seeds": [
+    9999
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 10000000,
+    "max_workers": 4,
+    "group_by": [],
+    "contrast_group_by": [],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "lenweighted_score": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_lenweighted_score",
+      "raw_score": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_dmlab_raw_score",
+      "episode_length": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_len"
+    },
+    "cumulative_metrics": {},
+    "contrasts": []
+  }
+}
