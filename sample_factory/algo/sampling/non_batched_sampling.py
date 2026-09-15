@@ -203,6 +203,13 @@ class ActorState:
         self.curr_traj_buffer["rewards"][rollout_step] = float(reward)
         self.curr_traj_buffer["dones"][rollout_step] = done
         self.curr_traj_buffer["time_outs"][rollout_step] = truncated
+        if "controller_final_valid" in self.curr_traj_buffer:
+            from sf_working_directories.IntrMotiv.dmlab.controller_transport import record_terminal
+
+            record_terminal(self.curr_traj_buffer, rollout_step, terminated, info)
+            self.curr_traj_buffer["controller_frames"][rollout_step] = int(
+                info.get("num_frames", self.env_info.frameskip)
+            )
 
         # -1 policy_id does not match any valid policy on the learner, therefore this will be treated as
         # invalid data coming from a different policy and should be ignored by the learner.
@@ -498,6 +505,10 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
 
                     # save parsed trajectory outputs directly into the trajectory buffer
                     actor_state.set_trajectory_data(policy_outputs_dict, self.rollout_step)
+                    if "controller_input_state" in policy_outputs_dict:
+                        actor_state.curr_traj_buffer["rnn_states"][self.rollout_step] = policy_outputs_dict[
+                            "controller_input_state"
+                        ]
                     actor_state.last_actions = policy_outputs_dict["actions"].squeeze()
 
                     # this is an rnn state for the next iteration in the rollout

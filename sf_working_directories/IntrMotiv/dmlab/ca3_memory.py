@@ -98,3 +98,30 @@ def advance_reference_goal(state, previous_activity, current_activity, horizon, 
     goal = F.one_hot((result[:, 0].long() - 1).clamp_min(0), n)
     goal = goal.to(current_activity.dtype) * result[:, 0:1].gt(0)
     return result, goal
+
+
+def finite_shift_history(activity, injection_width, memory_length):
+    """All zero-initialized additive CA3 states, using the same finite impulse.
+
+    ``activity`` is [time,batch,unit]. Each observation is injected into the
+    first R slots, then shifted one slot per decision. No subtraction is used:
+    zero/nonzero event identities are preserved for nonnegative DG activities.
+    This is the packed replay equivalent of the existing single-step update.
+    """
+    if activity.ndim != 3 or not 1 <= injection_width <= memory_length:
+        raise ValueError("Invalid finite shift-register dimensions")
+    steps, batch, units = activity.shape
+    stream = activity.permute(1, 2, 0).reshape(batch * units, 1, steps)
+    kernel = activity.new_ones(1, 1, injection_width)
+    full = F.conv1d(F.pad(stream, (injection_width - 1, 0)), kernel).squeeze(1)
+    older = (
+        F.pad(full, (memory_length - injection_width, 0)).unfold(-1, memory_length - injection_width + 1, 1).flip(-1)
+    )
+    if injection_width > 1:
+        recent = (
+            F.pad(stream.squeeze(1), (injection_width - 2, 0)).unfold(-1, injection_width - 1, 1).flip(-1).cumsum(-1)
+        )
+        states = torch.cat((recent, older), -1)
+    else:
+        states = older
+    return states.reshape(batch, units, steps, memory_length).permute(2, 0, 1, 3)

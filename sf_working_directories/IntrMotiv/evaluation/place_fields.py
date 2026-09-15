@@ -118,7 +118,10 @@ def load_checkpoint_dict(checkpoint: pathlib.Path, device: torch.device) -> dict
     """
     safe_globals = [np.core.multiarray.scalar, np.dtype, type(np.dtype(np.float64))]
     with torch.serialization.safe_globals(safe_globals):
-        return torch.load(checkpoint, map_location=device, weights_only=True)
+        # CPU audits/evaluation need model and metadata, not eager copies of
+        # gigabytes of replay tensors. Torch's private mmap preserves tensor
+        # values and safe unpickling while faulting storage pages on demand.
+        return torch.load(checkpoint, map_location=device, weights_only=True, mmap=device.type == "cpu")
 
 
 def load_policy_env(

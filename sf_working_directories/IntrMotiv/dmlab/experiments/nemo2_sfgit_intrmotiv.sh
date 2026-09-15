@@ -12,8 +12,9 @@ set -euo pipefail
 
 source ~/miniforge3/etc/profile.d/conda.sh
 conda activate SFgit
-cd ~/SF_git_XXL/SF_hipposlam || exit 1
+cd "$${SLURM_SUBMIT_DIR:?Submit from the intended source checkout}" || exit 1
 
+export PYTHONPATH="/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/torch_cuda_2_9_1:/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/controller_terminal_binding_v1:$${PYTHONPATH:-}"
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -26,7 +27,7 @@ export MPLCONFIGDIR="$$RUNTIME_ROOT/matplotlib"
 export WANDB_CACHE_DIR="$$RUNTIME_ROOT/wandb_cache"
 export WANDB_DATA_DIR="$$RUNTIME_ROOT/wandb_data"
 export WANDB_DIR="$$RUNTIME_ROOT/wandb"
-export TMPDIR="$$RUNTIME_ROOT/tmp/$${SLURM_JOB_ID:-manual}"
+export TMPDIR="/work/classic/fr_xl1014-train/tmp/intrmotiv_$${SLURM_JOB_ID:-manual}"
 mkdir -p "$$XDG_CACHE_HOME" "$$MPLCONFIGDIR" "$$WANDB_CACHE_DIR" "$$WANDB_DATA_DIR" "$$WANDB_DIR" "$$TMPDIR"
 
 exec python -m sf_working_directories.IntrMotiv.dmlab.train_hipposlam $CMD \

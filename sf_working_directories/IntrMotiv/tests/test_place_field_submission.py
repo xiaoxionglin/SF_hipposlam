@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from sf_working_directories.IntrMotiv.evaluation.submit_place_field_sweep import (
+    SOURCE_ROOT,
     ManifestRow,
     build_sbatch_command,
     parse_job_id,
@@ -34,6 +35,7 @@ def test_single_submission_command_has_no_array_or_dependency():
         "33",
         "/work/classic/fr_xl1014-train/analysis/c05",
     ]
+    assert f"INTRMOTIV_RUNTIME_SOURCE={SOURCE_ROOT}" in command[7]
     assert "PLACE_FIELD_MAX_FRAMES=10000" in command[7]
     assert "PLACE_FIELD_REPLAY_PANEL=/work/classic/fr_xl1014-train/panel.npz" in command[7]
 

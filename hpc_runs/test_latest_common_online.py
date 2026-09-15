@@ -74,6 +74,26 @@ class LatestCommonTests(unittest.TestCase):
         with self.assertRaisesRegex(SpecError, "required histories"):
             collect_online_records(self.study, self.root, latest_common=True)
 
+    def test_process_matches_thread_and_reports_progress(self):
+        self.write("control", [10, 20, 30], [(10, 1), (20, 3), (30, 99)])
+        self.write("transfer", [10, 20, 40], [(10, 2), (20, 4)])
+        expected = collect_online_records(self.study, self.root, latest_common=True)
+        self.study.analysis["loader_backend"] = "process"
+        progress = []
+        actual = collect_online_records(
+            self.study, self.root, latest_common=True, progress=lambda *args: progress.append(args)
+        )
+        self.assertEqual(actual, expected)
+        self.assertEqual([(p[0], p[1]) for p in progress], [(1, 2), (2, 2)])
+        self.assertEqual({p[2] for p in progress}, {"control", "transfer"})
+
+    def test_process_missing_metric_propagates(self):
+        self.write("control", [10, 20], [(10, 1), (20, 2)])
+        self.write("transfer", [10, 20], [])
+        self.study.analysis["loader_backend"] = "process"
+        with self.assertRaisesRegex(SpecError, "required histories"):
+            collect_online_records(self.study, self.root, latest_common=True)
+
     def test_empty_common_metric_window_fails(self):
         self.write("control", [10, 20], [(20, 1)])
         self.write("transfer", [10, 40], [(30, 2), (40, 4)])

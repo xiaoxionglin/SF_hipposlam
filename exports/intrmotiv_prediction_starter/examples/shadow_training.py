@@ -4,7 +4,6 @@ Run from the kit directory: python -m examples.shadow_training
 """
 
 import torch
-
 from intrmotiv_transfer import CA3TargetPredictor, future_target_labels, shadow_prediction_loss
 
 
@@ -15,7 +14,7 @@ def main():
     # Replace with real sampled/replayed tensors using INTEGRATION.md conventions.
     ca3 = torch.randn(batch, steps, ca3_size, requires_grad=True)
     goals = torch.nn.functional.one_hot(torch.randint(features, (batch, steps)), features).float()
-    dg = (torch.rand(batch, steps, features) < .15).float()
+    dg = (torch.rand(batch, steps, features) < 0.15).float()
     dones_after = torch.zeros(batch, steps, dtype=torch.bool)
     hit, delay, usable = future_target_labels(goals, dg, dones_after, horizon)
     head = CA3TargetPredictor(ca3_size, features, 32)
@@ -25,8 +24,13 @@ def main():
     losses = []
     for _ in range(100):
         loss, stats = shadow_prediction_loss(
-            head, ca3.reshape(-1, ca3_size), goals.reshape(-1, features),
-            hit.flatten(), delay.flatten(), usable.flatten(), horizon,
+            head,
+            ca3.reshape(-1, ca3_size),
+            goals.reshape(-1, features),
+            hit.flatten(),
+            delay.flatten(),
+            usable.flatten(),
+            horizon,
         )
         optimizer.zero_grad()
         loss.backward()

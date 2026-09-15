@@ -65,6 +65,14 @@ class GoalDiagnosticScheduleTest(unittest.TestCase):
             _behavior_targets_from_states=lambda states: torch.eye(2),
             _with_worker_target=lambda core, target: core,
         )
+        helper_namespace = dict(
+            torch=torch,
+            categorical_action_total_variation=lambda a, b: (a.softmax(-1) - b.softmax(-1)).abs().sum(-1) / 2,
+        )
+        execute(method("_record_goal_condition_diagnostics"), helper_namespace)
+        owner._record_goal_condition_diagnostics = lambda *args: helper_namespace["_record_goal_condition_diagnostics"](
+            owner, *args
+        )
         stats = {}
         execute(
             gate,

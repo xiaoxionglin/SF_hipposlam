@@ -223,11 +223,15 @@ def discover_nemo_checkpoints(study: StudySpec, batch_root: Path) -> list[Checkp
     except ImportError as error:
         raise RuntimeError("render-telemetry must run from the NEMO2 SF_hipposlam checkout") from error
 
+    targets = sorted(
+        set(study.telemetry["target_frames"])
+        | set((study.telemetry.get("intervention") or {}).get("target_frames", []))
+    )
     inventory: list[CheckpointRecord] = []
     run_directories = discover_run_directories(study, batch_root)
     for run in study.expand_runs():
         run_dir = run_directories[run.name]
-        for target, checkpoint in select_checkpoints(run_dir):
+        for target, checkpoint in select_checkpoints(run_dir, target_frames=targets):
             inventory.append(
                 CheckpointRecord(
                     run_name=run.name,

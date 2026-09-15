@@ -25,6 +25,20 @@ def hipposlam_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    p.add_argument("--controller_learning", choices=["ppo", "shadow", "ddqn"], default="ppo")
+    p.add_argument("--controller_replay_state", choices=("reconstruct", "stored"), default="reconstruct")
+    p.add_argument("--controller_her", type=str2bool, default=False)
+    p.add_argument("--controller_epsilon", type=float, default=0.1)
+    p.add_argument("--controller_target_updates", type=int, default=100)
+    p.add_argument("--controller_replay_capacity", type=int, default=200000)
+    p.add_argument("--controller_td_positions", type=int, default=256)
+    p.add_argument("--controller_decisions_per_update", type=int, default=64)
+    p.add_argument("--controller_learning_starts", type=int, default=16384)
+    p.add_argument("--controller_her_positions", type=int, default=256)
+    p.add_argument("--controller_her_loss_coeff", type=float, default=1.0)
+    p.add_argument("--controller_epsilon_decay_decisions", type=int, default=250000)
+    p.add_argument("--controller_preflight", type=str2bool, default=False)
+    p.add_argument("--controller_cache_visual", type=str2bool, default=True)
     p.add_argument("--decoder_reward_gate", choices=["none", "ca3_absent"], default="none")
     p.add_argument("--dg_ca3_reentry_inhibition", choices=["none", "trace_subtractive", "hard"], default="none")
     p.add_argument("--intrinsic_goal_mode", choices=["none", "ca3_absent_target"], default="none")
@@ -92,6 +106,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="when loading an encoder, fix its weights at initialization",
     )
     p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")
+    p.add_argument(
+        "--depth_sensor_inverse",
+        default=None,
+        type=str2bool,
+        help="Use capped inverse depth 10/max(raw depth code,1); defaults to legacy pass-through",
+    )
     p.add_argument(
         "--dmlab_reduced_action_set", default=False, type=str2bool, help="reduced action set to facilitate learning"
     )

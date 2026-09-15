@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from statistics import fmean
 from typing import Any, Iterable, Mapping
@@ -25,11 +26,35 @@ def latest_at_or_before(events: Iterable[Any], high: int) -> tuple[float, int]:
     return float(latest.value), int(latest.step)
 
 
+def _load_run_histories(run_name, run_dir, step_tag, required, scalar_size_guidance, latest_common):
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+    summary_dir = run_dir / ".summary" / "0"
+    if not summary_dir.is_dir():
+        raise SpecError(f"missing TensorBoard summary directory: {summary_dir}")
+    accumulator = EventAccumulator(
+        str(summary_dir), size_guidance={"scalars": 0 if latest_common else scalar_size_guidance}
+    )
+    accumulator.Reload()
+    available = set(accumulator.Tags().get("scalars", []))
+    if step_tag not in available:
+        raise SpecError(f"run {run_name!r} is missing step tag {step_tag!r}")
+    histories = {tag: accumulator.Scalars(tag) for tag in required & available}
+    if not histories[step_tag]:
+        raise SpecError(f"run {run_name!r} has an empty step history")
+    if latest_common:
+        missing = [tag for tag in required if not histories.get(tag)]
+        if missing:
+            raise SpecError(f"run {run_name!r} is missing required histories: {missing}")
+    return run_dir, histories
+
+
 def collect_online_records(
     study: StudySpec,
     batch_root: Path,
     fixed_window: tuple[int, int] | None = None,
     latest_common: bool = False,
+    progress=None,
 ) -> list[dict[str, Any]]:
     """Collect standardized per-run rows from TensorBoard event directories."""
 
@@ -63,32 +88,35 @@ def collect_online_records(
 
     run_directories = discover_run_directories(study, batch_root)
 
-    def load_run(run: Any) -> tuple[Path, dict[str, list[Any]]]:
-        run_dir = run_directories[run.name]
-        summary_dir = run_dir / ".summary" / "0"
-        if not summary_dir.is_dir():
-            raise SpecError(f"missing TensorBoard summary directory: {summary_dir}")
-        accumulator = EventAccumulator(
-            str(summary_dir), size_guidance={"scalars": 0 if latest_common else scalar_size_guidance}
-        )
-        accumulator.Reload()
-        available = set(accumulator.Tags().get("scalars", []))
-        if step_tag not in available:
-            raise SpecError(f"run {run.name!r} is missing step tag {step_tag!r}")
-        required = {step_tag, *window_metrics.values(), *cumulative_metrics.values()}
-        histories = {tag: accumulator.Scalars(tag) for tag in required & available}
-        if not histories[step_tag]:
-            raise SpecError(f"run {run.name!r} has an empty step history")
-        if latest_common:
-            missing = [tag for tag in required if not histories.get(tag)]
-            if missing:
-                raise SpecError(f"run {run.name!r} is missing required histories: {missing}")
-        return run_dir, histories
-
     runs = study.expand_runs()
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(runs))) as executor:
-        # Retain only study-declared histories; each event directory is read once.
-        loaded = list(executor.map(load_run, runs))
+    required = {step_tag, *window_metrics.values(), *cumulative_metrics.values()}
+    backend = analysis.get("loader_backend", "thread")
+    if backend not in ("thread", "process"):
+        raise SpecError("analysis.loader_backend must be thread or process")
+    executor_type = ProcessPoolExecutor if backend == "process" else ThreadPoolExecutor
+    options = {"max_workers": min(max_workers, len(runs))}
+    if backend == "process":
+        # Spawn avoids inheriting TensorBoard/PyTorch background threads.
+        options["mp_context"] = multiprocessing.get_context("spawn")
+    loaded = [None] * len(runs)
+    with executor_type(**options) as executor:
+        futures = {
+            executor.submit(
+                _load_run_histories,
+                run.name,
+                run_directories[run.name],
+                step_tag,
+                required,
+                scalar_size_guidance,
+                latest_common,
+            ): index
+            for index, run in enumerate(runs)
+        }
+        for completed, future in enumerate(as_completed(futures), start=1):
+            index = futures[future]
+            loaded[index] = future.result()
+            if progress is not None:
+                progress(completed, len(runs), runs[index].name)
     if latest_common:
         high = min(max(int(event.step) for event in events) for _, histories in loaded for events in histories.values())
         low = max(0, high - terminal_width)

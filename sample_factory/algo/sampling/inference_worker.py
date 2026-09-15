@@ -328,12 +328,36 @@ class InferenceWorker(HeartbeatStoppableEventLoopObject, Configurable):
                 action_mask = (
                     ensure_torch_tensor(obs.pop("action_mask")).to(self.device) if "action_mask" in obs else None
                 )
-                normalized_obs = prepare_and_normalize_obs(actor_critic, obs)
                 rnn_states = ensure_torch_tensor(rnn_states).to(self.device).float()
+                controller_memory = None
+                if (
+                    getattr(self.cfg, "controller_learning", "ppo") != "ppo"
+                    and getattr(self.cfg, "controller_replay_state", "reconstruct") != "stored"
+                ):
+                    from sf_working_directories.IntrMotiv.dmlab.controller_actor_memory import ActorMemory
+
+                    if not hasattr(self, "controller_memory"):
+                        self.controller_memory = ActorMemory()
+                    controller_memory = self.controller_memory
+                    raw_obs = {k: ensure_torch_tensor(v) for k, v in obs.items()}
+                    rnn_states = controller_memory.before_forward(
+                        actor_critic, raw_obs, rnn_states, self.param_client.policy_version
+                    )
+                normalized_obs = prepare_and_normalize_obs(actor_critic, obs)
 
             with timing.add_time("forward"):
                 policy_outputs = actor_critic(normalized_obs, rnn_states, action_mask=action_mask)
                 policy_outputs["policy_version"] = torch.empty([num_samples]).fill_(self.param_client.policy_version)
+                if controller_memory is not None:
+                    controller_memory.after_forward(actor_critic, policy_outputs["controller_condition"])
+                if getattr(self.cfg, "controller_learning", "ppo") != "ppo":
+                    policy_outputs["controller_input_state"] = rnn_states
+                    stats = (
+                        [controller_memory.rebuilds, controller_memory.failures, controller_memory.seconds]
+                        if controller_memory is not None
+                        else [0.0, 0.0, 0.0]
+                    )
+                    policy_outputs["controller_memory_stats"] = rnn_states.new_tensor(stats).expand(num_samples, -1)
 
             with timing.add_time("prepare_outputs"):
                 signals_to_send = self._prepare_policy_outputs_func(num_samples, policy_outputs, self.requests)

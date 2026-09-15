@@ -431,14 +431,17 @@ def _transitive_reachability(adjacency: Tensor) -> Tensor:
     return reach
 
 
+def _connectivity_gain_from_reachability(reach: Tensor, source: int, destination: int) -> float:
+    # Every newly reachable path uses the inserted edge once: an old path to
+    # source, the edge, then an old path from destination. Cycles do not require
+    # another closure. The reflexive closure already excludes diagonal gains.
+    added = reach[:, source].unsqueeze(1) & reach[destination].unsqueeze(0)
+    return float((added & ~reach).sum().item())
+
+
 def connectivity_gain(adjacency: Tensor, source: int, destination: int) -> float:
     """Increase in ordered reachable pairs after adding one directed edge."""
-    before = _transitive_reachability(adjacency)
-    after_graph = adjacency.clone()
-    after_graph[source, destination] = True
-    after = _transitive_reachability(after_graph)
-    diagonal = torch.eye(adjacency.size(0), dtype=torch.bool, device=adjacency.device)
-    return float(((after & ~before) & ~diagonal).sum().item())
+    return _connectivity_gain_from_reachability(_transitive_reachability(adjacency), source, destination)
 
 
 def select_connectivity_probe(
@@ -457,11 +460,13 @@ def select_connectivity_probe(
     attempts = graph.control_attempts
     successes = graph.edge_confidence
     total_attempts = attempts.sum()
-    gains = [connectivity_gain(reliable, int(pair[0]), int(pair[1])) for pair in edge_ids]
+    reach = _transitive_reachability(reliable)
+    edge_pairs = edge_ids.tolist()
+    gains = [_connectivity_gain_from_reachability(reach, source, destination) for source, destination in edge_pairs]
     max_gain = max(gains) if gains else 0.0
     best_pair = None
     best_score = -math.inf
-    for pair, gain in zip(edge_ids.tolist(), gains):
+    for pair, gain in zip(edge_pairs, gains):
         source, destination = int(pair[0]), int(pair[1])
         attempt = float(attempts[source, destination].item())
         success = float(successes[source, destination].item())
@@ -521,10 +526,29 @@ def _geometry_condition(graph, source: int, target: int, dtype: torch.dtype, dev
 
 
 def _advance_options_without_probes(
-    option, topo, current, exclusive, graph, dist, next_hop, hop_count, scores,
-    option_layout, topo_layout, fallback_horizon, margin_ratio, margin_steps, confidence_threshold,
-    reliability_threshold, exploration_horizon, waypoint_planning, common_manager,
-    geometry, control_outcome, direct_target_selection, min_target_visits,
+    option,
+    topo,
+    current,
+    exclusive,
+    graph,
+    dist,
+    next_hop,
+    hop_count,
+    scores,
+    option_layout,
+    topo_layout,
+    fallback_horizon,
+    margin_ratio,
+    margin_steps,
+    confidence_threshold,
+    reliability_threshold,
+    exploration_horizon,
+    waypoint_planning,
+    common_manager,
+    geometry,
+    control_outcome,
+    direct_target_selection,
+    min_target_visits,
 ):
     """Batch option transitions when directed-edge probing is disabled.
 
@@ -555,12 +579,18 @@ def _advance_options_without_probes(
         else:
             valid_cost = torch.isfinite(cost) & (cost > 0)
             deadline = torch.where(
-                valid_cost, (torch.ceil(cost * (1 + margin_ratio)) + margin_steps).clamp_min(1),
+                valid_cost,
+                (torch.ceil(cost * (1 + margin_ratio)) + margin_steps).clamp_min(1),
                 float(fallback_horizon),
             )
-        for field, value in ((option_layout.target, dst + 1), (option_layout.source, src + 1), (option_layout.age, 0.0),
-                             (option_layout.countdown, deadline), (option_layout.option_reset, 1.0),
-                             (option_layout.selected_deadline, deadline)):
+        for field, value in (
+            (option_layout.target, dst + 1),
+            (option_layout.source, src + 1),
+            (option_layout.age, 0.0),
+            (option_layout.countdown, deadline),
+            (option_layout.option_reset, 1.0),
+            (option_layout.selected_deadline, deadline),
+        ):
             put(option, field, mask, value)
         put(topo, topo_layout.mode, mask, float(new_mode))
         put(topo, topo_layout.final_goal, mask, goal + 1)
@@ -572,11 +602,17 @@ def _advance_options_without_probes(
             delta = b[:, :2] - a[:, :2]
             c, s = a[:, 2].cos(), a[:, 2].sin()
             angle = b[:, 2] - a[:, 2]
-            condition = torch.stack(((c * delta[:, 0] + s * delta[:, 1]) / 32,
-                                     (-s * delta[:, 0] + c * delta[:, 1]) / 32,
-                                     angle.sin(), angle.cos()), dim=-1).to(option.dtype)
+            condition = torch.stack(
+                (
+                    (c * delta[:, 0] + s * delta[:, 1]) / 32,
+                    (-s * delta[:, 0] + c * delta[:, 1]) / 32,
+                    angle.sin(),
+                    angle.cos(),
+                ),
+                dim=-1,
+            ).to(option.dtype)
             condition = torch.where(valid[:, None], condition, 0.0)
-        old = topo[:, topo_layout.geometry_start:topo_layout.geometry_end]
+        old = topo[:, topo_layout.geometry_start : topo_layout.geometry_end]
         old.copy_(torch.where(mask[:, None], condition, old))
 
     def explore(mask, score):
@@ -755,8 +791,9 @@ def advance_topological_manager(
     rows = torch.arange(topo.size(0), device=topo.device)
     anchor = topo_layout.anchors_start + 3 * current.clamp_min(0)
     new_anchor = exclusive & (topo[rows, anchor + 2] <= 0)
-    for offset, value in enumerate((topo[:, topo_layout.episode_x], topo[:, topo_layout.episode_y],
-                                     torch.ones_like(current, dtype=topo.dtype))):
+    for offset, value in enumerate(
+        (topo[:, topo_layout.episode_x], topo[:, topo_layout.episode_y], torch.ones_like(current, dtype=topo.dtype))
+    ):
         topo[rows, anchor + offset] = torch.where(new_anchor, value, topo[rows, anchor + offset])
 
     last = decode_node(topo[:, topo_layout.last_landmark])
@@ -783,9 +820,11 @@ def advance_topological_manager(
     for field, value in passive_values.items():
         topo[:, field] = torch.where(accepted, value, 0.0)
     topo[:, topo_layout.passive_reject_nonexclusive] = ((n_active > 1) & (last >= 0)).to(topo.dtype)
-    for field, valid in ((topo_layout.passive_reject_time, elapsed_ok),
-                         (topo_layout.passive_reject_path, path_ok),
-                         (topo_layout.passive_reject_motion, motion_ok)):
+    for field, valid in (
+        (topo_layout.passive_reject_time, elapsed_ok),
+        (topo_layout.passive_reject_path, path_ok),
+        (topo_layout.passive_reject_motion, motion_ok),
+    ):
         topo[:, field] = (transition & ~valid).to(topo.dtype)
     topo[:, topo_layout.last_landmark] = torch.where(reset_segment, current + 1, last + 1)
     topo[:, topo_layout.last_landmark_age] = torch.where(reset_segment, 0.0, elapsed)
@@ -909,11 +948,29 @@ def advance_topological_manager(
 
     if not edge_exploration:
         _advance_options_without_probes(
-            option, topo, current, exclusive, graph, dist, next_hop, hop_count, scores,
-            option_layout, topo_layout, fallback_horizon, margin_ratio, margin_steps,
-            confidence_threshold, reliability_threshold, exploration_horizon,
-            waypoint_planning, common_manager, geometry, control_outcome,
-            direct_target_selection, min_target_visits,
+            option,
+            topo,
+            current,
+            exclusive,
+            graph,
+            dist,
+            next_hop,
+            hop_count,
+            scores,
+            option_layout,
+            topo_layout,
+            fallback_horizon,
+            margin_ratio,
+            margin_steps,
+            confidence_threshold,
+            reliability_threshold,
+            exploration_horizon,
+            waypoint_planning,
+            common_manager,
+            geometry,
+            control_outcome,
+            direct_target_selection,
+            min_target_visits,
         )
     else:
         target = decode_node(option[:, option_layout.target])
@@ -923,7 +980,11 @@ def advance_topological_manager(
         exploring = target == n_nodes
         hit = exclusive & normal_target & (current == target)
         wrong = (
-            (control_outcome == "first_distinct") & exclusive & normal_target & (current != source) & (current != target)
+            (control_outcome == "first_distinct")
+            & exclusive
+            & normal_target
+            & (current != source)
+            & (current != target)
         )
         expired = (~hit) & (normal_target | exploring) & (option[:, option_layout.countdown] <= 1.0)
         elapsed = option[:, option_layout.age] + 1.0
@@ -1001,7 +1062,9 @@ def advance_topological_manager(
                 continue
             if expired[row]:
                 option[row, option_layout.option_expired] = 1.0
-                option[row, option_layout.completion_elapsed] = -elapsed[row] if row_mode == MODE_EXPLORE else elapsed[row]
+                option[row, option_layout.completion_elapsed] = (
+                    -elapsed[row] if row_mode == MODE_EXPLORE else elapsed[row]
+                )
                 if row_mode in (MODE_RETURN, MODE_VALIDATE):
                     topo[row, topo_layout.validation_timeout] = 1.0
                     topo[row, topo_layout.validation_defer_countdown] = float(exploration_horizon)

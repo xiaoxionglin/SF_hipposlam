@@ -396,6 +396,10 @@ def write_intrmotiv_summaries(runner, msg, policy_id):
         if source_key in train_stats:
             writer.add_scalar(summary_tag, train_stats[source_key], env_steps)
 
+    for source_key in tuple(train_stats):
+        if source_key.startswith("controller/"):
+            writer.add_scalar("intrmotiv/" + source_key, train_stats.pop(source_key), env_steps)
+
     for source_key in INTRMOTIV_SUMMARY_TAGS:
         train_stats.pop(source_key, None)
 

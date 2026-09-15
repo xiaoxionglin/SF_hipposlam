@@ -1,5 +1,11 @@
 import torch
-from intrmotiv_transfer.contextual_dg import (ContextualDGFeedback, DGTransitionPredictor, build_transition_prediction_batch, transition_prediction_losses)
+from intrmotiv_transfer.contextual_dg import (
+    ContextualDGFeedback,
+    DGTransitionPredictor,
+    build_transition_prediction_batch,
+    transition_prediction_losses,
+)
+
 
 def test_feedback_zero_initialization_matches_visual_baseline():
     visual = torch.tensor([[3.0, 2.2, -1.0]])

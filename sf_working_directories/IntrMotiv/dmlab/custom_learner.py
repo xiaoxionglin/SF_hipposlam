@@ -121,8 +121,16 @@ def dg_gradient_interaction_stats(decoder_loss: Tensor, encoder_loss: Tensor, pr
             "cosine": zero,
             "row_conflict_fraction": zero,
         }
-    decoder_grads = torch.autograd.grad(decoder_loss, parameters, retain_graph=True, allow_unused=True)
-    encoder_grads = torch.autograd.grad(encoder_loss, parameters, retain_graph=True, allow_unused=True)
+    decoder_grads = (
+        torch.autograd.grad(decoder_loss, parameters, retain_graph=True, allow_unused=True)
+        if decoder_loss.requires_grad
+        else (None,) * len(parameters)
+    )
+    encoder_grads = (
+        torch.autograd.grad(encoder_loss, parameters, retain_graph=True, allow_unused=True)
+        if encoder_loss.requires_grad
+        else (None,) * len(parameters)
+    )
     ppo_sq = zero.clone()
     encoder_sq = zero.clone()
     dot = zero.clone()
@@ -589,6 +597,32 @@ def target_reward_magnitude(
     return reward
 
 
+def worker_reward_from_magnitude(
+    reward, hit, *, control_outcome="target_hit", wrong_outcome=None, n_targets=None, command_set_size=None
+):
+    worker_reward = hit * reward
+    if control_outcome == "first_distinct":
+        if wrong_outcome is None:
+            raise ValueError("first_distinct reward requires wrong_outcome")
+        wrong = wrong_outcome.to(dtype=reward.dtype)
+        if wrong.shape != worker_reward.shape:
+            raise ValueError("Wrong-outcome mask must align with worker reward transitions")
+        if command_set_size is None:
+            if n_targets is None or int(n_targets) <= 2:
+                raise ValueError("first_distinct reward requires n_targets > 2 or command_set_size")
+            # One source is excluded, leaving n_targets - 1 possible commands;
+            # for a fixed in-set outcome, n_targets - 2 commands are wrong.
+            wrong_denominator = float(int(n_targets) - 2)
+        else:
+            if command_set_size.shape != worker_reward.shape:
+                raise ValueError("Command-set size must align with worker reward transitions")
+            wrong_denominator = (command_set_size.to(reward.dtype) - 1.0).clamp_min(1.0)
+        worker_reward = worker_reward - wrong * reward / wrong_denominator
+    elif control_outcome != "target_hit":
+        raise ValueError(f"Unknown HRL control outcome: {control_outcome}")
+    return worker_reward
+
+
 def target_success_worker_reward(
     internal_reward: Tensor,
     target_hit: Tensor,
@@ -607,26 +641,14 @@ def target_success_worker_reward(
 ) -> Tensor:
     hit = target_hit[:, 2:].to(dtype=internal_reward.dtype)
     reward = target_reward_magnitude(internal_reward, baseline, reward_scale, mode, hit_reward, distance_bonus_coeff)
-    worker_reward = hit * reward
-    if control_outcome == "first_distinct":
-        if wrong_outcome is None:
-            raise ValueError("first_distinct reward requires wrong_outcome")
-        wrong = wrong_outcome.to(dtype=internal_reward.dtype)
-        if wrong.shape != worker_reward.shape:
-            raise ValueError("Wrong-outcome mask must align with worker reward transitions")
-        if command_set_size is None:
-            if n_targets is None or int(n_targets) <= 2:
-                raise ValueError("first_distinct reward requires n_targets > 2 or command_set_size")
-            # One source is excluded, leaving n_targets - 1 possible commands;
-            # for a fixed in-set outcome, n_targets - 2 commands are wrong.
-            wrong_denominator = float(int(n_targets) - 2)
-        else:
-            if command_set_size.shape != worker_reward.shape:
-                raise ValueError("Command-set size must align with worker reward transitions")
-            wrong_denominator = (command_set_size.to(reward.dtype) - 1.0).clamp_min(1.0)
-        worker_reward = worker_reward - wrong * reward / wrong_denominator
-    elif control_outcome != "target_hit":
-        raise ValueError(f"Unknown HRL control outcome: {control_outcome}")
+    worker_reward = worker_reward_from_magnitude(
+        reward,
+        hit,
+        control_outcome=control_outcome,
+        wrong_outcome=wrong_outcome,
+        n_targets=n_targets,
+        command_set_size=command_set_size,
+    )
     if exploration_mode is None:
         return worker_reward
     if exploration_reward is None:
@@ -734,7 +756,13 @@ class BaseDistanceRecorder(BaseLearner):
                 self.cfg, self.env_info, self.policy_id, self.env_steps, getattr(self, "actor_critic", None)
             )
         valids = (buff["policy_id"] == self.policy_id) & (
-            self.train_step - buff["policy_version"] < self.cfg.max_policy_lag
+            self.train_step
+            - (
+                buff["controller_fresh_version"].squeeze(-1)
+                if "controller_fresh_version" in buff
+                else buff["policy_version"]
+            )
+            < self.cfg.max_policy_lag
         )
         self._online_spatial.append_batch(buff, valids)
 
@@ -1227,7 +1255,7 @@ class BaseDistanceRecorder(BaseLearner):
             torch.cat(
                 (
                     (sequence_core != 0).to(dtype=torch.int),
-                    torch.ones(sequence_core.shape[:-1] + (1,), dtype=torch.int),
+                    torch.ones(sequence_core.shape[:-1] + (1,), dtype=torch.int, device=sequence_core.device),
                 ),
                 dim=-1,
             ),
@@ -2325,7 +2353,15 @@ class DoubleDistanceLearnerReward(BaseDistanceRecorder):
             valids: Tensor = buff["policy_id"] == self.policy_id
             # ignore experience that was older than the threshold even before training started
             curr_policy_version: int = self.train_step
-            buff["valids"][:, :-1] = valids & (curr_policy_version - buff["policy_version"] < self.cfg.max_policy_lag)
+            buff["valids"][:, :-1] = valids & (
+                curr_policy_version
+                - (
+                    buff["controller_fresh_version"].squeeze(-1)
+                    if "controller_fresh_version" in buff
+                    else buff["policy_version"]
+                )
+                < self.cfg.max_policy_lag
+            )
             # for last T+1 step, we want to use the validity of the previous step
             buff["valids"][:, -1] = buff["valids"][:, -2]
             # log.info(f'RNN_states Shape: {buff["rnn_states"].shape}')
@@ -3247,23 +3283,181 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         else:
             return 0
 
-    def _calculate_losses(
-        self, mb: AttrDict, num_invalids: int, iterative_phase: str, *, record_goal_diagnostics: bool = True
-    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
-        additional_stats = AttrDict()
-        with torch.no_grad(), self.timing.add_time("losses_init"):
-            recurrence: int = self.cfg.recurrence
+    def _calculate_fresh_encoder_loss(self, outputs, mb, valids, num_invalids, recurrence, additional_stats):
+        """Original real-rollout DG objective, independent of controller losses.
 
-            # PPO clipping
-            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
-            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
-            clip_ratio_low = 1.0 / clip_ratio_high
-            clip_value = self.cfg.ppo_clip_value
+        The caller owns the single fresh forward and optimizer schedule. Replay
+        must never call this method or use it to update normalization statistics.
+        """
+        n_dg = int(self.cfg.Hippo_n_feature)
+        expanded = int(self.cfg.Hippo_R) + int(self.cfg.Hippo_L) - 1
+        learner_dg = outputs.core_outputs[:, : n_dg * expanded].view(-1, n_dg, expanded)[:, :, 0]
+        with self.timing.add_time("encoder_losses"):
+            learner_active = outputs.head_outputs[:, : int(self.cfg.Hippo_n_feature)] > 0
+            scheduled_credit_mask = mb["encoder_credit_activation_mask"].bool()
+            applied_credit_mask = scheduled_credit_mask & learner_active
+            reward_by_row = mb["rewards_encoder"]
+            if reward_by_row.ndim == 1:
+                reward_by_row = reward_by_row.unsqueeze(1).expand_as(applied_credit_mask)
+            scheduled_reward_mass = (reward_by_row * scheduled_credit_mask).sum()
+            applied_reward_mass = (reward_by_row * applied_credit_mask).sum()
+            scheduled_credit_count = scheduled_credit_mask.sum()
+            applied_credit_count = applied_credit_mask.sum()
+            additional_stats["encoder_credit_scheduled_count"] = scheduled_credit_count.detach().float()
+            additional_stats["encoder_credit_applied_count"] = applied_credit_count.detach().float()
+            additional_stats["encoder_credit_scheduled_mass"] = scheduled_reward_mass.detach().float()
+            additional_stats["encoder_credit_applied_mass"] = applied_reward_mass.detach().float()
+            additional_stats["encoder_credit_replay_match"] = (
+                applied_credit_count.float() / scheduled_credit_count.clamp_min(1).float()
+            ).detach()
+            # noinspection PyTypeChecker
+            encoder_loss = self._encoder_loss(
+                outputs.head_outputs,
+                mb["rewards_encoder"],
+                applied_credit_mask,
+                valids,
+                num_invalids,
+            )
+            encoder_credit_loss = encoder_loss
+            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
 
-            valids = mb.valids
-            if int(valids.sum().item()) < 2:
-                raise RuntimeError("Learner update invariant violated: fewer than two valid decisions reached PPO")
+            if self.cfg.extra_encoder_losses:
+                (
+                    encoder_penalty_loss,
+                    encoder_reward_loss,
+                    encoder_batch_loss,
+                    encoder_batch_unused_count,
+                ) = self._extra_encoder_loss(
+                    outputs.head_outputs,
+                    mb["rnn_states"].detach(),
+                    mb["encoder_dominant_activation_mask"],
+                    mb["encoder_non_dominant_activation_mask"],
+                    outputs.minibatch_size,
+                    valids,
+                    num_invalids,
+                )
+                encoder_loss += encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
+            else:
+                encoder_loss += l1_loss
+                encoder_batch_unused_count = outputs.head_outputs.sum() * 0.0
+                encoder_penalty_loss = encoder_reward_loss = encoder_batch_loss = encoder_batch_unused_count
+            population_loss, usage_loss, density_loss, collision_loss = self._population_usage_loss(
+                outputs.head_outputs
+            )
+            (
+                global_punishment_loss,
+                row_repulsion_loss,
+                temporal_exclusion_loss,
+                path_scatter_loss,
+                dg_regularizer_stats,
+            ) = self._anti_collapse_losses(
+                outputs.head_outputs,
+                mb["rnn_states"],
+                mb["encoder_dominant_activation_mask"],
+                valids,
+                num_invalids,
+            )
+            encoder_loss += (
+                population_loss
+                + global_punishment_loss
+                + row_repulsion_loss
+                + temporal_exclusion_loss
+                + path_scatter_loss
+            )
+            transition_mode = getattr(self.cfg, "dg_transition_prediction", "none")
+            transition_loss = encoder_loss * 0.0
+            transition_stats = {
+                "main_loss": transition_loss.detach(),
+                "control_loss": transition_loss.detach(),
+                "validation_main_ce": transition_loss.detach(),
+                "validation_control_ce": transition_loss.detach(),
+                "validation_state_gain": transition_loss.detach(),
+                "validation_accuracy": transition_loss.detach(),
+                "validation_count": transition_loss.detach(),
+            }
+            scheduled_prediction = transition_loss.detach()
+            applied_prediction = transition_loss.detach()
+            boundary_prediction = transition_loss.detach()
+            predictor = getattr(self.actor_critic, "dg_transition_predictor", None)
+            if transition_mode != "none":
+                if predictor is None:
+                    raise RuntimeError("DG transition prediction is enabled without a predictor")
+                prediction_batch = build_transition_prediction_batch(
+                    learner_dg,
+                    mb["hrl_control_completed"],
+                    mb["hrl_control_target_timeout"],
+                    mb["hrl_control_source"],
+                    mb["hrl_control_command_target"],
+                    mb["hrl_control_outcome_id"],
+                    mb["hrl_control_elapsed"],
+                    valids,
+                    recurrence,
+                    n_dg,
+                )
+                transition_loss, transition_stats = transition_prediction_losses(predictor, prediction_batch)
+                scheduled_prediction = prediction_batch.scheduled_count.detach().float()
+                applied_prediction = prediction_batch.applied_count.detach().float()
+                boundary_prediction = prediction_batch.boundary_drop_count.detach().float()
+                encoder_loss = (
+                    encoder_loss + float(getattr(self.cfg, "dg_transition_prediction_coeff", 0.1)) * transition_loss
+                )
+            encoder_loss *= self.cfg.encoder_grad_coeff
+            additional_stats["encoder_loss"] = encoder_loss
+            additional_stats["dg_transition_prediction_loss"] = transition_loss.detach()
+            additional_stats["dg_transition_prediction_main_loss"] = transition_stats["main_loss"]
+            additional_stats["dg_transition_prediction_control_loss"] = transition_stats["control_loss"]
+            additional_stats["dg_transition_prediction_validation_main_ce"] = transition_stats["validation_main_ce"]
+            additional_stats["dg_transition_prediction_validation_control_ce"] = transition_stats[
+                "validation_control_ce"
+            ]
+            additional_stats["dg_transition_prediction_validation_state_gain"] = transition_stats[
+                "validation_state_gain"
+            ]
+            additional_stats["dg_transition_prediction_validation_accuracy"] = transition_stats["validation_accuracy"]
+            additional_stats["dg_transition_prediction_validation_count"] = transition_stats["validation_count"]
+            additional_stats["dg_transition_prediction_scheduled_count"] = scheduled_prediction
+            additional_stats["dg_transition_prediction_applied_count"] = applied_prediction
+            additional_stats["dg_transition_prediction_boundary_drop_count"] = boundary_prediction
+            additional_stats["dg_transition_prediction_replay_match"] = applied_prediction / (
+                scheduled_prediction - boundary_prediction
+            ).clamp_min(1.0)
+            gradient_zero = encoder_loss.detach().new_zeros(())
+            additional_stats["dg_ppo_gradient_norm"] = gradient_zero
+            additional_stats["dg_encoder_gradient_norm"] = gradient_zero
+            additional_stats["dg_gradient_norm_ratio"] = gradient_zero
+            additional_stats["dg_gradient_cosine"] = gradient_zero
+            additional_stats["dg_gradient_row_conflict_fraction"] = gradient_zero
+            zero_credit = encoder_loss.detach() * 0.0
+            if getattr(self.cfg, "encoder_reward_recipient", "arrival") == "source":
+                additional_stats["encoder_source_credit_loss"] = encoder_credit_loss.detach()
+                additional_stats["encoder_arrival_credit_loss"] = zero_credit
+            else:
+                additional_stats["encoder_arrival_credit_loss"] = encoder_credit_loss.detach()
+                additional_stats["encoder_source_credit_loss"] = zero_credit
+            additional_stats["intrinsic_rewards"] = mb["rewards"]
+            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
+            additional_stats["encoder_reward_loss"] = encoder_reward_loss
+            additional_stats["batch_reward_loss"] = encoder_batch_loss
+            additional_stats["encoder_batch_unused_count"] = encoder_batch_unused_count
+            additional_stats["encoder_population_loss"] = population_loss
+            additional_stats["encoder_usage_loss"] = usage_loss
+            additional_stats["encoder_density_loss"] = density_loss
+            additional_stats["encoder_collision_loss"] = collision_loss
+            additional_stats["encoder_global_punishment_loss"] = global_punishment_loss
+            additional_stats["encoder_row_repulsion_loss"] = row_repulsion_loss
+            additional_stats["encoder_ca3_temporal_exclusion_loss"] = temporal_exclusion_loss
+            additional_stats["encoder_path_scatter_loss"] = path_scatter_loss
+            additional_stats["dg_pre_threshold_mean"] = dg_regularizer_stats[0]
+            additional_stats["dg_pre_threshold_above_fraction"] = dg_regularizer_stats[1]
+            additional_stats["dg_ca3_conflict_fraction"] = dg_regularizer_stats[2]
+            additional_stats["dg_ca3_conflicting_activation_fraction"] = dg_regularizer_stats[3]
+            additional_stats["dg_ca3_conflict_activity"] = dg_regularizer_stats[4]
+            additional_stats["dg_path_scatter_conflict_fraction"] = dg_regularizer_stats[5]
 
+        return encoder_loss
+
+    def _forward_fresh_dg(self, mb, recurrence, valids, iterative_phase, additional_stats):
+        """The parent's one fresh forward and its original DG diagnostics."""
         projection = self.actor_critic.encoder.DG_projection
         update_running_stats = iterative_phase in (SIMULTANEOUS, ENCODER) and not bool(
             getattr(self.cfg, "transfer_freeze_dg", False)
@@ -3321,6 +3515,62 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             additional_stats["dg_normalized_logit_variance_error"] = zero
 
         additional_stats["Head Output"] = outputs.head_outputs[:, : getattr(self.cfg, "Hippo_n_feature", 64)]
+
+        return outputs
+
+    def _record_goal_condition_diagnostics(self, outputs, mb, additional_stats):
+        with torch.no_grad():
+            if self._uses_policy_graph():
+                behavior_target = self._behavior_targets_from_states(mb.rnn_states)
+                alternate_target = behavior_target.roll(1, dims=0)
+                alternate = self.actor_critic.forward_tail(
+                    self._with_worker_target(outputs.core_outputs.detach(), alternate_target),
+                    values_only=False,
+                    sample_actions=False,
+                )
+                goal_valid = behavior_target.sum(dim=-1).gt(0)
+                action_delta = (
+                    (outputs.result["action_logits"].detach() - alternate["action_logits"]).abs().mean(dim=-1)
+                )
+                action_probability_tv = categorical_action_total_variation(
+                    outputs.result["action_logits"].detach(), alternate["action_logits"]
+                )
+                value_delta = (outputs.result["values"].detach() - alternate["values"]).abs()
+                additional_stats["goal_condition_target_valid_fraction"] = goal_valid.float().mean()
+                additional_stats["goal_condition_action_sensitivity"] = (
+                    action_delta[goal_valid].mean() if goal_valid.any() else action_delta.sum() * 0.0
+                )
+                additional_stats["goal_condition_action_probability_tv"] = (
+                    action_probability_tv[goal_valid].mean() if goal_valid.any() else action_probability_tv.sum() * 0.0
+                )
+                additional_stats["goal_condition_value_span"] = (
+                    value_delta[goal_valid].mean() if goal_valid.any() else value_delta.sum() * 0.0
+                )
+            else:
+                goal_zero = outputs.core_outputs.detach().sum() * 0.0
+                additional_stats["goal_condition_target_valid_fraction"] = goal_zero
+                additional_stats["goal_condition_action_sensitivity"] = goal_zero
+                additional_stats["goal_condition_action_probability_tv"] = goal_zero
+                additional_stats["goal_condition_value_span"] = goal_zero
+
+    def _calculate_losses(
+        self, mb: AttrDict, num_invalids: int, iterative_phase: str, *, record_goal_diagnostics: bool = True
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+        additional_stats = AttrDict()
+        with torch.no_grad(), self.timing.add_time("losses_init"):
+            recurrence: int = self.cfg.recurrence
+
+            # PPO clipping
+            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
+            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
+            clip_ratio_low = 1.0 / clip_ratio_high
+            clip_value = self.cfg.ppo_clip_value
+
+            valids = mb.valids
+            if int(valids.sum().item()) < 2:
+                raise RuntimeError("Learner update invariant violated: fewer than two valid decisions reached PPO")
+
+        outputs = self._forward_fresh_dg(mb, recurrence, valids, iterative_phase, additional_stats)
 
         with self.timing.add_time("post_forward"):
             action_distribution = self.actor_critic.action_distribution()
@@ -3434,206 +3684,15 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             additional_stats["empirical_her_valid_fraction"] = empirical_her_valid_fraction
             # Evaluate the alternate target only when this minibatch will be summarized.
             if record_goal_diagnostics:
-                with torch.no_grad():
-                    if self._uses_policy_graph():
-                        behavior_target = self._behavior_targets_from_states(mb.rnn_states)
-                        alternate_target = behavior_target.roll(1, dims=0)
-                        alternate = self.actor_critic.forward_tail(
-                            self._with_worker_target(outputs.core_outputs.detach(), alternate_target),
-                            values_only=False,
-                            sample_actions=False,
-                        )
-                        goal_valid = behavior_target.sum(dim=-1).gt(0)
-                        action_delta = (
-                            (outputs.result["action_logits"].detach() - alternate["action_logits"]).abs().mean(dim=-1)
-                        )
-                        action_probability_tv = categorical_action_total_variation(
-                            outputs.result["action_logits"].detach(), alternate["action_logits"]
-                        )
-                        value_delta = (outputs.result["values"].detach() - alternate["values"]).abs()
-                        additional_stats["goal_condition_target_valid_fraction"] = goal_valid.float().mean()
-                        additional_stats["goal_condition_action_sensitivity"] = (
-                            action_delta[goal_valid].mean() if goal_valid.any() else action_delta.sum() * 0.0
-                        )
-                        additional_stats["goal_condition_action_probability_tv"] = (
-                            action_probability_tv[goal_valid].mean()
-                            if goal_valid.any()
-                            else action_probability_tv.sum() * 0.0
-                        )
-                        additional_stats["goal_condition_value_span"] = (
-                            value_delta[goal_valid].mean() if goal_valid.any() else value_delta.sum() * 0.0
-                        )
-                    else:
-                        goal_zero = outputs.core_outputs.detach().sum() * 0.0
-                        additional_stats["goal_condition_target_valid_fraction"] = goal_zero
-                        additional_stats["goal_condition_action_sensitivity"] = goal_zero
-                        additional_stats["goal_condition_action_probability_tv"] = goal_zero
-                        additional_stats["goal_condition_value_span"] = goal_zero
+                self._record_goal_condition_diagnostics(outputs, mb, additional_stats)
 
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
 
-        with self.timing.add_time("encoder_losses"):
-            learner_active = outputs.head_outputs[:, : int(self.cfg.Hippo_n_feature)] > 0
-            scheduled_credit_mask = mb["encoder_credit_activation_mask"].bool()
-            applied_credit_mask = scheduled_credit_mask & learner_active
-            reward_by_row = mb["rewards_encoder"]
-            if reward_by_row.ndim == 1:
-                reward_by_row = reward_by_row.unsqueeze(1).expand_as(applied_credit_mask)
-            scheduled_reward_mass = (reward_by_row * scheduled_credit_mask).sum()
-            applied_reward_mass = (reward_by_row * applied_credit_mask).sum()
-            scheduled_credit_count = scheduled_credit_mask.sum()
-            applied_credit_count = applied_credit_mask.sum()
-            additional_stats["encoder_credit_scheduled_count"] = scheduled_credit_count.detach().float()
-            additional_stats["encoder_credit_applied_count"] = applied_credit_count.detach().float()
-            additional_stats["encoder_credit_scheduled_mass"] = scheduled_reward_mass.detach().float()
-            additional_stats["encoder_credit_applied_mass"] = applied_reward_mass.detach().float()
-            additional_stats["encoder_credit_replay_match"] = (
-                applied_credit_count.float() / scheduled_credit_count.clamp_min(1).float()
-            ).detach()
-            # noinspection PyTypeChecker
-            encoder_loss = self._encoder_loss(
-                outputs.head_outputs,
-                mb["rewards_encoder"],
-                applied_credit_mask,
-                valids,
-                num_invalids,
-            )
-            encoder_credit_loss = encoder_loss
-            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
-
-            if self.cfg.extra_encoder_losses:
-                (
-                    encoder_penalty_loss,
-                    encoder_reward_loss,
-                    encoder_batch_loss,
-                    encoder_batch_unused_count,
-                ) = self._extra_encoder_loss(
-                    outputs.head_outputs,
-                    mb["rnn_states"].detach(),
-                    mb["encoder_dominant_activation_mask"],
-                    mb["encoder_non_dominant_activation_mask"],
-                    outputs.minibatch_size,
-                    valids,
-                    num_invalids,
-                )
-                encoder_loss += encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
-            else:
-                encoder_loss += l1_loss
-                encoder_batch_unused_count = outputs.head_outputs.sum() * 0.0
-            population_loss, usage_loss, density_loss, collision_loss = self._population_usage_loss(
-                outputs.head_outputs
-            )
-            (
-                global_punishment_loss,
-                row_repulsion_loss,
-                temporal_exclusion_loss,
-                path_scatter_loss,
-                dg_regularizer_stats,
-            ) = self._anti_collapse_losses(
-                outputs.head_outputs,
-                mb["rnn_states"],
-                mb["encoder_dominant_activation_mask"],
-                valids,
-                num_invalids,
-            )
-            encoder_loss += (
-                population_loss
-                + global_punishment_loss
-                + row_repulsion_loss
-                + temporal_exclusion_loss
-                + path_scatter_loss
-            )
-            transition_mode = getattr(self.cfg, "dg_transition_prediction", "none")
-            transition_loss = encoder_loss * 0.0
-            transition_stats = {
-                "main_loss": transition_loss.detach(),
-                "control_loss": transition_loss.detach(),
-                "validation_main_ce": transition_loss.detach(),
-                "validation_control_ce": transition_loss.detach(),
-                "validation_state_gain": transition_loss.detach(),
-                "validation_accuracy": transition_loss.detach(),
-                "validation_count": transition_loss.detach(),
-            }
-            scheduled_prediction = transition_loss.detach()
-            applied_prediction = transition_loss.detach()
-            boundary_prediction = transition_loss.detach()
-            predictor = getattr(self.actor_critic, "dg_transition_predictor", None)
-            if transition_mode != "none":
-                if predictor is None:
-                    raise RuntimeError("DG transition prediction is enabled without a predictor")
-                prediction_batch = build_transition_prediction_batch(
-                    learner_dg,
-                    mb["hrl_control_completed"],
-                    mb["hrl_control_target_timeout"],
-                    mb["hrl_control_source"],
-                    mb["hrl_control_command_target"],
-                    mb["hrl_control_outcome_id"],
-                    mb["hrl_control_elapsed"],
-                    valids,
-                    recurrence,
-                    n_dg,
-                )
-                transition_loss, transition_stats = transition_prediction_losses(predictor, prediction_batch)
-                scheduled_prediction = prediction_batch.scheduled_count.detach().float()
-                applied_prediction = prediction_batch.applied_count.detach().float()
-                boundary_prediction = prediction_batch.boundary_drop_count.detach().float()
-                encoder_loss = (
-                    encoder_loss + float(getattr(self.cfg, "dg_transition_prediction_coeff", 0.1)) * transition_loss
-                )
-            encoder_loss *= self.cfg.encoder_grad_coeff
-            additional_stats["encoder_loss"] = encoder_loss
-            additional_stats["dg_transition_prediction_loss"] = transition_loss.detach()
-            additional_stats["dg_transition_prediction_main_loss"] = transition_stats["main_loss"]
-            additional_stats["dg_transition_prediction_control_loss"] = transition_stats["control_loss"]
-            additional_stats["dg_transition_prediction_validation_main_ce"] = transition_stats["validation_main_ce"]
-            additional_stats["dg_transition_prediction_validation_control_ce"] = transition_stats[
-                "validation_control_ce"
-            ]
-            additional_stats["dg_transition_prediction_validation_state_gain"] = transition_stats[
-                "validation_state_gain"
-            ]
-            additional_stats["dg_transition_prediction_validation_accuracy"] = transition_stats["validation_accuracy"]
-            additional_stats["dg_transition_prediction_validation_count"] = transition_stats["validation_count"]
-            additional_stats["dg_transition_prediction_scheduled_count"] = scheduled_prediction
-            additional_stats["dg_transition_prediction_applied_count"] = applied_prediction
-            additional_stats["dg_transition_prediction_boundary_drop_count"] = boundary_prediction
-            additional_stats["dg_transition_prediction_replay_match"] = applied_prediction / (
-                scheduled_prediction - boundary_prediction
-            ).clamp_min(1.0)
-            gradient_zero = encoder_loss.detach().new_zeros(())
-            additional_stats["dg_ppo_gradient_norm"] = gradient_zero
-            additional_stats["dg_encoder_gradient_norm"] = gradient_zero
-            additional_stats["dg_gradient_norm_ratio"] = gradient_zero
-            additional_stats["dg_gradient_cosine"] = gradient_zero
-            additional_stats["dg_gradient_row_conflict_fraction"] = gradient_zero
-            zero_credit = encoder_loss.detach() * 0.0
-            if getattr(self.cfg, "encoder_reward_recipient", "arrival") == "source":
-                additional_stats["encoder_source_credit_loss"] = encoder_credit_loss.detach()
-                additional_stats["encoder_arrival_credit_loss"] = zero_credit
-            else:
-                additional_stats["encoder_arrival_credit_loss"] = encoder_credit_loss.detach()
-                additional_stats["encoder_source_credit_loss"] = zero_credit
-            additional_stats["intrinsic_rewards"] = mb["rewards"]
-            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
-            additional_stats["encoder_reward_loss"] = encoder_reward_loss
-            additional_stats["batch_reward_loss"] = encoder_batch_loss
-            additional_stats["encoder_batch_unused_count"] = encoder_batch_unused_count
-            additional_stats["encoder_population_loss"] = population_loss
-            additional_stats["encoder_usage_loss"] = usage_loss
-            additional_stats["encoder_density_loss"] = density_loss
-            additional_stats["encoder_collision_loss"] = collision_loss
-            additional_stats["encoder_global_punishment_loss"] = global_punishment_loss
-            additional_stats["encoder_row_repulsion_loss"] = row_repulsion_loss
-            additional_stats["encoder_ca3_temporal_exclusion_loss"] = temporal_exclusion_loss
-            additional_stats["encoder_path_scatter_loss"] = path_scatter_loss
-            additional_stats["dg_pre_threshold_mean"] = dg_regularizer_stats[0]
-            additional_stats["dg_pre_threshold_above_fraction"] = dg_regularizer_stats[1]
-            additional_stats["dg_ca3_conflict_fraction"] = dg_regularizer_stats[2]
-            additional_stats["dg_ca3_conflicting_activation_fraction"] = dg_regularizer_stats[3]
-            additional_stats["dg_ca3_conflict_activity"] = dg_regularizer_stats[4]
-            additional_stats["dg_path_scatter_conflict_fraction"] = dg_regularizer_stats[5]
+        encoder_loss = self._calculate_fresh_encoder_loss(
+            outputs, mb, valids, num_invalids, recurrence, additional_stats
+        )
 
         loss_summaries = dict(
             ratio=ratio,
@@ -3947,7 +4006,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             non_dominant_activations,
         )
 
-    def _calculate_internal_reward(self, buff, additional_step):
+    def _calculate_reward_components(self, buff, additional_step):
         buff["rewards_external"] = buff["rewards"].clone()
         (
             internal_reward,
@@ -4041,6 +4100,19 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             if command_set_size is not None:
                 buff["hrl_control_command_set_size"] = command_set_size
         buff["rewards"] = decoder_reward
+        return (
+            baseline,
+            encoder_reward,
+            progression,
+            candidate_activations,
+            dominant_activations,
+            non_dominant_activations,
+        )
+
+    def _calculate_internal_reward(self, buff, additional_step):
+        baseline, encoder_reward, progression, candidate_activations, dominant_activations, non_dominant_activations = (
+            self._calculate_reward_components(buff, additional_step)
+        )
         dominant_rollout = dominant_activations[:, 1:-1]
         credit_mask = dominant_rollout
         if bool(getattr(self.cfg, "encoder_reward_require_local_predecessor", False)):
@@ -4077,7 +4149,15 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             valids: Tensor = buff["policy_id"] == self.policy_id
             # ignore experience that was older than the threshold even before training started
             curr_policy_version: int = self.train_step
-            buff["valids"][:, :-1] = valids & (curr_policy_version - buff["policy_version"] < self.cfg.max_policy_lag)
+            buff["valids"][:, :-1] = valids & (
+                curr_policy_version
+                - (
+                    buff["controller_fresh_version"].squeeze(-1)
+                    if "controller_fresh_version" in buff
+                    else buff["policy_version"]
+                )
+                < self.cfg.max_policy_lag
+            )
             eligible_before_generation = buff["valids"][:, :-1].clone()
             generation_matches = self._current_generation_mask(buff["rnn_states"][:, :-1])
             generation_valids, stale_rollouts = complete_rollout_generation_mask(
@@ -4152,7 +4232,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
             self._calculate_internal_reward(buff, additional_step)
 
-            if self.cfg.normalize_returns:
+            if self.cfg.normalize_returns and getattr(self.cfg, "controller_learning", "ppo") != "ddqn":
                 # Since our value targets are normalized, the values will also have normalized statistics.
                 # We need to denormalize them before using them for GAE caculation and value bootstrapping.
                 # rl_games PPO uses a similar approach, see:
@@ -4200,7 +4280,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             buff["rewards_cpu"] = buff["rewards"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
 
             # return normalization parameters are only used on the learner, no need to lock the mutex
-            if self.cfg.normalize_returns:
+            if self.cfg.normalize_returns and getattr(self.cfg, "controller_learning", "ppo") != "ddqn":
                 self.actor_critic.returns_normalizer(buff["returns"])  # in-place
 
             num_invalids = dataset_size - buff["valids"].sum().item()
@@ -4217,6 +4297,17 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
             return buff, dataset_size, num_invalids
+
+    def _record_goal_modulation_summaries(self, stats):
+        dg_modulation = getattr(self.actor_critic.core, "dg_goal_modulation", None)
+        if dg_modulation is not None:
+            stats["dg_goal_modulation_norm"] = dg_modulation.detach().norm().float()
+            grad = dg_modulation.grad
+            stats["dg_goal_modulation_gradient_norm"] = grad.norm().detach().float() if grad is not None else 0.0
+            for goal_id in range(int(self.cfg.Hippo_n_feature)):
+                stats[f"dg_goal_gradient_{goal_id:03d}"] = (
+                    grad[goal_id].norm().detach().float() if grad is not None else 0.0
+                )
 
     def _record_summaries(self, train_loop_vars):
         var = train_loop_vars  # TODO: Think of a better way, why is this necessary? Just redirecting pointer?
@@ -4938,15 +5029,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.dg_recruitment_goal_adapter_reset_count = float(self._last_recruitment_stats["goal_adapter_reset_count"])
         stats.dg_recruitment_goal_adapter_reset_total = float(self._goal_adapter_reset_count)
         decoder = self.actor_critic.decoder
-        dg_modulation = getattr(self.actor_critic.core, "dg_goal_modulation", None)
-        if dg_modulation is not None:
-            stats.dg_goal_modulation_norm = dg_modulation.detach().norm().float()
-            grad = dg_modulation.grad
-            stats.dg_goal_modulation_gradient_norm = grad.norm().detach().float() if grad is not None else 0.0
-            for goal_id in range(int(self.cfg.Hippo_n_feature)):
-                stats[f"dg_goal_gradient_{goal_id:03d}"] = (
-                    grad[goal_id].norm().detach().float() if grad is not None else 0.0
-                )
+        self._record_goal_modulation_summaries(stats)
         if self._uses_policy_graph():
             goals = self._behavior_targets_from_states(var.mb.rnn_states).detach()
             decision_counts = (goals * var.mb.valids.unsqueeze(-1)).sum(0)
@@ -5016,6 +5099,21 @@ class OnlineSpatialDefaultLearner(DefaultLearner):
 def make_hipposlam_learner(
     cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer
 ) -> BaseLearner:
+    if getattr(cfg, "controller_learning", "ppo") != "ppo":
+        # Stored-state production passed all six fresh and real-restart gates.
+        # Keep unreleased reconstruction behind its original guard.
+        if (
+            not getattr(cfg, "controller_preflight", False)
+            and getattr(cfg, "controller_replay_state", "reconstruct") != "stored"
+        ):
+            raise RuntimeError("Full-system production remains guarded until all six 2M-frame preflights pass")
+        from .controller_learner import ControllerLearner
+        from .controller_transport import validate_controller_config
+
+        validate_controller_config(cfg)
+        return ControllerLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+    if bool(getattr(cfg, "controller_her", False)):
+        raise ValueError("controller_her requires the separate off-policy auxiliary learner")
     if cfg.distance_learning:
         if cfg.double_value:
             return DoubleDistanceLearnerReward(cfg, env_info, policy_versions_tensor, policy_id, param_server)

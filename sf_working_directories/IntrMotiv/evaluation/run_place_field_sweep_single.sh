@@ -93,13 +93,31 @@ export DMLAB_CACHE_DIR=$output_dir/dmlab_cache
 export XDG_CACHE_HOME=$output_dir/cache
 export WANDB_DIR=$output_dir/wandb
 export WANDB_MODE=disabled
+export TORCH_HOME="$workspace_root/IntrMotiv/SF_hipposlam/runtime/cache/torch"
 require_workspace_path "$TMPDIR" "TMPDIR"
 require_workspace_path "$DMLAB_CACHE_DIR" "DMLab cache"
 require_workspace_path "$XDG_CACHE_HOME" "XDG cache"
 require_workspace_path "$WANDB_DIR" "W&B directory"
+require_workspace_path "$TORCH_HOME" "Fixed pretrained-model cache"
 mkdir -p "$output_dir/raw" "$output_dir/slurm" "$TMPDIR" "$DMLAB_CACHE_DIR" "$XDG_CACHE_HOME" "$WANDB_DIR"
 
-cd /home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam
+# sbatch executes a spool copy: BASH_SOURCE alone cannot locate the checkout.
+runtime_source=${INTRMOTIV_RUNTIME_SOURCE:-${SLURM_SUBMIT_DIR:-}}
+if [[ -z $runtime_source ]]; then
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  runtime_source=$(cd "$script_dir/../../.." && pwd)
+fi
+if [[ ! -f $runtime_source/sf_working_directories/IntrMotiv/evaluation/place_fields.py ]]; then
+  echo "Invalid IntrMotiv evaluator source: $runtime_source" >&2
+  exit 2
+fi
+cd "$runtime_source"
+# A direct Python script otherwise resolves an older editable installation.
+export PYTHONPATH="$runtime_source${PYTHONPATH:+:$PYTHONPATH}"
+terminal_binding=${INTRMOTIV_TERMINAL_BINDING:-$workspace_root/IntrMotiv/SF_hipposlam/runtime/controller_terminal_binding_v1}
+if [[ -d $terminal_binding ]]; then
+  export PYTHONPATH="$runtime_source:$terminal_binding${PYTHONPATH:+:$PYTHONPATH}"
+fi
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 export OPENBLAS_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}

@@ -162,6 +162,7 @@ def make_dmlab_env_impl(
         dmlab_level_caches_per_policy,
         spec.extra_cfg,
         render_mode,
+        capture_terminal_observation=getattr(cfg, "controller_learning", "ppo") in ("ddqn", "shadow"),
         depth_sensor=depth_sensor,
         reduced_action_set=cfg.dmlab_reduced_action_set,
         navigation_action_set=cfg.dmlab_navigation_action_set,
@@ -192,6 +193,10 @@ def make_dmlab_env_impl(
         exploration_window_steps=getattr(cfg, "exploration_window_steps", 0),
         action_path_integration=getattr(cfg, "hrl_action_path_integration", False),
     )
+    from .controller_transport import ControllerIdentity, enabled
+
+    if enabled(cfg):
+        env = ControllerIdentity(env, int(env_config.get("env_id", 0)) if env_config else 0)
     return env
 
 

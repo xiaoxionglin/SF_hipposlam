@@ -102,6 +102,15 @@ def alloc_trajectory_tensors(
     # we need to allocate an extra rollout step here to calculate the value estimates for the last step
     for space_name, space in obs_space.spaces.items():
         tensors["obs"][space_name] = init_tensor([num_traj, rollout + 1], space.dtype, space.shape, device, share)
+    if getattr(cfg, "controller_learning", "ppo") in ("ddqn", "shadow"):
+        tensors["controller_final_obs"] = TensorDict()
+        for name, space in obs_space.spaces.items():
+            tensors["controller_final_obs"][name] = init_tensor(
+                [num_traj, rollout], space.dtype, space.shape, device, share
+            )
+        tensors["controller_final_valid"] = init_tensor([num_traj, rollout], torch.bool, [], device, share)
+        tensors["controller_frames"] = init_tensor([num_traj, rollout], torch.int64, [], device, share)
+        tensors["controller_terminated"] = init_tensor([num_traj, rollout], torch.bool, [], device, share)
     tensors["rnn_states"] = init_tensor([num_traj, rollout + 1], torch.float32, [rnn_size], device, share)
 
     num_actions, num_action_distribution_parameters = action_info(env_info)

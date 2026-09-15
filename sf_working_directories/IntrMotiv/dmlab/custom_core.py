@@ -804,7 +804,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             raise RuntimeError("CA3 target predictor is disabled")
         return self.ca3_predictor(ca3_state, target_onehot)
 
-    def forward(self, head_output, rnn_states):
+    def forward(self, head_output, rnn_states, *, replay_conditions=None, replay_padded=False):
         """
         Args:
             head_output: Either a Tensor of shape (B, input_size) (single time step)
@@ -818,6 +818,17 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 or is a PackedSequence with the time dimension preserved.
               - new_rnn_states is updated similarly.
         """
+        if replay_padded and replay_conditions is None:
+            raise ValueError("Padded outputs require explicit replay conditions")
+        if replay_conditions is not None:
+            if (
+                not isinstance(head_output, PackedSequence)
+                or self.context_feedback is not None
+                or self.graph_recruitment
+            ):
+                raise ValueError(
+                    "Exogenous conditions require finite packed replay without contextual/recruitment state"
+                )
         # Case: head_output is a PackedSequence (multiple time steps)
         if isinstance(head_output, PackedSequence):
             # Unpack the sequence.
@@ -825,6 +836,36 @@ class SimpleSequenceWithBypassCore(ModelCore):
             _, batch_sizes, sorted_indices, unsorted_indices = head_output
             padded, lengths = nn.utils.rnn.pad_packed_sequence(head_output)
             T, B, input_size = padded.shape  # T: time steps, B: max batch size
+            if replay_conditions is not None and replay_conditions.shape != (T, B, self.hrl_condition_size):
+                raise ValueError("Incomplete exogenous condition history")
+
+            if replay_conditions is not None:
+                from .ca3_memory import finite_shift_history
+
+                base, hrl, _, _ = self._split_state(rnn_states)
+                if (
+                    self.action_feature_size
+                    or self.context_action_history_size
+                    or base[:, : self.core_output_size].count_nonzero()
+                ):
+                    raise ValueError("Finite replay requires zero trace initialization and no contextual actions")
+                trace = finite_shift_history(padded[:, :, : self.Hippo_n_feature], self.R, self.expanded_length)
+                trace = trace.flatten(2)
+                bypass = padded[:, :, self.Hippo_n_feature :]
+                output = torch.cat((trace, bypass, replay_conditions), -1)
+                indices = lengths.to(padded.device) - 1
+                batch_indices = torch.arange(B, device=padded.device)
+                final_base = torch.cat((trace[indices, batch_indices], bypass[indices, batch_indices]), -1)
+                final_state = torch.cat((final_base, hrl), -1)
+                if self.behavior_goal_state_size:
+                    final_state = torch.cat(
+                        (final_state, self._behavior_descriptor(replay_conditions[indices, batch_indices])), -1
+                    )
+                return (
+                    output
+                    if replay_padded
+                    else nn.utils.rnn.pack_padded_sequence(output, lengths, enforce_sorted=False)
+                ), final_state
 
             # Separate core state and bypass part from the recurrent state.
             base_rnn_states, hrl_state, recruitment_history, context_action_history = self._split_state(rnn_states)
@@ -886,11 +927,16 @@ class SimpleSequenceWithBypassCore(ModelCore):
                         action_valid = padded[t, valid_idx, action_start:action_end]
                     else:
                         action_valid = curr_core.new_zeros((curr_core.size(0), ACTION_FEATURE_SIZE))
-                    hrl_valid, target_valid = self._update_hrl(
-                        hrl_state[valid_idx], curr_core, prev_core_valid, action_valid
-                    )
-                    hrl_state[valid_idx] = hrl_valid
-                    hrl_seq[t, valid_idx] = target_valid
+                    if replay_conditions is None:
+                        hrl_valid, target_valid = self._update_hrl(
+                            hrl_state[valid_idx], curr_core, prev_core_valid, action_valid
+                        )
+                        hrl_state[valid_idx] = hrl_valid
+                        hrl_seq[t, valid_idx] = target_valid
+                    else:
+                        # Historical commands are recorded facts. Reconstruct
+                        # memory without planning new historical manager actions.
+                        hrl_seq[t, valid_idx] = replay_conditions[t, valid_idx]
                 # Save the flattened core state (for all batches) at time t.
                 out_core[t] = new_core_state[0].view(B, self.core_output_size)
             # torch.save(out_core, "./train_dir/rnn_states.pt")

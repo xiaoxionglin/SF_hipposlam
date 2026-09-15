@@ -136,6 +136,8 @@ class LearnerWorker(HeartbeatStoppableEventLoopObject, Configurable):
         if not self.cfg.serial_mode:
             self.start_batcher_thread()
 
+        if hasattr(self.learner, "set_progress_callback"):
+            self.learner.set_progress_callback(self._report_heartbeat)
         init_model_data = self.learner.init()
         # signal other components that the model is ready
         self.model_initialized.emit(init_model_data)

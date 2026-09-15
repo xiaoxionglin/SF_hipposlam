@@ -117,3 +117,8 @@ tracking branch on desktop. Verify equal commit IDs and clean worktrees on both
 machines. The desktop `SF_git` environment uses an editable installation at
 `/home/xiaoxiong/SFgit/SF_hipposlam`; verify imports using its Python executable
 and repeat the focused tests there. No reinstall is needed for source-only changes.
+
+For checkout consolidation and retirement, follow
+[the source consolidation procedure](docs/intrmotiv_source_consolidation.md).
+Record an owner, dependent jobs, and a retirement condition whenever an isolated
+release is needed; use the canonical checkout for ordinary development.

@@ -29,10 +29,10 @@ def isolated_model_factory():
 
 
 def test_first_future_vector_preserves_simultaneous_and_continuing_activity():
-    dg = torch.tensor([[[1., 0.], [1., 2.], [0., 0.], [0., 3.], [0., 0.]]])
+    dg = torch.tensor([[[1.0, 0.0], [1.0, 2.0], [0.0, 0.0], [0.0, 3.0], [0.0, 0.0]]])
     labels = next_dg_event_labels(dg, torch.zeros(1, 5, dtype=torch.bool), torch.ones(1, 5, dtype=torch.bool), 3)
-    assert labels.delay.tolist() == [[1., 2., 1., 0., 0.]]
-    assert labels.dg[0, 0].tolist() == [1., 2.]
+    assert labels.delay.tolist() == [[1.0, 2.0, 1.0, 0.0, 0.0]]
+    assert labels.dg[0, 0].tolist() == [1.0, 2.0]
     assert labels.usable.tolist() == [[True, True, True, False, False]]
 
 
@@ -71,7 +71,7 @@ def test_model_uses_candidate_action_without_mutating_state():
 def test_event_loss_only_updates_predictor_and_handles_no_labels():
     model = DGEventWorldModel(4, 2, 3, 8)
     ca3 = torch.randn(4, 4, requires_grad=True)
-    dg = torch.tensor([[[0., 0.], [1., 2.], [0., 0.], [0., 0.]]], requires_grad=True)
+    dg = torch.tensor([[[0.0, 0.0], [1.0, 2.0], [0.0, 0.0], [0.0, 0.0]]], requires_grad=True)
     valid = torch.ones(1, 4, dtype=torch.bool)
     labels = next_dg_event_labels(dg, torch.zeros_like(valid), valid, 2)
     loss, _ = event_prediction_loss(model, ca3, torch.zeros(4, dtype=torch.long), labels, 2)
@@ -98,14 +98,34 @@ class ToyDGEncoder(Encoder):
 
 
 def make_config(tmp_path, enabled):
-    argv = ["--env=world_model_unit_test", "--experiment=" + ("on" if enabled else "off"),
-            "--train_dir=" + str(tmp_path), "--device=cpu", "--serial_mode=true", "--seed=12",
-            "--dg_world_model=" + str(enabled), "--dg_world_model_horizon=2", "--dg_world_model_hidden_size=8",
-            "--core_name=BypassSS", "--Hippo_n_feature=2", "--Hippo_R=2", "--Hippo_L=3",
-            "--use_rnn=true", "--rnn_type=gru", "--rnn_size=8", "--recurrence=4", "--rollout=4",
-            "--batch_size=8", "--num_batches_per_epoch=1", "--num_epochs=1",
-            "--normalize_input=false", "--normalize_returns=false", "--decoder_mlp_layers=8",
-            "--learning_rate=0.001", "--lr_schedule=constant"]
+    argv = [
+        "--env=world_model_unit_test",
+        "--experiment=" + ("on" if enabled else "off"),
+        "--train_dir=" + str(tmp_path),
+        "--device=cpu",
+        "--serial_mode=true",
+        "--seed=12",
+        "--dg_world_model=" + str(enabled),
+        "--dg_world_model_horizon=2",
+        "--dg_world_model_hidden_size=8",
+        "--core_name=BypassSS",
+        "--Hippo_n_feature=2",
+        "--Hippo_R=2",
+        "--Hippo_L=3",
+        "--use_rnn=true",
+        "--rnn_type=gru",
+        "--rnn_size=8",
+        "--recurrence=4",
+        "--rollout=4",
+        "--batch_size=8",
+        "--num_batches_per_epoch=1",
+        "--num_epochs=1",
+        "--normalize_input=false",
+        "--normalize_returns=false",
+        "--decoder_mlp_layers=8",
+        "--learning_rate=0.001",
+        "--lr_schedule=constant",
+    ]
     parser, _ = parse_sf_args(argv)
     add_hipposlam_env_args(parser)
     add_world_model_args(parser)
@@ -117,8 +137,16 @@ def make_learner(tmp_path, enabled):
     global_model_factory().register_encoder_factory(ToyDGEncoder)
     global_model_factory().register_model_core_factory(SimpleSequenceWithBypassCore)
     cfg = make_config(tmp_path, enabled)
-    info = EnvInfo(gym.spaces.Dict(obs=gym.spaces.Box(-1, 1, (3,), dtype=np.float32)),
-                   gym.spaces.Discrete(3), 1, False, False, None, None, 1)
+    info = EnvInfo(
+        gym.spaces.Dict(obs=gym.spaces.Box(-1, 1, (3,), dtype=np.float32)),
+        gym.spaces.Discrete(3),
+        1,
+        False,
+        False,
+        None,
+        None,
+        1,
+    )
     versions = torch.zeros(1, dtype=torch.int32)
     server = ParameterServer(0, versions, serial_mode=True)
     learner = make_world_model_learner(cfg, info, versions, 0, server)
@@ -130,12 +158,17 @@ def minibatch(learner):
     torch.manual_seed(23)
     n = 8
     batch = TensorDict(
-        normalized_obs=TensorDict(obs=torch.randn(n, 3)), rnn_states=torch.zeros(n, 8),
+        normalized_obs=TensorDict(obs=torch.randn(n, 3)),
+        rnn_states=torch.zeros(n, 8),
         actions=torch.tensor([[0], [1], [2], [0], [1], [0], [2], [1]]),
-        dones=torch.zeros(n, dtype=torch.bool), dones_cpu=torch.zeros(n, dtype=torch.bool),
-        valids=torch.ones(n, dtype=torch.bool), advantages=torch.linspace(-1, 1, n),
-        returns=torch.linspace(0, 1, n), values=torch.zeros(n),
-        policy_id=torch.zeros(n, dtype=torch.long), policy_version=torch.zeros(n),
+        dones=torch.zeros(n, dtype=torch.bool),
+        dones_cpu=torch.zeros(n, dtype=torch.bool),
+        valids=torch.ones(n, dtype=torch.bool),
+        advantages=torch.linspace(-1, 1, n),
+        returns=torch.linspace(0, 1, n),
+        values=torch.zeros(n),
+        policy_id=torch.zeros(n, dtype=torch.long),
+        policy_version=torch.zeros(n),
     )
     # Include an episode boundary, exercising SF's packed replay and reset path.
     batch["dones"][1] = batch["dones_cpu"][1] = True
@@ -194,9 +227,14 @@ def test_censored_only_update_does_not_advance_optimizer_or_mutate_actor(tmp_pat
     before = copy.deepcopy(learner.actor_critic.state_dict())
     head_before = copy.deepcopy(learner.world_model.state_dict())
     # Each row invalid, with out-of-range action sentinel. It must not supervise.
-    learner._world_model_pending = (torch.zeros(4, 8), torch.zeros(4, 2),
-                                    torch.full((4, 1), -1), torch.zeros(4, dtype=torch.bool),
-                                    torch.zeros(4, dtype=torch.bool), 4)
+    learner._world_model_pending = (
+        torch.zeros(4, 8),
+        torch.zeros(4, 2),
+        torch.full((4, 1), -1),
+        torch.zeros(4, dtype=torch.bool),
+        torch.zeros(4, dtype=torch.bool),
+        4,
+    )
     with torch.no_grad():
         learner._after_optimizer_step()
     assert_same_state(before, learner.actor_critic.state_dict())

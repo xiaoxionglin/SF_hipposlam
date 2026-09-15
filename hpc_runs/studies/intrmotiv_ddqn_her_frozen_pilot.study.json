@@ -1,0 +1,96 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.8.0",
+  "study_id": "intrmotiv_ddqn_her_frozen_pilot_20260911",
+  "description": "Selected F16 parent: frozen representation, finite-budget local Double DQN with a matched HER ablation. Production release requires runtime and independent control gates.",
+  "expected_runs": 6,
+  "metadata": {
+    "stage": "frozen_pilot",
+    "parent_run": "DGC_DIRECT_WORKER_F16_S99",
+    "parent_frames": 25001984,
+    "parent_source_seed": 99,
+    "representation": "frozen",
+    "recognition": "exclusive",
+    "action_set": "navigation8",
+    "action_repeat": 4,
+    "policy_pose_input": false,
+    "graph_learning": false,
+    "release_status": "gated",
+    "comparison": "DDQN_vs_DDQN_HER_only",
+    "development_goals": "1,4,11"
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "intrmotiv_ddqn_her_frozen_pilot_20260911",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_ddqn_her_frozen_pilot_20260911",
+    "run_name_template": "DQ_{base_label}_S{seed}",
+    "condition_name_template": "DQ_{base_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+      "--parent-manifest=06_experiments/data/intrmotiv_ddqn_her_20260911/parent_manifest.json",
+      "--parent-run=DGC_DIRECT_WORKER_F16_S99",
+      "--total-frames=5000000",
+      "--num-envs=32",
+      "--device=cpu",
+      "--torch-threads=8",
+      "--registry=1,4,11",
+      "--replay-capacity=200000",
+      "--learning-start=16384",
+      "--milestones=0,250000,500000,1000000,2500000,5000000"
+    ]
+  },
+  "bases": [
+    {
+      "name": "DDQN",
+      "label": "DDQN",
+      "args": [
+        "--her-fraction=0.0"
+      ],
+      "metadata": {
+        "her": false
+      }
+    },
+    {
+      "name": "DDQN_HER",
+      "label": "DDQN_HER",
+      "args": [
+        "--her-fraction=0.8"
+      ],
+      "metadata": {
+        "her": true
+      }
+    }
+  ],
+  "factors": [],
+  "seeds": [
+    8,
+    99,
+    123
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 250000,
+    "synchronized_steps": [
+      5000000
+    ],
+    "max_workers": 2,
+    "group_by": [
+      "base"
+    ],
+    "contrast_group_by": [],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "throughput_fps": "ddqn/throughput_fps",
+      "td_loss": "ddqn/td_loss",
+      "realized_her_fraction": "ddqn/realized_her_fraction",
+      "q_out_of_range_fraction": "ddqn/q_out_of_range_fraction"
+    },
+    "cumulative_metrics": {},
+    "contrasts": []
+  },
+  "telemetry": {}
+}

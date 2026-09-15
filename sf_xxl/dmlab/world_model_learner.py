@@ -9,9 +9,15 @@ from sf_xxl.dmlab.world_model import DGEventWorldModel, event_prediction_loss, n
 
 
 def add_world_model_args(parser):
-    parser.add_argument("--dg_world_model", type=str2bool, default=False,
-                        help="Train an action-conditioned next-DG-event shadow model; does not control PPO.")
-    parser.add_argument("--dg_world_model_horizon", type=int, default=16, help="Prediction horizon in policy decisions.")
+    parser.add_argument(
+        "--dg_world_model",
+        type=str2bool,
+        default=False,
+        help="Train an action-conditioned next-DG-event shadow model; does not control PPO.",
+    )
+    parser.add_argument(
+        "--dg_world_model_horizon", type=int, default=16, help="Prediction horizon in policy decisions."
+    )
     parser.add_argument("--dg_world_model_hidden_size", type=int, default=128)
     parser.add_argument("--dg_world_model_lr", type=float, default=0.001)
 
@@ -48,9 +54,13 @@ class DGWorldModelLearner(DefaultLearner):
         return result
 
     def _world_model_config(self):
-        return dict(ca3_size=self.cfg.Hippo_n_feature * (self.cfg.Hippo_R + self.cfg.Hippo_L - 1),
-                    n_features=self.cfg.Hippo_n_feature, action_count=self.env_info.action_space.n,
-                    hidden_size=self.cfg.dg_world_model_hidden_size, horizon=self.cfg.dg_world_model_horizon)
+        return dict(
+            ca3_size=self.cfg.Hippo_n_feature * (self.cfg.Hippo_R + self.cfg.Hippo_L - 1),
+            n_features=self.cfg.Hippo_n_feature,
+            action_count=self.env_info.action_space.n,
+            hidden_size=self.cfg.dg_world_model_hidden_size,
+            horizon=self.cfg.dg_world_model_horizon,
+        )
 
     def _initialize_world_model(self):
         config = self._world_model_config()
@@ -74,8 +84,12 @@ class DGWorldModelLearner(DefaultLearner):
             # Uses the SAME forward pass as PPO, never a second encoder pass.
             # build_core_out_from_seq restored the chronological segment order.
             self._world_model_pending = (
-                outputs.core_outputs[:, :n].detach(), outputs.head_outputs[:, :f].detach(),
-                mb.actions.detach(), mb.dones.detach(), valids.detach(), recurrence,
+                outputs.core_outputs[:, :n].detach(),
+                outputs.head_outputs[:, :f].detach(),
+                mb.actions.detach(),
+                mb.dones.detach(),
+                valids.detach(),
+                recurrence,
             )
         return outputs
 
@@ -86,8 +100,12 @@ class DGWorldModelLearner(DefaultLearner):
         ca3, dg, actions, dones, valids, recurrence = self._world_model_pending
         self._world_model_pending = None
         horizon = self.cfg.dg_world_model_horizon
-        labels = next_dg_event_labels(dg.reshape(-1, recurrence, dg.size(-1)),
-                                     dones.reshape(-1, recurrence), valids.reshape(-1, recurrence), horizon)
+        labels = next_dg_event_labels(
+            dg.reshape(-1, recurrence, dg.size(-1)),
+            dones.reshape(-1, recurrence),
+            valids.reshape(-1, recurrence),
+            horizon,
+        )
         # Invalid/padded samples may use an action sentinel. They supply no
         # supervision and must not be passed as candidate actions to the head.
         actions = torch.where(valids.reshape(-1), actions.reshape(-1), 0)
@@ -111,9 +129,12 @@ class DGWorldModelLearner(DefaultLearner):
     def _get_checkpoint_dict(self):
         checkpoint = super()._get_checkpoint_dict()
         if self.world_model is not None:
-            checkpoint["dg_world_model"] = dict(schema=1, config=self._world_model_config(),
-                                               model=self.world_model.state_dict(),
-                                               optimizer=self.world_model_optimizer.state_dict())
+            checkpoint["dg_world_model"] = dict(
+                schema=1,
+                config=self._world_model_config(),
+                model=self.world_model.state_dict(),
+                optimizer=self.world_model_optimizer.state_dict(),
+            )
         return checkpoint
 
     def _restore_world_model(self, state):

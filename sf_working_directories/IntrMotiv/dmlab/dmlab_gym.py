@@ -237,7 +237,7 @@ class DmlabGymEnv(gym.Env):
         if not terminated:
             obs_dict = self.format_obs_dict(self.dmlab.observations())
             self.last_observation = obs_dict
-        info = {"num_frames": self.action_repeat}
+        info = {"num_frames": self.action_repeat, "intrmotiv_final_observation_valid": not terminated}
         return self.last_observation, reward, terminated, truncated, info
 
     def render(self) -> Optional[np.ndarray]:
@@ -316,9 +316,11 @@ class DmlabGymEnv_custom(gym.Env):
         with_pos_telemetry=False,
         with_online_spatial_telemetry=False,
         action_path_integration=False,
+        capture_terminal_observation=False,
     ):
 
         # self.depth_sensor = depth_sensor
+        self.capture_terminal_observation = capture_terminal_observation
         self.width = res_w
         self.height = res_h
 
@@ -588,11 +590,20 @@ class DmlabGymEnv_custom(gym.Env):
         if not terminated:
             obs_dict = self.format_obs_dict(self.dmlab.observations())
             self.last_observation = obs_dict
+        terminal_observation_valid = not terminated
+        if terminated and getattr(self, "capture_terminal_observation", False):
+            terminal_reader = getattr(self.dmlab, "terminal_observations", None)
+            final = terminal_reader() if terminal_reader is not None else self._terminal_debug_observations()
+            if final is not None and self.main_observation in final:
+                # Read the engine after the action and before SF autoresets it.
+                # Never certify the Python-side previous-observation fallback.
+                self.last_observation = self.format_obs_dict(final)
+                terminal_observation_valid = True
         terminal_pose_fresh = True
         if terminated and self.with_pos_telemetry:
-            terminal_pose_fresh = self._refresh_terminal_debug_pose()
+            terminal_pose_fresh = terminal_observation_valid or self._refresh_terminal_debug_pose()
 
-        info = {"num_frames": self.action_repeat}
+        info = {"num_frames": self.action_repeat, "intrmotiv_final_observation_valid": terminal_observation_valid}
         if self.with_pos_telemetry and self.last_debug_position is not None and self.last_debug_rotation is not None:
             # DMLab rotations are (pitch, yaw, roll) in degrees. Keep only the
             # horizontal pose needed by telemetry. This private value is

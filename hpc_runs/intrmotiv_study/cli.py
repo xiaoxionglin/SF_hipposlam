@@ -159,7 +159,11 @@ def command_collect_online(args: argparse.Namespace) -> None:
             raise SpecError("--window-low and --window-high must be supplied together")
         fixed_window = (args.window_low, args.window_high)
     records = collect_online_records(
-        study, args.batch_root, fixed_window=fixed_window, latest_common=args.latest_common
+        study,
+        args.batch_root,
+        fixed_window=fixed_window,
+        latest_common=args.latest_common,
+        progress=lambda done, total, name: print(f"Loaded {done}/{total}: {name}", flush=True),
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "per_run.csv", records)
@@ -171,6 +175,7 @@ def command_collect_online(args: argparse.Namespace) -> None:
         "step_tag": study.analysis.get("step_tag", "train/env_steps"),
         "windows": sorted({(row["window_low"], row["window_high"]) for row in records}),
         "scalar_size_guidance": 0 if args.latest_common else study.analysis.get("scalar_size_guidance", 30000),
+        "loader_backend": study.analysis.get("loader_backend", "thread"),
     }
     _write_json(manifest_path, manifest)
     if args.latest_common:

@@ -62,7 +62,7 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
             (output[..., self.total_output_size :], output[..., self.core_output_size : self.total_output_size]), -1
         )
 
-    def forward(self, head_output, rnn_states):
+    def forward(self, head_output, rnn_states, *, replay_conditions=None, replay_padded=False):
         canonical_state, worker = self.split_worker_state(rnn_states)
         n = self.Hippo_n_feature
         packed = isinstance(head_output, PackedSequence)
@@ -72,12 +72,33 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
             raise ValueError("Unexpected goal-conditioned head payload width")
         canonical_data = data[..., : self.canonical_input_size]
         canonical_head = head_output._replace(data=canonical_data) if packed else canonical_data
-        canonical_out, canonical_new_state = super().forward(canonical_head, canonical_state)
+        canonical_out, canonical_new_state = super().forward(
+            canonical_head, canonical_state, replay_conditions=replay_conditions, replay_padded=replay_padded
+        )
         worker = worker.reshape(-1, n, self.expanded_length).detach()
         if packed:
             padded_head, lengths = pad_packed_sequence(head_output)
-            padded_out, out_lengths = pad_packed_sequence(canonical_out)
-            assert torch.equal(lengths, out_lengths)
+            if replay_padded:
+                padded_out = canonical_out
+            else:
+                padded_out, out_lengths = pad_packed_sequence(canonical_out)
+                assert torch.equal(lengths, out_lengths)
+            if replay_conditions is not None:
+                from .ca3_memory import finite_shift_history
+
+                if worker.count_nonzero():
+                    raise ValueError("Finite worker replay requires zero initial traces")
+                pre = padded_head[:, :, self.canonical_input_size : self.canonical_input_size + n]
+                goals = padded_head[:, :, -n:] if replay else replay_conditions[:, :, :n]
+                activity = self.write_activity(pre.reshape(-1, n), goals.reshape(-1, n)).reshape(*pre.shape)
+                memories = finite_shift_history(activity, self.R, self.expanded_length).flatten(2)
+                batch = torch.arange(len(lengths), device=memories.device)
+                final = memories[lengths.to(memories.device) - 1, batch]
+                output = torch.cat((padded_out, memories), -1)
+                if not replay_padded:
+                    output = pack_padded_sequence(output, lengths, enforce_sorted=False)
+                self.last_worker_memory = final.detach()
+                return output, self.join_worker_state(canonical_new_state, final)
             result = []
             for t in range(padded_head.size(0)):
                 valid = (lengths > t).to(worker.device)

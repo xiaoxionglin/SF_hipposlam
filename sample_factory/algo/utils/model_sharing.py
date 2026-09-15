@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 
 from sample_factory.algo.utils.multiprocessing_utils import get_lock, get_mp_ctx
+from sample_factory.algo.utils.torch_utils import synchronize
 from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.utils.timing import Timing
 from sample_factory.utils.utils import log
@@ -130,8 +131,13 @@ class ParameterClientAsync(ParameterClient):
         if self.latest_policy_version < server_policy_version and self._shared_model_weights is not None:
             with self.timing.time_avg("weight_update"), self._policy_lock:
                 self._actor_critic.load_state_dict(self._shared_model_weights)
+                if getattr(self.cfg, "controller_learning", "ppo") in ("ddqn", "shadow"):
+                    # CUDA device-to-device copies outlive the host call. Keep
+                    # the writer excluded until this snapshot is fully copied.
+                    synchronize(self.cfg, next(self._actor_critic.parameters()).device)
+                loaded_version = self._get_server_policy_version()
 
-            self.latest_policy_version = server_policy_version
+            self.latest_policy_version = loaded_version
 
             self.num_policy_updates += 1
             if self.num_policy_updates % 10 == 0:

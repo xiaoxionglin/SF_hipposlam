@@ -341,6 +341,29 @@ def maybe_overwrite_rnn_size(cfg):
         cfg.rnn_persistent_state_size = 0
     if intrinsic_goal:
         cfg.rnn_persistent_state_size = 1
+    if getattr(cfg, "controller_learning", "ppo") != "ppo":
+        from .controller_transport import validate_controller_config
+
+        validate_controller_config(cfg)
+        n = int(cfg.Hippo_n_feature)
+        context_size = hrl_option_state_size(n) + topological_state_size(n) + 1
+        cfg.extra_policy_output_shapes += (
+            ("controller_fresh_version", [1]),
+            ("controller_context", [context_size]),
+            ("controller_condition", [n]),
+            ("controller_input_state", [int(cfg.rnn_size)]),
+            ("controller_memory_stats", [3]),
+        )
+        if getattr(cfg, "controller_replay_state", "reconstruct") == "stored":
+            cfg.extra_policy_output_shapes += (("controller_worker_state", [int(cfg.rnn_size) - context_size]),)
+        if cfg.controller_cache_visual:
+            if cfg.encoder_conv_architecture != "layer2_resnet18":
+                raise ValueError("Exact visual cache dimensions require layer2_resnet18")
+            # Layer2 has 128 channels; the original stem/layer2/pool use
+            # four padded stride-two reductions. Actual encoder width is
+            # also checked when using the cached features.
+            visual_size = 128 * ((int(cfg.res_h) + 15) // 16) * ((int(cfg.res_w) + 15) // 16)
+            cfg.extra_policy_output_shapes += (("controller_visual", [visual_size]),)
 
 
 def parse_dmlab_args(argv=None, evaluation=False):

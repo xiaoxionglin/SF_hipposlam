@@ -197,6 +197,65 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             self.exploration_critic_linear.apply(self.initialize_weights)
             self.exploration_action_parameterization.apply(self.initialize_weights)
 
+        self.controller_learning = getattr(cfg, "controller_learning", "ppo")
+        if self.controller_learning not in ("ppo", "shadow", "ddqn"):
+            raise ValueError(f"Unknown controller_learning={self.controller_learning}")
+        if self.controller_learning != "ppo":
+            if not isinstance(action_space, gym.spaces.Discrete):
+                raise ValueError("DDQN requires the parent's discrete action space")
+            if self.separate_exploration or self.separate_goal_controllers:
+                raise ValueError("Separate controller branches need their own Q-head ownership contract")
+            from .controller_q import ControllerQHeads
+
+            # Adding a shadow head must not advance the parent's RNG stream.
+            with torch.random.fork_rng(devices=[]):
+                torch.random.default_generator.manual_seed(int(cfg.seed))
+                self.controller_q = ControllerQHeads(
+                    self.decoder.get_out_size(), action_space.n, bool(getattr(cfg, "controller_her", False))
+                )
+
+    def controller_hidden(self, core_output):
+        if getattr(self.core, "dg_goal_modulation", None) is not None:
+            view = self.core.worker_view(core_output)
+        else:
+            view = controller_core_view(core_output, self.core.core_output_size, self.ppo_dg_gradient)
+        return self.decoder(view)
+
+    def _forward_q_tail(self, controller_output, values_only, sample_actions, action_mask):
+        from .controller_q import epsilon_distribution
+
+        q = self.controller_q(self.decoder(controller_output))
+        valid_q = q
+        if action_mask is not None:
+            if action_mask.shape != q.shape or not action_mask.bool().any(-1).all():
+                raise ValueError("Invalid Q action mask")
+            valid_q = q.masked_fill(~action_mask.bool(), -torch.inf)
+        result = TensorDict(values=valid_q.max(-1).values)
+        if values_only:
+            return result
+        from .controller_q import exploration_epsilon
+
+        decisions = (
+            int(self.controller_q.environment_decisions.item())
+            if hasattr(self.controller_q, "environment_decisions")
+            else 0
+        )
+        epsilon = exploration_epsilon(decisions, self.cfg)
+        probabilities = epsilon_distribution(q, epsilon, action_mask)
+        # SF entropy computes p*log(p), so -inf logits would produce NaNs
+        # for epsilon=0 or masked actions. Finite minima still softmax to zero.
+        logits = probabilities.log().masked_fill(probabilities == 0, torch.finfo(q.dtype).min)
+        self.last_action_distribution = get_action_distribution(self.action_space, logits)
+        result["action_logits"] = logits
+        self._maybe_sample_actions(sample_actions, result)
+        return result
+
+    def forward_core(self, head_output, rnn_states):
+        output, state = super().forward_core(head_output, rnn_states)
+        if getattr(self, "controller_learning", "ppo") != "ppo":
+            self._controller_core_output = output
+        return output, state
+
     def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
         x = super().forward_head(normalized_obs_dict)
         if (
@@ -210,6 +269,19 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
         self, normalized_obs_dict, rnn_states, values_only=False, action_mask: Optional[Tensor] = None
     ) -> TensorDict:
         result = super().forward(normalized_obs_dict, rnn_states, values_only, action_mask)
+        if getattr(self, "controller_learning", "ppo") != "ppo" and not values_only:
+            canonical = result["new_rnn_states"]
+            if hasattr(self.core, "split_worker_state"):
+                canonical, _ = self.core.split_worker_state(canonical)
+            if getattr(self.cfg, "controller_cache_visual", True):
+                result["controller_visual"] = self.encoder._controller_visual
+            result["controller_fresh_version"] = self.controller_q.fresh_version.expand(canonical.size(0), 1)
+            if getattr(self.cfg, "controller_replay_state", "reconstruct") == "stored":
+                result["controller_worker_state"] = self._controller_core_output[:, : self.core.target_condition_start]
+            result["controller_context"] = canonical[:, self.core.base_state_size :]
+            result["controller_condition"] = self._controller_core_output[
+                :, self.core.target_condition_start : self.core.total_output_size
+            ]
         if getattr(self.cfg, "online_spatial_telemetry", False) and not values_only:
             contextual_activity = getattr(getattr(self, "core", None), "last_dg_activity", None)
             if torch.is_tensor(contextual_activity):
@@ -231,6 +303,8 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             controller_output = self.core.worker_view(core_output)
         else:
             controller_output = controller_core_view(core_output, ca3_size, getattr(self, "ppo_dg_gradient", "stop"))
+        if getattr(self, "controller_learning", "ppo") == "ddqn":
+            return self._forward_q_tail(controller_output, values_only, sample_actions, action_mask)
         if getattr(self, "separate_goal_controllers", False):
             start = self.core.target_condition_start
             target = controller_output[:, start : start + int(self.cfg.Hippo_n_feature)]
@@ -360,6 +434,8 @@ def make_hipposlam_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: 
 
     model_factory = global_model_factory()
     obs_space = obs_space_without_action_mask(obs_space)
+    if "controller_identity" in obs_space.spaces:
+        obs_space = gym.spaces.Dict({k: v for k, v in obs_space.spaces.items() if k != "controller_identity"})
     online_spatial = bool(getattr(cfg, "online_spatial_telemetry", False))
     if online_spatial:
         if not isinstance(obs_space, gym.spaces.Dict) or "telemetry_pose" not in obs_space.spaces:
@@ -390,5 +466,7 @@ def make_hipposlam_actor_critic(cfg: Config, obs_space: ObsSpace, action_space: 
             actor_critic = IntrMotivActorCriticSharedWeights(model_factory, obs_space, action_space, cfg)
     else:
         actor_critic = IntrMotivActorCriticSeparateWeights(model_factory, obs_space, action_space, cfg)
-    actor_critic.privileged_obs_keys = ("telemetry_pose",) if online_spatial else ()
+    actor_critic.privileged_obs_keys = (("telemetry_pose",) if online_spatial else ()) + (
+        ("controller_identity",) if getattr(cfg, "controller_learning", "ppo") != "ppo" else ()
+    )
     return actor_critic

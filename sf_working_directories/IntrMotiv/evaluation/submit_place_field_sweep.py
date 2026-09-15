@@ -13,6 +13,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKSPACE_ROOT = pathlib.Path("/work/classic/fr_xl1014-train")
 REQUIRED_COLUMNS = (
     "condition",
@@ -115,6 +116,7 @@ def build_sbatch_command(
     export = ",".join(
         (
             "ALL",
+            f"INTRMOTIV_RUNTIME_SOURCE={SOURCE_ROOT}",
             f"PLACE_FIELD_MAX_FRAMES={max_num_frames}",
             f"TMPDIR={output_dir / 'tmp'}",
             f"DMLAB_CACHE_DIR={output_dir / 'dmlab_cache'}",
