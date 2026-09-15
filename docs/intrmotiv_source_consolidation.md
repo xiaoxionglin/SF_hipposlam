@@ -47,8 +47,9 @@ Three source folders are retained while jobs reference them:
 | `controller_rr1_20260913` | 12 |
 | `controller_stored_production_release_20260912` | 8 |
 
-The other 33 alternatives are retirement candidates. Retirement must recheck
-current jobs and verify the full archived contents immediately before removal.
+The other 33 alternatives were retired after fresh job checks and an empty
+checksum-based comparison against the full backups. Retained release source
+hashes were rechecked after removal and were unchanged.
 No training output or checkpoint directory is removed. Preserve Git worktree
 administration used by retained copies; do not blindly prune registrations.
 
@@ -74,5 +75,14 @@ source. Track its jobs and retirement condition at creation.
 ## Validation
 
 Desktop validation of the integrated source passed all three pinned pre-commit
-hooks and 583 runtime, workflow, and world-model tests. NEMO verification and
-retirement results are recorded in the workspace archive before completion.
+hooks and 583 runtime, workflow, and world-model tests. NEMO verification passed
+573 tests with 10 CUDA tests skipped. The desktop editable-install check passed
+all 17 depth tests after synchronization. The published source tree exactly
+matched the tested tree before retirement.
+
+Retirement completed for 33 inactive folders; three live release folders remain.
+Their shared publication-worktree metadata is locked against pruning. Full
+retirement results are recorded in `retirement.json` in the workspace archive.
+Desktop and NEMO use `codex/nemo-consolidation-20260915`. Shell push credentials
+were unavailable, so the connected GitHub app published the tested tree; the
+local pre-publication commit is also preserved in the archive bundle.

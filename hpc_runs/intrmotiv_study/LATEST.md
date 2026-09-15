@@ -1,11 +1,19 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.8.1` (local; NEMO2 remains `1.7.1`)
+- Implementation: `1.8.1` (desktop and canonical NEMO2 checkout)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 runtime copy: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/hpc_runs/intrmotiv_study/`
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## September 15 canonical source consolidation
+
+The canonical NEMO2 `SF_hipposlam` checkout now includes workflow 1.8.1 and the
+qualified controller integration on `codex/nemo-consolidation-20260915`.
+The integrated NEMO runtime/workflow/world-model suite passed 573 tests with 10
+CUDA skips; desktop passed 583. Earlier deployment notes below are historical.
+See `docs/intrmotiv_source_consolidation.md` for preservation and retirement.
 
 ## 1.8.1 checkpoint target discovery
 
