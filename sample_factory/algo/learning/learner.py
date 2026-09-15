@@ -843,11 +843,16 @@ class BaseLearner(Configurable):
         with self.timing.add_time("prepare_batch"):
             buff, experience_size, num_invalids = self._prepare_batch(batch)
 
-        if num_invalids >= experience_size:
+        num_valids = experience_size - num_invalids
+        if num_valids < 2:
             if self.cfg.with_pbt:
-                log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
+                log.warning(
+                    "Fewer than two valid samples in the batch; with PBT this can follow a weight replacement"
+                )
             else:
-                log.error(f"Learner {self.policy_id=} received an entire batch of invalid data, skipping...")
+                log.warning(
+                    f"Learner {self.policy_id=} received only {num_valids} valid samples, skipping this batch"
+                )
             return None
         else:
             with self.timing.add_time("train"):
