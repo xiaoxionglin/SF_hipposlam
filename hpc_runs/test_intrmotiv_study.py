@@ -177,6 +177,7 @@ class StudySpecTests(unittest.TestCase):
             self.assertIn(f"--study_id={study.study_id}", run.args)
             self.assertIn(f"--study_condition={first_condition}", run.args)
             self.assertIn(f"--study_base={run.base}", run.args)
+            self.assertIn(f"--wandb_tags={first_condition}", run.args)
 
     def test_workflow_1_11_emits_tracking_identity_by_default(self):
         raw = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
@@ -193,10 +194,17 @@ class StudySpecTests(unittest.TestCase):
                 for run in study.expand_runs()
             )
         )
+        self.assertTrue(
+            all(
+                f"--wandb_tags={run.condition}" in run.args
+                for run in study.expand_runs()
+            )
+        )
 
     def test_tracking_identity_does_not_change_existing_studies(self):
         for run in self.study.expand_runs():
             self.assertFalse(any(arg.startswith("--study_") for arg in run.args))
+            self.assertFalse(any(arg.startswith("--wandb_tags") for arg in run.args))
 
     def test_tracking_identity_flag_must_be_boolean(self):
         raw = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
@@ -205,6 +213,16 @@ class StudySpecTests(unittest.TestCase):
             path = Path(directory) / "bad-tracking.json"
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(SpecError, "emit_tracking_identity must be a boolean"):
+                load_study(path)
+
+    def test_generated_condition_tag_rejects_manual_wandb_tags(self):
+        raw = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+        raw["training"]["emit_tracking_identity"] = True
+        raw["training"]["common_args"].append("--wandb_tags=manual")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duplicate-tags.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(SpecError, "duplicate flags.*--wandb_tags"):
                 load_study(path)
 
     def test_supplemental_study_cannot_be_submitted_as_complete(self):

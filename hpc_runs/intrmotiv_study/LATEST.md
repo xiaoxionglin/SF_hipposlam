@@ -16,6 +16,11 @@ seed-independent dashboard grouping key. Existing studies remain byte-for-byte
 command compatible because earlier declared workflow versions default the
 option off.
 
+The workflow also emits one `wandb_tags` entry equal to `study_condition`.
+Sample Factory duplicates this into `config.wandb_tags`, giving each condition
+one flat list value shared by all seeds. Keep it to that single generated value;
+additional tags would make the complete config list a different group.
+
 The IntrMotiv runtime registers these fields as metadata-only arguments; they
 do not participate in model or environment behavior. A changed StudySpec must
 still be revalidated and reviewed before submission.

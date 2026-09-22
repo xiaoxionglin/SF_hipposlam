@@ -331,6 +331,7 @@ class StudySpec:
                             f"--study_id={self.study_id}",
                             f"--study_condition={condition}",
                             f"--study_base={base.name}",
+                            f"--wandb_tags={condition}",
                         )
                     arg_templates = [
                         *self.common_args,
