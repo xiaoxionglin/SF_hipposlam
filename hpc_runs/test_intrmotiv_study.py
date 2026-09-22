@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from hpc_runs.graph_stabilized_recruitment_manifest import rows as legacy_rows
-from hpc_runs.intrmotiv_study import SCHEMA_ID, WORKFLOW_VERSION, SpecError, load_study
+from hpc_runs.intrmotiv_study import SCHEMA_ID, WORKFLOW_VERSION, SpecError, StudySpec, load_study
 from hpc_runs.intrmotiv_study.analysis import linear_contrasts, summarize_records
 from hpc_runs.intrmotiv_study.discovery import discover_run_directories
 from hpc_runs.intrmotiv_study.sample_factory import build_run_description
@@ -264,7 +264,8 @@ class SubmissionAuditTests(unittest.TestCase):
     def setUp(self) -> None:
         self.study = load_study(SPEC_PATH)
 
-    def _write_jobs(self, path: Path, remove_first_arg: bool = False) -> None:
+    def _write_jobs(self, path: Path, remove_first_arg: bool = False, study=None) -> None:
+        study = study or self.study
         fields = [
             "job_id",
             "status",
@@ -278,7 +279,7 @@ class SubmissionAuditTests(unittest.TestCase):
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t")
             writer.writeheader()
-            for index, run in enumerate(self.study.expand_runs(), start=1000):
+            for index, run in enumerate(study.expand_runs(), start=1000):
                 args = list(run.args)
                 if remove_first_arg and index == 1000:
                     args.pop(0)
@@ -317,6 +318,16 @@ class SubmissionAuditTests(unittest.TestCase):
             self._write_jobs(path, remove_first_arg=True)
             with self.assertRaisesRegex(SpecError, "missing study arguments"):
                 audit_submission(self.study, path, require_submitted=True)
+
+    def test_submission_audit_requires_explicit_online_spatial_workspace_paths(self):
+        raw = json.loads(SPEC_PATH.read_text())
+        raw["training"]["common_args"].append("--online_spatial_telemetry=True")
+        study = StudySpec.from_mapping(raw)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "jobs.tsv"
+            self._write_jobs(path, study=study)
+            with self.assertRaisesRegex(SpecError, "without explicit --online_spatial_output_root"):
+                audit_submission(study, path, require_submitted=True)
 
 
 class TensorBoardPrimitiveTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 {
   "schema": "intrmotiv/study/v1",
   "workflow_version": "1.10.1",
-  "study_id": "ca3_predictive_active_goals_20260922_preflight",
+  "study_id": "ca3_predictive_active_goals_20260922_preflight_r2",
   "description": "Factorized predictive CA3 readout, confirmed active-goal set, and contextual graph study.",
   "expected_runs": 7,
   "metadata": {
@@ -59,9 +59,9 @@
   },
   "training": {
     "mode": "sample_factory",
-    "batch_name": "ca3_predictive_active_goals_20260922_preflight",
+    "batch_name": "ca3_predictive_active_goals_20260922_preflight_r2",
     "workspace_root": "/work/classic/fr_xl1014-corridor-geometry",
-    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/ca3_predictive_active_goals_20260922_preflight",
+    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/ca3_predictive_active_goals_20260922_preflight_r2",
     "run_name_template": "CA3_{architecture}_{controller}_S{seed}",
     "condition_name_template": "CA3_{architecture}_{controller}",
     "seed_arg": "--seed={seed}",
@@ -117,7 +117,7 @@
       "--with_wandb=True",
       "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
       "--wandb_project=SF_IntrMotiv_CPU2048",
-      "--wandb_group=ca3_predictive_active_goals_20260922_preflight",
+      "--wandb_group=ca3_predictive_active_goals_20260922_preflight_r2",
       "--wandb_dir=/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/wandb",
       "--benchmark=False",
       "--with_number_instruction=True",
@@ -160,6 +160,8 @@
       "--encoder_reward_require_local_predecessor=True",
       "--dmlab_navigation_action_set=True",
       "--online_spatial_telemetry=True",
+      "--online_spatial_workspace_root=/work/classic/fr_xl1014-corridor-geometry",
+      "--online_spatial_output_root=/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/analysis/online_spatial",
       "--online_spatial_snapshot_max_frames=2000000",
       "--exploration_window_steps=10000",
       "--hrl_controllable_graph=True",

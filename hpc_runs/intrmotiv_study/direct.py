@@ -59,9 +59,18 @@ def make_manifest(study, source, slots):
         tokens = dict(a[2:].split("=", 1) for a in args if a.startswith("--") and "=" in a)
         if tokens.get("with_wandb", "").lower() != "true":
             raise ValueError("This queue requires online W&B")
-        for key in ("wandb_dir", "dmlab_level_cache_path", "online_spatial_output_root"):
+        for key in (
+            "wandb_dir",
+            "dmlab_level_cache_path",
+            "online_spatial_output_root",
+            "online_spatial_workspace_root",
+        ):
             if key in tokens and not Path(tokens[key]).resolve().is_relative_to(root):
                 raise ValueError(f"{key} escapes workspace")
+        if tokens.get("online_spatial_telemetry", "").lower() == "true":
+            for key in ("online_spatial_output_root", "online_spatial_workspace_root"):
+                if key not in tokens:
+                    raise ValueError(f"online spatial telemetry requires explicit {key}")
         runs.append({**run.as_dict(), "command": command, "target_frames": int(tokens["train_for_env_steps"])})
     result = {
         **study.provenance(),

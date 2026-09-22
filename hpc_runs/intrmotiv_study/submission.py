@@ -82,6 +82,19 @@ def audit_submission(
         train_dir = flags.get("--train_dir")
         if train_dir is None or not _under_workspace(train_dir, study.workspace_root):
             raise SpecError(f"{run_name} command has no workspace --train_dir")
+        for flag in (
+            "--wandb_dir",
+            "--dmlab_level_cache_path",
+            "--online_spatial_output_root",
+            "--online_spatial_workspace_root",
+        ):
+            value = flags.get(flag)
+            if value is not None and not _under_workspace(value, study.workspace_root):
+                raise SpecError(f"{run_name} {flag} is outside the workspace: {value}")
+        if flags.get("--online_spatial_telemetry", "").lower() == "true":
+            for flag in ("--online_spatial_output_root", "--online_spatial_workspace_root"):
+                if flag not in flags:
+                    raise SpecError(f"{run_name} enables online spatial telemetry without explicit {flag}")
         submitted_tokens = set(shlex.split(row["command"]))
         missing_args = [arg for arg in run.args if arg not in submitted_tokens]
         if missing_args:
