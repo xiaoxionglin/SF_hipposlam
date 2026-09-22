@@ -853,6 +853,12 @@ def validate_snapshot_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in SNAPSHOT_REQUIRED_ARRAYS if key not in payload]
     if missing:
         raise SpatialContractError(f"snapshot is missing arrays: {missing}")
+    from .geometry import validate_geometry_payload
+
+    try:
+        validate_geometry_payload(payload)
+    except ValueError as error:
+        raise SpatialContractError(str(error)) from error
     arrays = _aligned_arrays(*(payload[key] for key in SNAPSHOT_REQUIRED_ARRAYS))
     result = dict(payload)
     for key, value in zip(SNAPSHOT_REQUIRED_ARRAYS, arrays):

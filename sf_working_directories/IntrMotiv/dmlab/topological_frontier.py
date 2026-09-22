@@ -267,6 +267,8 @@ def reliable_edges(graph, confidence_threshold: float, reliability_threshold: fl
     if hasattr(graph, "control_attempts"):
         reliability = (graph.edge_confidence + 1.0) / (graph.control_attempts + 2.0)
         known = known & (reliability >= float(reliability_threshold))
+    selectable = graph.selectable_mask()
+    known &= selectable[:, None] & selectable[None, :]
     known.fill_diagonal_(False)
     return known
 
@@ -278,6 +280,7 @@ def select_least_tested_target(graph, source: int, min_visits: float = 1.0) -> i
         return None
     ids = torch.arange(graph.n_nodes, device=graph.node_visits.device)
     eligible = (graph.node_visits >= float(min_visits)) & (ids != source)
+    eligible &= graph.selectable_mask()
     candidates = torch.where(eligible)[0]
     if not candidates.numel():
         return None
@@ -291,10 +294,11 @@ def select_least_tested_target(graph, source: int, min_visits: float = 1.0) -> i
 def select_least_tested_successor(graph, source: int) -> tuple[int | None, int]:
     """Choose among directed passive first successors, returning target and set size."""
     source = int(source)
-    if source < 0 or source >= graph.n_nodes:
+    if source < 0 or source >= graph.n_nodes or not bool(graph.selectable_mask()[source]):
         return None, 0
     ids = torch.arange(graph.n_nodes, device=graph.passive_confidence.device)
     eligible = (graph.passive_confidence[source] > 0) & (ids != source)
+    eligible &= graph.selectable_mask()
     candidates = torch.where(eligible)[0]
     count = int(candidates.numel())
     if count == 0:
@@ -312,6 +316,8 @@ def validated_paths(
     """All-pairs controlled cost, first hop, and hop count for one policy graph."""
     n = graph.n_nodes
     known = reliable_edges(graph, confidence_threshold, reliability_threshold)
+    selectable = graph.selectable_mask()
+    known &= selectable[:, None] & selectable[None, :]
     dist = torch.where(known, graph.tctrl, torch.full_like(graph.tctrl, torch.inf)).clone()
     idx = torch.arange(n, device=dist.device)
     dist[idx, idx] = 0.0
@@ -378,6 +384,8 @@ def _candidate_edges(
             geometry_max_distance,
             unvalidated=not_reliable,
         )
+    selectable = graph.selectable_mask()
+    candidates &= selectable[:, None] & selectable[None, :]
     return candidates
 
 
@@ -636,6 +644,7 @@ def _advance_options_without_probes(
             else:
                 eligible = (graph.node_visits >= min_target_visits)[None, :].expand(option.size(0), -1)
             eligible = eligible & (ids[None, :] != node[:, None])
+            eligible = eligible & graph.selectable_mask()[None, :]
             attempts = graph.control_attempts[safe_node].masked_fill(~eligible, torch.inf)
             destination = attempts.argmin(dim=-1)
             has_candidate = eligible.any(dim=-1)
@@ -647,6 +656,7 @@ def _advance_options_without_probes(
             explore(mask & ~has_candidate, fallback_score)
             return
         eligible = (graph.node_visits > 0)[None, :].expand(option.size(0), -1)
+        eligible = eligible & graph.selectable_mask()[None, :]
         if waypoint_planning or common_manager:
             eligible = eligible & torch.isfinite(dist[safe_node])
         candidate_scores = scores[None, :].expand_as(eligible).masked_fill(~eligible, -torch.inf)
@@ -747,6 +757,14 @@ def advance_topological_manager(
     generation = graph.representation_generation.to(device=option.device, dtype=option.dtype)
     has_option = (option[:, option_layout.target] > 0) | (option[:, option_layout.source] > 0)
     stale = has_option & (option[:, option_layout.persistent_start] != generation)
+    if graph.contextual:
+        selectable = graph.selectable_mask()
+        target = option[:, option_layout.target].long() - 1
+        source = option[:, option_layout.source].long() - 1
+        final = topo[:, topo_layout.final_goal].long() - 1
+        stale |= (target >= 0) & (target < n_nodes) & ~selectable[target.clamp(0, n_nodes - 1)]
+        stale |= (source >= 0) & (source < n_nodes) & ~selectable[source.clamp(0, n_nodes - 1)]
+        stale |= (final >= 0) & (final < n_nodes) & ~selectable[final.clamp(0, n_nodes - 1)]
     option_prefix = option[:, : option_layout.persistent_start]
     option_prefix.copy_(torch.where(stale[:, None], 0.0, option_prefix))
     topo = torch.where(stale[:, None], 0.0, topo)
@@ -881,7 +899,9 @@ def advance_topological_manager(
                 destination, candidate_count = select_least_tested_successor(graph, source)
             else:
                 destination = select_least_tested_target(graph, source, min_target_visits)
-                candidate_count = max(0, int((graph.node_visits >= float(min_target_visits)).sum().item()) - 1)
+                candidate_count = max(
+                    0, int(((graph.node_visits >= float(min_target_visits)) & graph.selectable_mask()).sum().item()) - 1
+                )
             if destination is None:
                 start_exploration(row, source, float(scores[source].item()) if torch.isfinite(scores[source]) else 0.0)
                 return
@@ -910,7 +930,7 @@ def advance_topological_manager(
         # Direct frontier control commands the selected landmark itself; it
         # does not require an already validated route.  Reachability is a
         # prerequisite only for waypoint/common-manager planning.
-        observed = graph.node_visits > 0
+        observed = (graph.node_visits > 0) & graph.selectable_mask()
         eligible = (reachable & observed) if (waypoint_planning or common_manager) else observed
         ids = torch.where(eligible)[0]
         best_node_score = float(scores[ids].max().item()) if ids.numel() else -math.inf
@@ -1166,6 +1186,10 @@ def update_topological_graph_from_rollout(
         destination = next_topo[:, topo_layout.passive_destination].long() - 1
         accepted = passive & (source >= 0) & (source < n_nodes) & (destination >= 0) & (destination < n_nodes)
         accepted &= source != destination
+        selectable = graph.selectable_mask()
+        accepted &= selectable[source.clamp(0, n_nodes - 1)]
+        accepted &= selectable[destination.clamp(0, n_nodes - 1)]
+        passive_count = accepted.sum()
         edge_index = source[accepted] * n_nodes + destination[accepted]
         old_confidence = graph.passive_confidence.flatten().clone()
         observations = torch.zeros_like(old_confidence)
@@ -1198,11 +1222,13 @@ def update_topological_graph_from_rollout(
     attempt = discovery | exploration_timeout
     frontier_node = prev_option[:, option_layout.source].long() - 1
     attempt &= (frontier_node >= 0) & (frontier_node < n_nodes)
+    attempt &= graph.selectable_mask()[frontier_node.clamp(0, n_nodes - 1)]
     if attempt.any():
         graph.frontier_attempts.scatter_add_(
             0, frontier_node[attempt], torch.ones_like(frontier_node[attempt], dtype=graph.frontier_attempts.dtype)
         )
-    discovered_node = frontier_node[discovery & (frontier_node >= 0) & (frontier_node < n_nodes)]
+    discovery &= attempt
+    discovered_node = frontier_node[discovery]
     if discovered_node.numel():
         graph.frontier_discoveries.scatter_add_(
             0, discovered_node, torch.ones_like(discovered_node, dtype=graph.frontier_discoveries.dtype)

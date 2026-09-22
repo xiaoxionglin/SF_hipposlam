@@ -188,6 +188,12 @@ def optional_graph_arrays(actor_critic) -> dict[str, np.ndarray]:
         ("control_edge_confidence", control, "edge_confidence"),
         ("control_attempts", control, "control_attempts"),
         ("control_tctrl", control, "tctrl"),
+        ("anchor_valid", control, "anchor_valid"),
+        ("anchor_generation", control, "anchor_generation"),
+        ("active_goal_mask", control, "active_goal_mask"),
+        ("active_generation", control, "active_generation"),
+        ("confirmation_count", control, "confirmation_count"),
+        ("command_count", control, "command_count"),
         ("passive_confidence", passive, "confidence"),
         ("passive_elapsed", passive, "elapsed"),
         ("birth_support", passive, "birth_support"),
@@ -197,6 +203,47 @@ def optional_graph_arrays(actor_critic) -> dict[str, np.ndarray]:
         if torch.is_tensor(value):
             arrays[output_name] = value.detach().cpu().numpy().copy()
     return arrays
+
+
+def contextual_alias_diagnostics(pose: pd.DataFrame, activity: np.ndarray, grain: int) -> dict[str, np.ndarray]:
+    """Measure spatial fragmentation of prediction-recognized active goals.
+
+    Coordinates are consumed only here, after the frozen rollout. They never
+    enter the policy, graph, calibration, or contextual recognition path.
+    A component contains occupied bins with at least one recognized sample;
+    the primary component is the one containing the most recognized samples.
+    """
+    from hpc_runs.intrmotiv_study.spatial_contract import _component_labels
+
+    activity = np.asarray(activity)
+    if activity.ndim != 2 or len(pose) != activity.shape[0]:
+        raise ValueError("Contextual activity must align with rollout poses")
+    recognized = activity > 0
+    component_count = np.zeros(activity.shape[1], dtype=np.int16)
+    recognized_count = recognized.sum(axis=0, dtype=np.int64)
+    off_primary_fraction = np.zeros(activity.shape[1], dtype=np.float32)
+    bins = (
+        np.linspace(*XBOUND, grain + 1),
+        np.linspace(*YBOUND, grain + 1),
+    )
+    x_bin = np.digitize(pose["x"].to_numpy(), bins[0]) - 1
+    y_bin = np.digitize(pose["y"].to_numpy(), bins[1]) - 1
+    in_bounds = (x_bin >= 0) & (x_bin < grain) & (y_bin >= 0) & (y_bin < grain)
+    for slot in range(activity.shape[1]):
+        selected = in_bounds & recognized[:, slot]
+        if not selected.any():
+            continue
+        counts = np.zeros((grain, grain), dtype=np.int64)
+        np.add.at(counts, (x_bin[selected], y_bin[selected]), 1)
+        labels, count = _component_labels(counts > 0)
+        component_count[slot] = count
+        masses = np.asarray([counts[labels == label].sum() for label in range(1, count + 1)])
+        off_primary_fraction[slot] = 1.0 - float(masses.max()) / float(masses.sum())
+    return {
+        "contextual_alias_component_count": component_count,
+        "contextual_alias_recognized_count": recognized_count,
+        "contextual_alias_off_primary_fraction": off_primary_fraction,
+    }
 
 
 def spatial_information(rate_map, occupancy):
@@ -272,6 +319,7 @@ def rollout_dg(
 
     core_buffers = []
     worker_buffers = []
+    contextual_goal_buffers = []
     goal_buffers, timeout_buffers = [], []
     pre_threshold_buffers = []
 
@@ -294,6 +342,9 @@ def rollout_dg(
         worker = getattr(_module, "last_worker_dg_activity", None)
         if worker is not None:
             worker_buffers.append(worker.detach().cpu().clone())
+        contextual_goal = getattr(_module, "last_contextual_goal_activity", None)
+        if contextual_goal is not None:
+            contextual_goal_buffers.append(contextual_goal.detach().cpu().clone())
 
     dict(actor_critic.named_modules())["core"].register_forward_hook(core_hook)
 
@@ -405,6 +456,8 @@ def rollout_dg(
         arrays["option_timeouts"] = torch.cat(timeout_buffers).numpy()
     if worker_buffers:
         arrays["worker_dg_activity"] = torch.cat(worker_buffers).numpy()
+    if contextual_goal_buffers:
+        arrays["contextual_goal_activity"] = torch.cat(contextual_goal_buffers).numpy()
     return cfg, checkpoint, pose, dg, pre_threshold_logits, arrays
 
 
@@ -590,6 +643,23 @@ def main():
                 worker_spatial_information=worker_si,
                 worker_active_fraction=worker_fraction,
             )
+        if "contextual_goal_activity" in graph_arrays:
+            contextual = graph_arrays["contextual_goal_activity"]
+            alias = contextual_alias_diagnostics(pose, contextual, args.grain)
+            artifact.update(alias)
+            eligible = alias["contextual_alias_recognized_count"] > 0
+            alias_summary = {
+                "definition": "Eight-connected occupied recognition bins; primary component has most recognized samples",
+                "privileged_evaluation_only": True,
+                "eligible_active_slots": int(eligible.sum()),
+                "mean_component_count": (
+                    float(alias["contextual_alias_component_count"][eligible].mean()) if eligible.any() else 0.0
+                ),
+                "mean_off_primary_fraction": (
+                    float(alias["contextual_alias_off_primary_fraction"][eligible].mean()) if eligible.any() else 0.0
+                ),
+            }
+            (run_out / "contextual_alias_diagnostics.json").write_text(json.dumps(alias_summary, indent=2) + "\n")
             artifact.update(
                 {
                     "worker_" + key: value

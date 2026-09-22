@@ -66,6 +66,9 @@ def differentiable_replay(snapshot, source, operation, *args, source_version: in
     projection = getattr(getattr(source, "encoder", None), "DG_projection", None)
     stop = getattr(getattr(source, "cfg", None), "ppo_dg_gradient", "joint") == "stop"
     stopped = {id(p) for p in projection.parameters()} if stop and projection is not None else set()
+    readout = getattr(getattr(source, "core", None), "state_readout", None)
+    if readout is not None:
+        stopped.update(id(p) for p in readout.parameters())
     parameters = {f"model.{k}": v.detach() if id(v) in stopped else v for k, v in source.named_parameters()}
     buffers = {f"model.{k}": v.detach().clone() for k, v in snapshot.model.named_buffers()}
     # strict matching catches target/online architecture drift, including HER.
@@ -84,6 +87,11 @@ def evaluate_replay(snapshot, operation, *args):
 def fresh_dg_parameter_owner(model):
     """Keep controller Adam state out of the fresh DG-only transaction."""
     owned = {id(p) for p in model.encoder.DG_projection.parameters()}
+    core = getattr(model, "core", None)
+    for module_name in ("state_readout", "innovation_predictor"):
+        module = getattr(core, module_name, None)
+        if module is not None:
+            owned.update(id(p) for p in module.parameters())
     suspended = [p for p in model.parameters() if p.requires_grad and id(p) not in owned]
     for parameter in suspended:
         parameter.requires_grad_(False)

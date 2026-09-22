@@ -32,6 +32,7 @@ class PhysicalDecision:
     terminal_publication: int | None = None
     real_reward: float | None = None
     real_events: dict | None = None
+    anchor_generation: int | None = None
 
     @property
     def key(self):
@@ -145,7 +146,11 @@ class PhysicalReplay:
                 return {k: decode(v) for k, v in value.items()}
             return value
 
-        rows = [PhysicalDecision(**{k: decode(v) for k, v in item.items()}) for item in state["rows"]]
+        rows = []
+        for item in state["rows"]:
+            values = {k: decode(v) for k, v in item.items()}
+            values.setdefault("anchor_generation", None)
+            rows.append(PhysicalDecision(**values))
         self.rows = OrderedDict((row.key, row) for row in rows)
         self.capacity = state["capacity"]
         self.rng.bit_generator.state = state["rng"]

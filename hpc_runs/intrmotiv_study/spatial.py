@@ -85,16 +85,13 @@ def _scalar(payload: Mapping[str, Any], key: str) -> Any:
 def expected_spatial_targets(study: StudySpec) -> tuple[int, ...]:
     explicit = study.telemetry.get("online_spatial_target_frames")
     if explicit is None:
-        standard = study.telemetry.get("target_frames", DEFAULT_TARGETS)
-        explicit = [value for value in standard if int(value) in DEFAULT_TARGETS]
+        explicit = study.telemetry.get("target_frames", DEFAULT_TARGETS)
     try:
         targets = tuple(int(value) for value in explicit)
     except (TypeError, ValueError) as error:
         raise SpecError("telemetry online spatial targets must be integers") from error
     if not targets or len(set(targets)) != len(targets) or any(value <= 0 for value in targets):
         raise SpecError("telemetry online spatial targets must be unique positive integers")
-    if any(value not in DEFAULT_TARGETS for value in targets):
-        raise SpecError(f"online spatial targets must be selected from {DEFAULT_TARGETS}")
     return targets
 
 
@@ -307,6 +304,16 @@ def collect_spatial_detail_records(
                 {
                     **identity,
                     "unit_id": unit,
+                    **(
+                        {
+                            "geometry_sha256": str(_scalar(payload, "geometry_sha256")),
+                            "geometry_field_components_half_peak": int(
+                                payload["geometry_field_components_half_peak"][unit]
+                            ),
+                        }
+                        if "geometry_field_components_half_peak" in payload
+                        else {}
+                    ),
                     "active_fraction": float(details["active_fraction"][unit]),
                     "spatial_information": float(details["spatial_information"][unit]),
                     "active_observation_count": int(details["field_active_observation_count"][unit]),
@@ -435,8 +442,8 @@ def _figure_runtime():
             "font.size": 18,
             "axes.titlesize": 20,
             "axes.labelsize": 18,
-            "xtick.labelsize": 16,
-            "ytick.labelsize": 16,
+            "xtick.labelsize": 20,
+            "ytick.labelsize": 20,
             "legend.fontsize": 16,
             "figure.titlesize": 22,
             "pdf.fonttype": 42,
@@ -455,7 +462,37 @@ def _save_figure(fig, stem: Path, plt) -> list[Path]:
     return outputs
 
 
-def render_place_field_contact_sheets(payload: Mapping[str, Any], output_stem: Path) -> list[Path]:
+ATLAS_FIGURE_STYLE = "segmented-atlas/v1"
+
+
+def overlay_geometry_walls(ax, payload, bounds):
+    """Black walls, gray unvisited floor, and colored observed activity."""
+    if "geometry_accessible_mask" not in payload:
+        return
+    from matplotlib.colors import ListedColormap
+
+    mask = np.asarray(payload["geometry_accessible_mask"], dtype=bool)
+    ax.imshow(
+        np.ma.array(np.ones(mask.shape), mask=mask),
+        origin="lower",
+        extent=(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max),
+        cmap=ListedColormap(["#202020"]),
+        interpolation="nearest",
+        zorder=2,
+    )
+
+
+def render_place_field_contact_sheets(
+    payload: Mapping[str, Any],
+    output_stem: Path,
+    *,
+    title: str | None = None,
+) -> list[Path]:
+    """All units, 16 per page, with explicit per-unit peak normalization.
+
+    Silent units remain visible. One shared 0–1 colorbar describes shape, not
+    absolute response amplitude; unvisited cells are masked independently.
+    """
     plt = _figure_runtime()
     bounds_values = np.asarray(payload["bounds"], dtype=float)
     bounds = SpatialBounds(*bounds_values.tolist())
@@ -463,9 +500,7 @@ def render_place_field_contact_sheets(payload: Mapping[str, Any], output_stem: P
         payload["pose"], payload["dg_activity"], bounds, int(_scalar(payload, "grain"))
     )
     active = (np.asarray(payload["dg_activity"]) > 0).any(axis=0)
-    units = np.flatnonzero(active)
-    if not units.size:
-        units = np.arange(min(1, maps.shape[0]))
+    units = np.arange(maps.shape[0])
     outputs: list[Path] = []
     mask = occupancy == 0
     cmap = plt.get_cmap("viridis").copy()
@@ -475,33 +510,60 @@ def render_place_field_contact_sheets(payload: Mapping[str, Any], output_stem: P
         fig, axes = plt.subplots(4, 4, figsize=(16, 16), constrained_layout=True)
         image = None
         for ax, unit in zip(axes.flat, page_units):
+            peak = float(maps[unit].max())
+            normalized = maps[unit] / peak if peak > 0 else maps[unit]
             image = ax.imshow(
-                np.ma.array(maps[unit], mask=mask),
+                np.ma.array(normalized, mask=mask),
                 origin="lower",
                 extent=(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max),
                 cmap=cmap,
+                vmin=0,
+                vmax=1,
                 interpolation="nearest",
                 aspect="equal",
             )
-            ax.set_title(f"DG unit {int(unit)}")
+            overlay_geometry_walls(ax, payload, bounds)
+            ax.set_title(f"DG unit {int(unit)}" + (" · silent" if not active[unit] else ""))
             ax.set_xticks((bounds.x_min, bounds.x_max))
             ax.set_yticks((bounds.y_min, bounds.y_max))
         for ax in axes.flat[len(page_units) :]:
             ax.set_visible(False)
         if image is not None:
-            fig.colorbar(image, ax=list(axes.flat), shrink=0.65, label="Mean thresholded DG activity")
+            fig.colorbar(image, ax=list(axes.flat), shrink=0.65, label="Activity / unit peak")
         fig.suptitle(
-            f"{_scalar(payload, 'run_name')} · target {int(_scalar(payload, 'target_env_steps')):,} · "
-            f"active units {int(active.sum())}/{active.size} · page {page}"
+            (title or f"{_scalar(payload, 'run_name')} · target {int(_scalar(payload, 'target_env_steps')):,}")
+            + f"\nActive units {int(active.sum())}/{active.size} · page {page} · x/y in DMLab units"
         )
         outputs.extend(_save_figure(fig, output_stem.with_name(f"{output_stem.name}_page{page:02d}"), plt))
     return outputs
 
 
-def render_occupancy_trajectory(payload: Mapping[str, Any], output_stem: Path) -> list[Path]:
+def trajectory_segment_slices(payload: Mapping[str, Any]) -> list[slice]:
+    """Contiguous segments; never join separate streams or cross a terminal."""
+    segments = np.asarray(payload["segment_id"])
+    if not len(segments):
+        return []
+    dones = np.asarray(payload.get("dones", np.zeros(len(segments), dtype=bool)))
+    starts = np.r_[0, np.flatnonzero((segments[1:] != segments[:-1]) | dones[:-1].astype(bool)) + 1]
+    ends = np.r_[starts[1:], len(segments)]
+    return [slice(int(start), int(end)) for start, end in zip(starts, ends)]
+
+
+def render_occupancy_trajectory(
+    payload: Mapping[str, Any],
+    output_stem: Path,
+    *,
+    title: str | None = None,
+) -> list[Path]:
+    """Canonical colored-segment overview, matching the Navigation8 atlas.
+
+    Colors distinguish segments in storage order, not values or global time.
+    Batched artists preserve paths/markers without thousands of plotting calls.
+    """
+    from matplotlib.collections import LineCollection
+
     plt = _figure_runtime()
     pose = np.asarray(payload["pose"], dtype=np.float32)
-    segments = np.asarray(payload["segment_id"], dtype=np.int64)
     bounds_values = np.asarray(payload["bounds"], dtype=float)
     bounds = SpatialBounds(*bounds_values.tolist())
     _, occupancy, _ = spatial_rate_maps(pose, payload["dg_activity"], bounds, int(_scalar(payload, "grain")))
@@ -517,17 +579,31 @@ def render_occupancy_trajectory(payload: Mapping[str, Any], output_stem: Path) -
         aspect="equal",
     )
     fig.colorbar(image, ax=occupancy_ax, shrink=0.78, label="Observations per visited bin")
-    occupancy_ax.set_title("Occupancy (unvisited masked)")
+    overlay_geometry_walls(occupancy_ax, payload, bounds)
+    overlay_geometry_walls(trajectory_ax, payload, bounds)
+    occupancy_ax.set_title(
+        "Occupancy (gray: unvisited; black: walls)"
+        if "geometry_accessible_mask" in payload
+        else "Occupancy (unvisited masked)"
+    )
     occupancy_ax.set_xlabel("x (DMLab units)")
     occupancy_ax.set_ylabel("y (DMLab units)")
 
-    starts = np.r_[0, np.flatnonzero(segments[1:] != segments[:-1]) + 1]
-    ends = np.r_[starts[1:], pose.shape[0]]
+    slices = trajectory_segment_slices(payload)
+    starts = np.array([part.start for part in slices], dtype=int)
+    ends = np.array([part.stop for part in slices], dtype=int)
     colors = plt.get_cmap("turbo")(np.linspace(0.05, 0.95, max(1, len(starts))))
-    for color, start, end in zip(colors, starts, ends):
-        trajectory_ax.plot(pose[start:end, 0], pose[start:end, 1], color=color, linewidth=1.4, alpha=0.8)
-        trajectory_ax.scatter(pose[start, 0], pose[start, 1], color=color, marker="o", s=24)
-        trajectory_ax.scatter(pose[end - 1, 0], pose[end - 1, 1], color=color, marker="x", s=30)
+    if slices:
+        trajectory_ax.add_collection(
+            LineCollection(
+                [pose[part, :2] for part in slices],
+                colors=colors,
+                linewidths=1.4,
+                alpha=0.8,
+            )
+        )
+        trajectory_ax.scatter(pose[starts, 0], pose[starts, 1], c=colors, marker="o", s=24)
+        trajectory_ax.scatter(pose[ends - 1, 0], pose[ends - 1, 1], c=colors, marker="x", s=30)
     stride = max(1, pose.shape[0] // 100)
     yaw = np.deg2rad(pose[::stride, 2])
     trajectory_ax.quiver(
@@ -549,9 +625,72 @@ def render_occupancy_trajectory(payload: Mapping[str, Any], output_stem: Path) -
     trajectory_ax.set_xlabel("x (DMLab units)")
     trajectory_ax.set_ylabel("y (DMLab units)")
     fig.suptitle(
-        f"{_scalar(payload, 'run_name')} · target {int(_scalar(payload, 'target_env_steps')):,} · "
-        f"actual {int(_scalar(payload, 'actual_env_steps')):,}"
+        (
+            title
+            or f"{_scalar(payload, 'run_name')} · target {int(_scalar(payload, 'target_env_steps')):,} · "
+            f"actual {int(_scalar(payload, 'actual_env_steps')):,}"
+        )
+        + "\nColor: segment identity · circle: start · cross: end · arrow: heading"
     )
+    return _save_figure(fig, output_stem, plt)
+
+
+def render_trajectory_segments(
+    payload: Mapping[str, Any],
+    output_stem: Path,
+    *,
+    title: str | None = None,
+) -> list[Path]:
+    """Four evenly spaced non-singleton fragments, using full arena bounds."""
+    plt = _figure_runtime()
+    pose = np.asarray(payload["pose"])
+    bounds = SpatialBounds(*np.asarray(payload["bounds"]).tolist())
+    slices = [part for part in trajectory_segment_slices(payload) if part.stop - part.start > 1]
+    indices = np.unique(np.linspace(0, len(slices) - 1, min(4, len(slices)), dtype=int))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12), constrained_layout=True)
+    for ax, index in zip(axes.flat, indices):
+        overlay_geometry_walls(ax, payload, bounds)
+        line = pose[slices[index], :2]
+        ax.plot(line[:, 0], line[:, 1], color="#0072B2")
+        ax.scatter(*line[0], color="#009E73", marker="o")
+        ax.scatter(*line[-1], color="#D55E00", marker="x")
+        ax.set(
+            xlim=(bounds.x_min, bounds.x_max),
+            ylim=(bounds.y_min, bounds.y_max),
+            aspect="equal",
+            title=f"Segment {index} · {len(line)} samples",
+            xlabel="x (DMLab units)",
+            ylabel="y (DMLab units)",
+        )
+    for ax in axes.flat[len(indices) :]:
+        ax.set_visible(False)
+    fig.suptitle((title or str(_scalar(payload, "run_name"))) + "\nGreen circle: start · orange cross: end")
+    return _save_figure(fig, output_stem, plt)
+
+
+def render_graph_outcomes(
+    attempts: np.ndarray,
+    successes: np.ndarray,
+    output_stem: Path,
+    *,
+    title: str,
+) -> list[Path]:
+    """All attempted directed edges, not just reliable edges; fixed 0–1 scale."""
+    plt = _figure_runtime()
+    attempts, successes = np.asarray(attempts), np.asarray(successes)
+    if attempts.ndim != 2 or attempts.shape[0] != attempts.shape[1] or successes.shape != attempts.shape:
+        raise ValueError("graph counts must be aligned square matrices")
+    if not (np.isfinite(attempts).all() and np.isfinite(successes).all()) or np.any(
+        (attempts < 0) | (successes < 0) | (successes > attempts)
+    ):
+        raise ValueError("graph counts must be finite and 0 <= successes <= attempts")
+    ratio = np.divide(successes, attempts, out=np.full(attempts.shape, np.nan), where=attempts > 0)
+    cmap = plt.get_cmap("viridis").copy()
+    cmap.set_bad("#d9d9d9")
+    fig, ax = plt.subplots(figsize=(10, 10), constrained_layout=True)
+    image = ax.imshow(np.ma.masked_invalid(ratio), vmin=0, vmax=1, cmap=cmap, interpolation="nearest")
+    ax.set(xlabel="Target DG unit", ylabel="Source DG unit", title=title)
+    fig.colorbar(image, ax=ax, shrink=0.7, label="Prospective hits / attempts")
     return _save_figure(fig, output_stem, plt)
 
 

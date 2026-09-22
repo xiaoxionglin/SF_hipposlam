@@ -16,6 +16,7 @@ from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, POLICY_ID_KEY, TRA
 from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.utils.attr_dict import AttrDict
 
+from .ca3_state_readout import paired_anchor_improvement
 from .controller_history import ControllerHistory, reconstruct_controller_histories, reconstruct_controller_history
 from .controller_q import continuing_double_q_target
 from .controller_replay import PhysicalDecision, PhysicalReplay
@@ -200,6 +201,121 @@ class ControllerLearner(DistanceLearnerReward):
     def _after_optimizer_step(self):
         super()._after_optimizer_step()
         self.fresh_dg_steps += 1
+        self._update_contextual_anchors()
+
+    @torch.no_grad()
+    def _update_contextual_anchors(self):
+        """Consume maximal exclusive-DG occurrences after W has been updated."""
+        pending = getattr(self, "_pending_contextual_anchors", None)
+        self._pending_contextual_anchors = None
+        if pending is None:
+            return
+        flat_states, flat_actions, flat_valids, flat_dones, flat_previous, recurrence = pending
+        core = self.actor_critic.core
+        graph = core.policy_graph
+        if graph is None or not graph.contextual:
+            return
+        n, expanded = graph.n_nodes, core.expanded_length
+        streams = flat_states.size(0) // recurrence
+        states = flat_states.reshape(streams, recurrence, -1)
+        dg = states.reshape(streams, recurrence, n, expanded)[..., 0]
+        actions = flat_actions.reshape(streams, recurrence, -1)[..., 0].long()
+        valid = flat_valids.reshape(streams, recurrence).bool()
+        done = flat_dones.reshape(streams, recurrence).bool()
+        previous = flat_previous.reshape(streams, recurrence, -1)[:, 0]
+        previous_dg = previous.reshape(streams, n, expanded)[..., 0]
+        horizon = int(self.cfg.ca3_state_readout_horizon)
+        decision = int(getattr(self.replay, "accepted", self.env_steps))
+        runs = []
+        for stream in range(streams):
+            t = 0
+            while t < recurrence:
+                active = torch.where(dg[stream, t] > 0)[0] if valid[stream, t] else torch.empty(0, device=dg.device)
+                if active.numel() != 1:
+                    t += 1
+                    continue
+                node, start = int(active[0]), t
+                t += 1
+                while t < recurrence and valid[stream, t] and not done[stream, t - 1]:
+                    next_active = torch.where(dg[stream, t] > 0)[0]
+                    if next_active.numel() != 1 or int(next_active[0]) != node:
+                        break
+                    t += 1
+                if start == 0:
+                    prior_active = torch.where(previous_dg[stream] > 0)[0]
+                    if prior_active.numel() == 1 and int(prior_active[0]) == node:
+                        # This chunk begins inside a maximal occurrence; only
+                        # its true onset may register or confirm an anchor.
+                        continue
+                runs.append((stream, start, t, node))
+        for stream, start, end, node in runs:
+            if end - start > 1:
+                for offset in range(start + 1, end):
+                    pair_complete = offset + horizon < recurrence
+                    if pair_complete:
+                        pair_complete = bool(valid[stream, offset : offset + horizon + 1].all()) and not bool(
+                            done[stream, offset : offset + horizon].any()
+                        )
+                    if pair_complete:
+                        graph.add_positive_pair(
+                            states[stream, start],
+                            states[stream, offset],
+                            actions[stream, offset : offset + horizon],
+                            dg[stream, offset + 1 : offset + horizon + 1],
+                        )
+        calibration_started = time.perf_counter()
+        calibrated = graph.recalibrate(
+            core.state_readout,
+            core.innovation_predictor,
+            decision,
+            int(self.cfg.ca3_context_calibration_interval),
+            int(self.cfg.ca3_context_calibration_min_pairs),
+            float(self.cfg.ca3_context_calibration_quantile),
+            float(self.cfg.ca3_state_readout_active_coeff),
+            float(self.cfg.ca3_state_readout_zero_coeff),
+        )
+        if calibrated:
+            self.controller_stats["calibration_seconds"] = time.perf_counter() - calibration_started
+        for stream, start, _end, node in runs:
+            complete = start + horizon < recurrence
+            if complete:
+                complete = bool(valid[stream, start : start + horizon + 1].all()) and not bool(
+                    done[stream, start : start + horizon].any()
+                )
+            candidate = states[stream, start]
+            if not graph.anchor_valid[node]:
+                if complete:
+                    graph.register_anchor(node, candidate, decision)
+                continue
+            if not complete:
+                continue
+            future = dg[stream, start + 1 : start + horizon + 1]
+            action_window = actions[stream, start : start + horizon]
+            if complete and getattr(self.cfg, "ca3_graph_anchor_mode", "fixed") == "champion":
+                mean, lower, score = paired_anchor_improvement(
+                    core.state_readout,
+                    core.innovation_predictor,
+                    graph.anchor_ca3[node],
+                    candidate,
+                    action_window,
+                    future,
+                    float(self.cfg.ca3_state_readout_active_coeff),
+                    float(self.cfg.ca3_state_readout_zero_coeff),
+                )
+                if lower > 0:
+                    graph.replace_anchor(node, candidate, decision, float(score))
+                    continue
+            graph.confirm_anchor(
+                node,
+                candidate,
+                core.state_readout,
+                core.innovation_predictor,
+                action_window,
+                future,
+                float(self.cfg.ca3_state_readout_active_coeff),
+                float(self.cfg.ca3_state_readout_zero_coeff),
+                decision,
+            )
 
     def _calculate_losses(self, mb, num_invalids, iterative_phase, **kwargs):
         if self.cfg.controller_learning != "ddqn":
@@ -316,17 +432,18 @@ class ControllerLearner(DistanceLearnerReward):
                         worker_state=cpu(batch["controller_worker_state"][i, j]) if stored else None,
                         terminal_dg=terminal_labels.get((i, j)),
                         terminal_publication=self.publication if (i, j) in terminal_labels else None,
+                        anchor_generation=int(batch["controller_anchor_generation"][i, j].item()),
                     )
                 )
         self.controller_stats["actor_memory_rebuilds"] = float(batch["controller_memory_stats"][..., 0].max())
         self.controller_stats["actor_memory_rebuild_seconds"] = float(batch["controller_memory_stats"][..., 2].max())
         self.controller_stats["actor_memory_version_failures"] = float(batch["controller_memory_stats"][..., 1].max())
 
-    def _example(self, key):
+    def _example(self, key, allow_stale_anchor=False):
         if getattr(self.cfg, "controller_replay_state", "reconstruct") == "stored":
             from .controller_stored_replay import example_from_replay
 
-            return example_from_replay(self, key)
+            return example_from_replay(self, key, allow_stale_anchor=allow_stale_anchor)
         prefix, suffix = self.replay.sequence(key, self.actor_critic.core.expanded_length, 2)
         row = suffix[0]
         generation = int(self.actor_critic.core.policy_graph.representation_generation.item())
@@ -551,10 +668,19 @@ class ControllerLearner(DistanceLearnerReward):
             aux_qs = []
             started = time.perf_counter()
             if self.cfg.controller_her:
-                selected = [
-                    examples[int(self.her_rng.integers(len(examples)))]
-                    for _ in range(self.cfg.controller_her_positions)
-                ]
+                # HER source material is independent of online command
+                # authority: obsolete/inactive anchors remain valid exact
+                # achieved endpoints, while structural DG generations do not.
+                selected = []
+                for key in self.replay.candidate_order():
+                    try:
+                        selected.append(self._example(key, allow_stale_anchor=True))
+                    except (ReplayRejected, ValueError) as exc:
+                        if type(exc) is ValueError and str(exc) not in ("missing_history", "cross_episode"):
+                            raise
+                        self.replay.reject(str(exc))
+                    if len(selected) >= self.cfg.controller_her_positions:
+                        break
                 for result in self._evaluate_pairs(self._her_examples(selected)):
                     if isinstance(result, str):
                         self.replay.reject(result)
@@ -637,6 +763,32 @@ class ControllerLearner(DistanceLearnerReward):
             fresh_graph_batches=self.fresh_graph_batches,
             transaction_seconds=time.perf_counter() - started,
         )
+        graph = self.actor_critic.core.policy_graph
+        if graph is not None:
+            self.controller_stats.setdefault("calibration_seconds", 0.0)
+            ready = bool(graph.calibration_ready) if graph.contextual else False
+            self.controller_stats.update(
+                active_goal_count=float(graph.selectable_mask().sum()) if graph.contextual else 0.0,
+                anchor_registrations=float(graph.anchor_registrations) if graph.contextual else 0.0,
+                confirmation_attempts=float(graph.confirmation_attempts) if graph.contextual else 0.0,
+                confirmation_successes=float(graph.confirmation_successes) if graph.contextual else 0.0,
+                anchor_replacements=float(graph.anchor_replacements) if graph.contextual else 0.0,
+                anchor_deactivations=float(graph.anchor_deactivations) if graph.contextual else 0.0,
+                calibration_ready=float(ready),
+                recognition_threshold=float(graph.recognition_threshold) if ready else 0.0,
+                prediction_absolute_threshold=float(graph.prediction_absolute_threshold) if ready else 0.0,
+                prediction_excess_threshold=float(graph.prediction_excess_threshold) if ready else 0.0,
+                calibration_pair_count=float(graph.calibration_count) if graph.contextual else 0.0,
+                activation_latency_mean=(
+                    float(graph.activation_latency_sum / graph.activation_latency_count.clamp_min(1))
+                    if graph.contextual
+                    else 0.0
+                ),
+                empty_set_exploration=float(graph.empty_set_exploration_count),
+            )
+            self.controller_stats.update(
+                {f"command_slot_{slot:02d}": float(value) for slot, value in enumerate(graph.command_count)}
+            )
         for group, counts in self._optimizer_step_counts().items():
             self.controller_stats[group + "_optimizer_steps_min"] = min(counts.values(), default=0)
             self.controller_stats[group + "_optimizer_steps_max"] = max(counts.values(), default=0)

@@ -223,7 +223,16 @@ class BaseLearner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        params = list(self.actor_critic.parameters())
+        # Modules can opt into a stable LR ratio without coupling the generic
+        # scheduler to application-specific parameter names.
+        grouped = {}
+        for parameter in self.actor_critic.parameters():
+            scale = float(getattr(parameter, "_intrmotiv_lr_scale", 1.0))
+            grouped.setdefault(scale, []).append(parameter)
+        params = [
+            {"params": group, "lr": self.cfg.learning_rate * scale, "intrmotiv_lr_scale": scale}
+            for scale, group in sorted(grouped.items())
+        ]
 
         optimizer_cls = dict(adam=torch.optim.Adam, lamb=Lamb)
         if self.cfg.optimizer not in optimizer_cls:
@@ -509,13 +518,13 @@ class BaseLearner(Configurable):
 
     def _optimizer_lr(self):
         for param_group in self.optimizer.param_groups:
-            return param_group["lr"]
+            return param_group["lr"] / float(param_group.get("intrmotiv_lr_scale", 1.0))
 
     def _apply_lr(self, lr: float) -> None:
         """Change learning rate in the optimizer."""
         if lr != self._optimizer_lr():
             for param_group in self.optimizer.param_groups:
-                param_group["lr"] = lr
+                param_group["lr"] = lr * float(param_group.get("intrmotiv_lr_scale", 1.0))
 
     def _get_minibatches(self, batch_size, experience_size):
         """Generating minibatches for training."""

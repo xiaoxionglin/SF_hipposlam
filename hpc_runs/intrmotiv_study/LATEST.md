@@ -1,19 +1,63 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.8.1` (desktop and canonical NEMO2 checkout)
+- Implementation: `1.10.1` (corridor geometry release; see deployment record below)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 runtime copy: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/hpc_runs/intrmotiv_study/`
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
 
+
+## 1.10.1 scalar-history export
+
+`collect-online --export-histories` saves every selected scalar event and input
+file provenance during the existing scan. `--loader-backend process` permits an
+execution-only override recorded in analysis metadata without changing the
+training StudySpec. Use these for learning curves and additional windows without
+repeated multi-gigabyte TensorBoard reads. Study definitions remain unchanged.
+
+## 1.10.0 corridor geometry
+
+Adds verified geometry archives, accessible-area episode coverage helpers,
+traversability-aware field components, isolated DMLab runfiles, and wall overlays.
+Existing study/NPZ schemas remain v1; geometry fields are optional additions.
+The 27-run screen and nine-run qualification are `corridor_geometry.study.json`
+and `corridor_geometry_preflight.study.json`. Deployment and qualification
+status: `06_experiments/corridor_geometry_20260919.md`. Do not infer production
+qualification from a rendered plan or a successful unit test.
+
+## 1.9.0 standardized atlas figures — verified CPU2048 regeneration
+
+All online atlas figure recipes now live in `spatial.py`: all-unit normalized
+field pages, colored independent-segment occupancy/trajectory overviews,
+four deterministic segment examples, and directed prospective-outcome matrices.
+The CPU2048 adapter calls these recipes instead of duplicating plotting logic.
+Style identifier: `segmented-atlas/v1`. See the canonical guide for encodings.
+38 tests pass both locally and in the isolated NEMO2 copy (atlas, target
+declarations, and canonical workflow). All 24 CPU2048 entries were regenerated
+at the original 25M comparison, with F16/F64 visual checks and stable figure
+URLs. The scientific tables are unchanged. Shared training code remains
+untouched; do not infer shared-checkout deployment from the analysis version.
+
+For isolated test staging, include both `graph_stabilized_recruitment.study.json`
+and `ca3_memory_novelty_goal.study.json` plus the legacy manifest adapter. An
+initial remote test run failed only because the second fixture was absent;
+the unchanged 38-test suite passed after copying it. The authentication pause
+was resolved by the user's manual OTP login before automated access resumed.
+
 ## September 15 canonical source consolidation
 
-The canonical NEMO2 `SF_hipposlam` checkout now includes workflow 1.8.1 and the
-qualified controller integration on `codex/nemo-consolidation-20260915`.
-The integrated NEMO runtime/workflow/world-model suite passed 573 tests with 10
-CUDA skips; desktop passed 583. Earlier deployment notes below are historical.
-See `docs/intrmotiv_source_consolidation.md` for preservation and retirement.
+September 17 patch: spatial collection now honors all declared telemetry targets,
+including 150M/300M. Previously it intersected them with historical 5M–100M
+defaults, rejecting actual late snapshots and undercounting expected artifacts.
+Regression: `hpc_runs.test_spatial_target_declarations`. The shared training
+checkout is unchanged; use the isolated CPU2048 analysis copy pending deployment.
+
+Workflow 1.8.1 is now in the canonical NEMO2 `SF_hipposlam` checkout on
+`codex/nemo-consolidation-20260915`. Integrated NEMO runtime/workflow/world-model
+verification passed 573 tests with 10 CUDA skips; desktop passed 583 tests.
+Earlier deployment notes below are historical. See the root `infra.md` entry
+and the runtime's `docs/intrmotiv_source_consolidation.md` for retirement records.
 
 ## 1.8.1 checkpoint target discovery
 

@@ -9,6 +9,7 @@ from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 from sample_factory.model.core import ModelCore, ModelCoreIdentity, ModelCoreRNN
 from sample_factory.utils.typing import Config
 from sample_factory.utils.utils import log
+from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import CA3StateReadout, CausalDGInnovationPredictor
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import ContextualDGFeedback
 from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import (
     RECRUITMENT_HISTORY_SIZE,
@@ -592,8 +593,43 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.mode_condition_start = self.geometry_condition_start + (
             GEOMETRY_POLICY_SIZE if self.topological_enabled and self.landmark_geometry == "se2" else 0
         )
+        self.readout_mode = getattr(cfg, "ca3_state_readout_mode", "off")
+        self.worker_goal_mode = getattr(cfg, "ca3_worker_goal_mode", "target_id")
+        self.anchor_mode = getattr(cfg, "ca3_graph_anchor_mode", "off")
+        self.contextual_graph_hits = bool(getattr(cfg, "ca3_graph_contextual_hits", False))
+        self.state_readout = None
+        self.innovation_predictor = None
+        if self.readout_mode != "off":
+            state_dim = int(getattr(cfg, "ca3_state_readout_dim", 16))
+            action_count = (
+                5
+                if bool(getattr(cfg, "dmlab_reduced_action_set", False))
+                else (
+                    15
+                    if bool(getattr(cfg, "dmlab_extended_action_set", False))
+                    else (8 if bool(getattr(cfg, "dmlab_navigation_action_set", False)) else 9)
+                )
+            )
+            self.state_readout = CA3StateReadout(
+                self.core_output_size, state_dim, float(getattr(cfg, "ca3_state_readout_lr_scale", 0.2))
+            )
+            self.innovation_predictor = CausalDGInnovationPredictor(
+                state_dim,
+                action_count,
+                int(getattr(cfg, "ca3_state_readout_horizon", 16)),
+                self.Hippo_n_feature,
+                int(getattr(cfg, "ca3_state_readout_hidden_size", 128)),
+                bool(getattr(cfg, "ca3_state_readout_action_conditioning", True)),
+            )
+        contextual_anchors = self.anchor_mode != "off"
         self.policy_graph = (
-            PolicyControllableGraph(self.Hippo_n_feature)
+            PolicyControllableGraph(
+                self.Hippo_n_feature,
+                self.core_output_size if contextual_anchors else 0,
+                contextual_anchors,
+                int(getattr(cfg, "ca3_context_calibration_capacity", 512)),
+                int(getattr(cfg, "ca3_state_readout_horizon", 16)) if contextual_anchors else 0,
+            )
             if self.hrl_enabled and self.hrl_graph_memory == "policy_buffer"
             else None
         )
@@ -620,6 +656,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 self.context_gradient_mode,
             )
         self.last_dg_activity = None
+        # Evaluation-only observation of the activity that remains after
+        # contextual recognition. The policy never reads this attribute.
+        self.last_contextual_goal_activity = None
         self.last_context_feedback_stats = {}
 
     def _split_state(self, rnn_states):
@@ -696,7 +735,53 @@ class SimpleSequenceWithBypassCore(ModelCore):
             self.L,
         )
 
-    def _update_hrl(self, hrl_state, dg_activity, prev_core_state, action_features=None):
+    def worker_view(self, output: Tensor, goal_ca3: Tensor | None = None, goal_override_mask: Tensor | None = None):
+        """Detached worker-only z-state and optional continuous goal view."""
+        if self.readout_mode != "worker":
+            return output.detach()
+        assert self.state_readout is not None
+        state = self.state_readout(output[:, : self.core_output_size]).detach()
+        bypass = output[:, self.core_output_size : self.target_condition_start]
+        condition = output[:, self.target_condition_start : self.target_condition_start + self.Hippo_n_feature]
+        suffix = output[:, self.target_condition_start + self.Hippo_n_feature :]
+        if self.worker_goal_mode == "target_id":
+            goal = condition
+        else:
+            if self.policy_graph is None:
+                online_goal = output.new_zeros(output.size(0), self.core_output_size)
+            else:
+                online_goal = condition @ self.policy_graph.anchor_ca3.to(condition)
+            if goal_ca3 is not None:
+                mask = goal_override_mask
+                if mask is None:
+                    mask = torch.ones(output.size(0), dtype=torch.bool, device=output.device)
+                online_goal = torch.where(mask.reshape(-1, 1), goal_ca3.to(online_goal), online_goal)
+            goal = online_goal if self.worker_goal_mode == "raw_ca3" else self.state_readout(online_goal).detach()
+        return torch.cat((state, bypass.detach(), goal.detach(), suffix.detach()), dim=-1)
+
+    @property
+    def worker_target_condition_start(self) -> int:
+        if self.readout_mode != "worker":
+            return self.target_condition_start
+        return int(getattr(self.cfg, "ca3_state_readout_dim", 16)) + self.target_condition_start - self.core_output_size
+
+    @property
+    def worker_goal_size(self) -> int:
+        if self.worker_goal_mode == "target_id":
+            return self.Hippo_n_feature
+        if self.worker_goal_mode == "raw_ca3":
+            return self.core_output_size
+        return int(getattr(self.cfg, "ca3_state_readout_dim", 16))
+
+    def _update_hrl(self, hrl_state, dg_activity, prev_core_state, action_features=None, current_ca3=None):
+        if self.contextual_graph_hits:
+            assert self.policy_graph is not None and self.state_readout is not None and current_ca3 is not None
+            dg_activity = self.policy_graph.contextual_activity(
+                dg_activity, current_ca3, self.state_readout, self.innovation_predictor
+            )
+            self.last_contextual_goal_activity = dg_activity.detach()
+        else:
+            self.last_contextual_goal_activity = None
         if self.hrl_graph_memory == "policy_buffer":
             assert self.policy_graph is not None
             if self.topological_enabled:
@@ -929,7 +1014,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                         action_valid = curr_core.new_zeros((curr_core.size(0), ACTION_FEATURE_SIZE))
                     if replay_conditions is None:
                         hrl_valid, target_valid = self._update_hrl(
-                            hrl_state[valid_idx], curr_core, prev_core_valid, action_valid
+                            hrl_state[valid_idx], curr_core, prev_core_valid, action_valid, tmp_state[0].flatten(1)
                         )
                         hrl_state[valid_idx] = hrl_valid
                         hrl_seq[t, valid_idx] = target_valid
@@ -1037,7 +1122,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     action_features = head_output[:, action_start:action_end]
                 else:
                     action_features = core_input.new_zeros((B, ACTION_FEATURE_SIZE))
-                hrl_state, target = self._update_hrl(hrl_state, core_input, core_state, action_features)
+                hrl_state, target = self._update_hrl(hrl_state, core_input, core_state, action_features, flat_core)
                 hidden_action_features = self.action_feature_size + self.context_action_count
                 policy_base_out = base_out[:, :-hidden_action_features] if hidden_action_features else base_out
                 out = torch.cat([policy_base_out, target], dim=1)

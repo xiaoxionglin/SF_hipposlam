@@ -7,6 +7,11 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import (
+    action_probe_signature,
+    predictive_window_consistency,
+)
+
 
 @dataclass(frozen=True)
 class HRLStateLayout:
@@ -426,9 +431,20 @@ def update_hrl_state(
 class PolicyControllableGraph(nn.Module):
     """Policy-scoped Hebbian controllability memory stored as model buffers."""
 
-    def __init__(self, n_nodes: int):
+    def __init__(
+        self,
+        n_nodes: int,
+        ca3_size: int = 0,
+        contextual: bool = False,
+        calibration_capacity: int = 512,
+        prediction_horizon: int = 0,
+    ):
         super().__init__()
         self.n_nodes = int(n_nodes)
+        self.ca3_size = int(ca3_size)
+        self.contextual = bool(contextual)
+        self.calibration_capacity = int(calibration_capacity)
+        self.prediction_horizon = int(prediction_horizon)
         self.register_buffer("node_visits", torch.zeros(self.n_nodes))
         self.register_buffer("tctrl", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("edge_confidence", torch.zeros(self.n_nodes, self.n_nodes))
@@ -446,6 +462,43 @@ class PolicyControllableGraph(nn.Module):
         self.register_buffer("pose_valid", torch.zeros(self.n_nodes, dtype=torch.bool))
         self.register_buffer("pose_stress", torch.zeros(()))
         self.register_buffer("representation_generation", torch.zeros((), dtype=torch.int64))
+        # Per-address contextual identity. F64 is capacity; only the predicate
+        # returned by selectable_mask grants online command authority.
+        self.register_buffer("anchor_ca3", torch.zeros(self.n_nodes, self.ca3_size))
+        self.register_buffer("anchor_valid", torch.zeros(self.n_nodes, dtype=torch.bool))
+        self.register_buffer("anchor_generation", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("anchor_last_update", torch.full((self.n_nodes,), -1, dtype=torch.int64))
+        self.register_buffer("anchor_last_score", torch.full((self.n_nodes,), float("inf")))
+        self.register_buffer("active_goal_mask", torch.zeros(self.n_nodes, dtype=torch.bool))
+        self.register_buffer("active_generation", torch.full((self.n_nodes,), -1, dtype=torch.int64))
+        self.register_buffer("confirmation_count", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("command_count", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("empty_set_exploration_count", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("recognition_threshold", torch.zeros(()))
+        self.register_buffer("prediction_absolute_threshold", torch.full((), float("inf")))
+        self.register_buffer("prediction_excess_threshold", torch.full((), float("inf")))
+        self.register_buffer("calibration_ready", torch.zeros((), dtype=torch.bool))
+        self.register_buffer("calibration_left", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer("calibration_right", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer(
+            "calibration_actions", torch.zeros(self.calibration_capacity, self.prediction_horizon, dtype=torch.int64)
+        )
+        self.register_buffer(
+            "calibration_targets", torch.zeros(self.calibration_capacity, self.prediction_horizon, self.n_nodes)
+        )
+        self.register_buffer("calibration_count", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("calibration_cursor", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("calibration_last_decision", torch.zeros((), dtype=torch.int64))
+        for name in (
+            "anchor_registrations",
+            "confirmation_attempts",
+            "confirmation_successes",
+            "anchor_replacements",
+            "anchor_deactivations",
+        ):
+            self.register_buffer(name, torch.zeros((), dtype=torch.int64))
+        self.register_buffer("activation_latency_sum", torch.zeros((), dtype=torch.float64))
+        self.register_buffer("activation_latency_count", torch.zeros((), dtype=torch.int64))
         # Cumulative outcomes evaluated against the graph as it existed before
         # each learner batch. These are diagnostic-only and never condition the
         # policy or graph updates.
@@ -486,6 +539,34 @@ class PolicyControllableGraph(nn.Module):
             "pose_valid",
             "pose_stress",
             "representation_generation",
+            "anchor_ca3",
+            "anchor_valid",
+            "anchor_generation",
+            "anchor_last_update",
+            "anchor_last_score",
+            "active_goal_mask",
+            "active_generation",
+            "confirmation_count",
+            "command_count",
+            "empty_set_exploration_count",
+            "recognition_threshold",
+            "prediction_absolute_threshold",
+            "prediction_excess_threshold",
+            "calibration_ready",
+            "calibration_left",
+            "calibration_right",
+            "calibration_actions",
+            "calibration_targets",
+            "calibration_count",
+            "calibration_cursor",
+            "calibration_last_decision",
+            "anchor_registrations",
+            "confirmation_attempts",
+            "confirmation_successes",
+            "anchor_replacements",
+            "anchor_deactivations",
+            "activation_latency_sum",
+            "activation_latency_count",
             "prospective_attempts",
             "prospective_successes",
             "prospective_probability_sum",
@@ -506,18 +587,141 @@ class PolicyControllableGraph(nn.Module):
             error_msgs,
         )
 
+    def selectable_mask(self) -> Tensor:
+        """Canonical online-goal authority predicate (legacy is unchanged)."""
+        if not self.contextual:
+            return torch.ones(self.n_nodes, dtype=torch.bool, device=self.node_visits.device)
+        return self.active_goal_mask & self.anchor_valid & (self.active_generation == self.anchor_generation)
+
     @torch.no_grad()
-    def invalidate_node(self, node: int) -> None:
-        """Forget graph evidence tied to a reassigned DG representation."""
+    def register_anchor(self, node: int, ca3: Tensor, decision: int) -> None:
         node = int(node)
-        if node < 0 or node >= self.n_nodes:
-            raise IndexError(f"DG node {node} is outside [0, {self.n_nodes})")
+        if self.anchor_valid[node]:
+            raise ValueError("register_anchor cannot overwrite an incumbent")
+        self.anchor_ca3[node].copy_(ca3.detach().to(self.anchor_ca3))
+        self.anchor_valid[node] = True
+        self.anchor_last_update[node] = int(decision)
+        self.anchor_last_score[node] = float("inf")
+        self.active_goal_mask[node] = False
+        self.active_generation[node] = -1
+        self.confirmation_count[node] = 0
+        self.anchor_registrations.add_(1)
+
+    @torch.no_grad()
+    def add_positive_pair(self, left: Tensor, right: Tensor, actions: Tensor, targets: Tensor) -> None:
+        if not self.contextual or not self.calibration_capacity:
+            return
+        cursor = int(self.calibration_cursor.item()) % self.calibration_capacity
+        self.calibration_left[cursor].copy_(left.detach().to(self.calibration_left))
+        self.calibration_right[cursor].copy_(right.detach().to(self.calibration_right))
+        self.calibration_actions[cursor].copy_(actions.detach().to(self.calibration_actions))
+        self.calibration_targets[cursor].copy_(targets.detach().to(self.calibration_targets))
+        self.calibration_cursor.add_(1)
+        self.calibration_count.fill_(min(int(self.calibration_count.item()) + 1, self.calibration_capacity))
+
+    @torch.no_grad()
+    def recalibrate(
+        self,
+        readout: nn.Module,
+        predictor: nn.Module,
+        decision: int,
+        interval: int,
+        min_pairs: int,
+        quantile: float,
+        active_coeff: float,
+        zero_coeff: float,
+    ) -> bool:
+        count = int(self.calibration_count.item())
+        if count < int(min_pairs) or int(decision) - int(self.calibration_last_decision.item()) < int(interval):
+            return False
+        left = self.calibration_left[:count]
+        right = self.calibration_right[:count]
+        left_signature = F.normalize(action_probe_signature(readout, predictor, left), dim=-1)
+        right_signature = F.normalize(action_probe_signature(readout, predictor, right), dim=-1)
+        similarities = (left_signature * right_signature).sum(-1)
+        absolute, excess = predictive_window_consistency(
+            readout,
+            predictor,
+            left,
+            right,
+            self.calibration_actions[:count],
+            self.calibration_targets[:count],
+            active_coeff,
+            zero_coeff,
+        )
+        upper_quantile = 1.0 - float(quantile)
+        self.recognition_threshold.copy_(torch.quantile(similarities, float(quantile)))
+        self.prediction_absolute_threshold.copy_(torch.quantile(absolute, upper_quantile))
+        self.prediction_excess_threshold.copy_(torch.quantile(excess, upper_quantile))
+        self.calibration_ready.fill_(True)
+        self.calibration_last_decision.fill_(int(decision))
+        return True
+
+    @torch.no_grad()
+    def recognition_similarity(self, node: int, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
+        candidate = F.normalize(action_probe_signature(readout, predictor, ca3.detach()), dim=-1)
+        anchor = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[int(node)]), dim=-1)
+        return (candidate * anchor).sum()
+
+    @torch.no_grad()
+    def confirm_anchor(
+        self,
+        node: int,
+        ca3: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        actions: Tensor,
+        targets: Tensor,
+        active_coeff: float,
+        zero_coeff: float,
+        decision: int | None = None,
+    ) -> bool:
+        node = int(node)
+        if not self.anchor_valid[node] or not bool(self.calibration_ready):
+            return False
+        self.confirmation_attempts.add_(1)
+        absolute, excess = predictive_window_consistency(
+            readout,
+            predictor,
+            self.anchor_ca3[node],
+            ca3,
+            actions,
+            targets,
+            active_coeff,
+            zero_coeff,
+        )
+        if absolute > self.prediction_absolute_threshold or excess > self.prediction_excess_threshold:
+            return False
+        self.confirmation_count[node].add_(1)
+        if not self.selectable_mask()[node]:
+            self.active_goal_mask[node] = True
+            self.active_generation[node] = self.anchor_generation[node]
+            self.confirmation_successes.add_(1)
+            if decision is not None:
+                self.activation_latency_sum.add_(float(max(0, int(decision) - int(self.anchor_last_update[node]))))
+                self.activation_latency_count.add_(1)
+        return True
+
+    @torch.no_grad()
+    def contextual_activity(self, dg_activity: Tensor, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
+        """Recognize only exclusive, currently selectable anchor generations."""
+        exclusive = (dg_activity > 0).sum(-1) == 1
+        node = dg_activity.argmax(-1)
+        allowed = exclusive & self.selectable_mask()[node]
+        result = torch.zeros_like(dg_activity)
+        for row in torch.where(allowed)[0].tolist():
+            j = int(node[row])
+            if self.recognition_similarity(j, ca3[row], readout, predictor) >= self.recognition_threshold:
+                result[row, j] = dg_activity[row, j]
+        return result
+
+    @torch.no_grad()
+    def _clear_node_evidence(self, node: int) -> None:
+        node = int(node)
         self.node_visits[node] = 0
-        self.tctrl[node, :] = 0
-        self.tctrl[:, node] = 0
-        self.edge_confidence[node, :] = 0
-        self.edge_confidence[:, node] = 0
         for matrix in (
+            self.tctrl,
+            self.edge_confidence,
             self.control_attempts,
             self.passive_confidence,
             self.passive_time,
@@ -541,15 +745,52 @@ class PolicyControllableGraph(nn.Module):
         self.frontier_discoveries[node] = 0
         self.landmark_pose[node] = 0
         self.pose_valid[node] = False
+
+    @torch.no_grad()
+    def replace_anchor(self, node: int, ca3: Tensor, decision: int, score: float) -> None:
+        node = int(node)
+        if self.active_goal_mask[node]:
+            self.anchor_deactivations.add_(1)
+        self._clear_node_evidence(node)
+        self.anchor_generation[node].add_(1)
+        self.anchor_ca3[node].copy_(ca3.detach().to(self.anchor_ca3))
+        self.anchor_valid[node] = True
+        self.anchor_last_update[node] = int(decision)
+        self.anchor_last_score[node] = float(score)
+        self.active_goal_mask[node] = False
+        self.active_generation[node] = -1
+        self.confirmation_count[node] = 0
+        self.anchor_replacements.add_(1)
+
+    @torch.no_grad()
+    def invalidate_node(self, node: int) -> None:
+        """Forget graph evidence tied to a reassigned DG representation."""
+        node = int(node)
+        if node < 0 or node >= self.n_nodes:
+            raise IndexError(f"DG node {node} is outside [0, {self.n_nodes})")
+        self._clear_node_evidence(node)
+        if self.contextual:
+            if self.active_goal_mask[node]:
+                self.anchor_deactivations.add_(1)
+            self.anchor_valid[node] = False
+            self.active_goal_mask[node] = False
+            self.active_generation[node] = -1
+            self.confirmation_count[node] = 0
+            self.anchor_generation[node].add_(1)
         self.representation_generation.add_(1)
 
     def expanded_state(self, batch_size: int, dtype: torch.dtype, device: torch.device) -> Tensor:
         """Materialize a read-only snapshot in the legacy packed graph layout."""
         layout = HRLStateLayout(self.n_nodes)
         state = torch.zeros(batch_size, layout.size, dtype=dtype, device=device)
-        state[:, layout.visits_start : layout.visits_end] = self.node_visits.to(device=device, dtype=dtype)
-        state[:, layout.tctrl_start : layout.tctrl_end] = self.tctrl.to(device=device, dtype=dtype).flatten()
-        state[:, layout.edge_strength_start : layout.edge_strength_end] = self.edge_confidence.to(
+        selectable = self.selectable_mask()
+        endpoints = selectable[:, None] & selectable[None, :]
+        visits = self.node_visits * selectable.to(self.node_visits.dtype)
+        tctrl = self.tctrl * endpoints.to(self.tctrl.dtype)
+        confidence = self.edge_confidence * endpoints.to(self.edge_confidence.dtype)
+        state[:, layout.visits_start : layout.visits_end] = visits.to(device=device, dtype=dtype)
+        state[:, layout.tctrl_start : layout.tctrl_end] = tctrl.to(device=device, dtype=dtype).flatten()
+        state[:, layout.edge_strength_start : layout.edge_strength_end] = confidence.to(
             device=device, dtype=dtype
         ).flatten()
         return state
@@ -590,6 +831,7 @@ class PolicyControllableGraph(nn.Module):
         unsuccessful = (nxt[:, layout.option_expired] > 0) & valid
         source = prev[:, layout.source].long() - 1
         target = prev[:, layout.target].long() - 1
+        next_target = nxt[:, layout.target].long() - 1
         normal_target = (target >= 0) & (target < self.n_nodes)
         exploration_target = target == self.n_nodes
         negative_elapsed = nxt[:, layout.completion_elapsed] < 0
@@ -598,6 +840,16 @@ class PolicyControllableGraph(nn.Module):
         target_timeout = unsuccessful & normal_target & (~negative_elapsed)
         timeout = target_timeout | exploration_timeout
         completed = hit | wrong_outcome | timeout
+        if self.contextual:
+            issued = valid & (next_target >= 0) & (next_target < self.n_nodes) & (next_target != target)
+            issued &= self.selectable_mask()[next_target.clamp(0, self.n_nodes - 1)]
+            if issued.any():
+                self.command_count.scatter_add_(
+                    0, next_target[issued], torch.ones_like(next_target[issued], dtype=self.command_count.dtype)
+                )
+            if not self.selectable_mask().any():
+                exploration_issued = valid & (next_target == self.n_nodes) & (next_target != target)
+                self.empty_set_exploration_count.add_(exploration_issued.sum())
         future_events = torch.flip(torch.cumsum(torch.flip(completed.to(torch.int64), (0,)), 0), (0,))
         future_events = future_events - completed.to(torch.int64)
         gamma_future = torch.pow(
@@ -617,11 +869,17 @@ class PolicyControllableGraph(nn.Module):
         self.frontier_discoveries.mul_(gamma_total)
         active = nxt[:, layout.active_dg].long() - 1
         active_mask = valid & (active >= 0) & (active < self.n_nodes)
+        if self.contextual:
+            active_mask &= self.selectable_mask()[active.clamp(0, self.n_nodes - 1)]
         if active_mask.any():
             self.node_visits.scatter_add_(0, active[active_mask], gamma_future[active_mask])
 
         attempted = (hit | wrong_outcome | target_timeout) & (source >= 0) & (source < self.n_nodes)
         attempted = attempted & (target >= 0) & (target < self.n_nodes) & (source != target)
+        if self.contextual:
+            selectable = self.selectable_mask()
+            attempted &= selectable[source.clamp(0, self.n_nodes - 1)]
+            attempted &= selectable[target.clamp(0, self.n_nodes - 1)]
         prospective = attempted.clone()
         if prospective.any():
             prospective = (
@@ -658,6 +916,10 @@ class PolicyControllableGraph(nn.Module):
             self.control_attempts.flatten().scatter_add_(0, attempt_index, attempt_weights)
         success = hit & (source >= 0) & (source < self.n_nodes) & (target >= 0) & (target < self.n_nodes)
         success = success & (source != target)
+        if self.contextual:
+            selectable = self.selectable_mask()
+            success &= selectable[source.clamp(0, self.n_nodes - 1)]
+            success &= selectable[target.clamp(0, self.n_nodes - 1)]
         if success.any():
             edge_index = source[success] * self.n_nodes + target[success]
             weights = gamma_future[success]
@@ -726,6 +988,13 @@ def update_option_state_from_policy_graph(
     generation = graph.representation_generation.to(device=prev_option_state.device, dtype=prev_option_state.dtype)
     has_option = (option_state[:, layout.target] > 0) | (option_state[:, layout.source] > 0)
     stale_option = has_option & (prev_option_state[:, layout.persistent_start] != generation)
+    if graph.contextual:
+        selectable = graph.selectable_mask()
+        target = option_state[:, layout.target].long() - 1
+        source = option_state[:, layout.source].long() - 1
+        bad_target = (target >= 0) & (target < graph.n_nodes) & ~selectable[target.clamp(0, graph.n_nodes - 1)]
+        bad_source = (source >= 0) & (source < graph.n_nodes) & ~selectable[source.clamp(0, graph.n_nodes - 1)]
+        stale_option |= bad_target | bad_source
     if stale_option.any():
         option_state[stale_option, layout.target] = 0
         option_state[stale_option, layout.source] = 0

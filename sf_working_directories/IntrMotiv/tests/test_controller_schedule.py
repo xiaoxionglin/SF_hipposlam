@@ -51,3 +51,25 @@ def test_controller_metrics_use_existing_tensorboard_wandb_route():
     write_intrmotiv_summaries(runner, msg, 0)
     assert scalars == [("intrmotiv/controller/main_updates", 1, 64), ("intrmotiv/controller/rejected/stale", 2, 64)]
     assert msg[TRAIN_STATS] == {}
+
+
+def test_ca3_readout_metrics_use_canonical_intrmotiv_tags():
+    from sample_factory.algo.utils.misc import LEARNER_ENV_STEPS, TRAIN_STATS
+    from sf_working_directories.IntrMotiv.dmlab.reward_summaries import write_intrmotiv_summaries
+
+    scalars = []
+    writer = SimpleNamespace(add_scalar=lambda *args: scalars.append(args))
+    runner = SimpleNamespace(writers={0: writer}, env_steps={0: 0})
+    msg = {
+        LEARNER_ENV_STEPS: 64,
+        TRAIN_STATS: {
+            "ca3_readout_prediction_loss": 0.25,
+            "ca3_readout_action_shuffle_delta": 0.5,
+        },
+    }
+    write_intrmotiv_summaries(runner, msg, 0)
+    assert scalars == [
+        ("intrmotiv/ca3_readout/prediction_loss", 0.25, 64),
+        ("intrmotiv/ca3_readout/action_shuffle_delta", 0.5, 64),
+    ]
+    assert msg[TRAIN_STATS] == {}

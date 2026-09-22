@@ -26,6 +26,7 @@ class TransitionInput:
     burn_in: int
     virtual_goal: int | None = None
     remaining: int | None = None
+    virtual_goal_state: np.ndarray | None = None
 
 
 def assemble_state(core, output, context):

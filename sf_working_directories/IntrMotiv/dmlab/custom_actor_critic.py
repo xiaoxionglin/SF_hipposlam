@@ -121,6 +121,39 @@ class TargetFiLMDecoder(nn.Module):
         return self.decoder_out_size
 
 
+class WorkerGoalFiLMDecoder(nn.Module):
+    """Fresh FiLM adapter for detached z-state and ID or continuous goals."""
+
+    def __init__(self, core, hidden_size: int = 128):
+        super().__init__()
+        self.target_condition_start = core.worker_target_condition_start
+        self.goal_size = core.worker_goal_size
+        canonical_suffix = core.get_out_size() - core.target_condition_start - core.Hippo_n_feature
+        worker_input_size = self.target_condition_start + self.goal_size + canonical_suffix
+        self.state_layer = nn.Sequential(nn.Linear(worker_input_size - self.goal_size, hidden_size), nn.ReLU())
+        if core.worker_goal_mode == "target_id":
+            self.goal_modulation = nn.Parameter(torch.zeros(self.goal_size, 2 * hidden_size))
+            self.goal_adapter = None
+        else:
+            self.goal_modulation = None
+            self.goal_adapter = nn.Linear(self.goal_size, 2 * hidden_size, bias=False)
+            nn.init.zeros_(self.goal_adapter.weight)
+        self.output_layer = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.ReLU())
+        self.decoder_out_size = hidden_size
+
+    def forward(self, worker_output: Tensor) -> Tensor:
+        start, end = self.target_condition_start, self.target_condition_start + self.goal_size
+        goal = worker_output[:, start:end]
+        state = torch.cat((worker_output[:, :start], worker_output[:, end:]), dim=-1)
+        hidden = self.state_layer(state)
+        modulation = goal @ self.goal_modulation if self.goal_modulation is not None else self.goal_adapter(goal)
+        scale, shift = modulation.chunk(2, dim=-1)
+        return self.output_layer(hidden * (1.0 + scale) + shift)
+
+    def get_out_size(self) -> int:
+        return self.decoder_out_size
+
+
 class ExplorationDecoder(nn.Module):
     def __init__(self, input_size: int, hidden_size: int):
         super().__init__()
@@ -152,7 +185,9 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             )
             self.dg_transition_predictor.apply(self.initialize_weights)
         goal_conditioning = getattr(cfg, "hrl_goal_conditioning", "legacy")
-        if goal_conditioning == "target_trace":
+        if getattr(self.core, "readout_mode", "off") == "worker":
+            self.decoder = WorkerGoalFiLMDecoder(self.core)
+        elif goal_conditioning == "target_trace":
             self.decoder = TargetRelativeDecoder(self.core)
         elif goal_conditioning == "target_id_film":
             self.decoder = TargetFiLMDecoder(self.core)
@@ -162,6 +197,8 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             self.critic_linear = nn.Linear(decoder_size, 1)
             self.action_parameterization = self.get_action_parameterization(decoder_size)
             self.decoder.apply(self.initialize_weights)
+            if isinstance(self.decoder, WorkerGoalFiLMDecoder) and self.decoder.goal_adapter is not None:
+                nn.init.zeros_(self.decoder.goal_adapter.weight)
             self.critic_linear.apply(self.initialize_weights)
             self.action_parameterization.apply(self.initialize_weights)
 
@@ -214,8 +251,10 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
                     self.decoder.get_out_size(), action_space.n, bool(getattr(cfg, "controller_her", False))
                 )
 
-    def controller_hidden(self, core_output):
-        if getattr(self.core, "dg_goal_modulation", None) is not None:
+    def controller_hidden(self, core_output, goal_ca3=None, goal_override_mask=None):
+        if getattr(self.core, "readout_mode", "off") == "worker":
+            view = self.core.worker_view(core_output, goal_ca3, goal_override_mask)
+        elif getattr(self.core, "dg_goal_modulation", None) is not None:
             view = self.core.worker_view(core_output)
         else:
             view = controller_core_view(core_output, self.core.core_output_size, self.ppo_dg_gradient)
@@ -282,6 +321,15 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             result["controller_condition"] = self._controller_core_output[
                 :, self.core.target_condition_start : self.core.total_output_size
             ]
+            condition = result["controller_condition"][:, : self.core.Hippo_n_feature]
+            target = condition.argmax(-1)
+            valid = condition.sum(-1) > 0
+            if self.core.policy_graph is not None and self.core.policy_graph.contextual:
+                generation = self.core.policy_graph.anchor_generation[target].to(condition.dtype)
+                generation = torch.where(valid & self.core.policy_graph.selectable_mask()[target], generation, -1)
+            else:
+                generation = torch.full_like(target, -1, dtype=condition.dtype)
+            result["controller_anchor_generation"] = generation.unsqueeze(-1)
         if getattr(self.cfg, "online_spatial_telemetry", False) and not values_only:
             contextual_activity = getattr(getattr(self, "core", None), "last_dg_activity", None)
             if torch.is_tensor(contextual_activity):
@@ -297,7 +345,9 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
         # bypass, target, geometry, and manager-mode features retain their
         # existing PPO gradient paths.
         ca3_size = int(getattr(self.core, "core_output_size", 0))
-        if getattr(self.core, "dg_goal_modulation", None) is not None:
+        if getattr(self.core, "readout_mode", "off") == "worker":
+            controller_output = self.core.worker_view(core_output)
+        elif getattr(self.core, "dg_goal_modulation", None) is not None:
             # The worker trace is differentiated only through goal modulation;
             # canonical CA3 remains in core_output for representation losses.
             controller_output = self.core.worker_view(core_output)

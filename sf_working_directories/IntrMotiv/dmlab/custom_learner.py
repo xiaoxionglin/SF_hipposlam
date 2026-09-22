@@ -28,6 +28,7 @@ from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.dicts import iterate_recursively
 from sample_factory.utils.typing import ActionDistribution, Config, PolicyID
 from sample_factory.utils.utils import log
+from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import predictive_readout_loss
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import (
     build_transition_prediction_batch,
     transition_prediction_losses,
@@ -3402,6 +3403,54 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     encoder_loss + float(getattr(self.cfg, "dg_transition_prediction_coeff", 0.1)) * transition_loss
                 )
             encoder_loss *= self.cfg.encoder_grad_coeff
+            core = getattr(self.actor_critic, "core", None)
+            readout = getattr(core, "state_readout", None)
+            predictor = getattr(core, "innovation_predictor", None)
+            prediction_zero = outputs.core_outputs.sum() * 0.0
+            additional_stats["ca3_readout_enabled"] = prediction_zero
+            for name in (
+                "prediction_loss",
+                "active_loss",
+                "zero_loss",
+                "valid_targets",
+                "active_fraction",
+                "state_shuffle_delta",
+                "action_shuffle_delta",
+            ):
+                additional_stats[f"ca3_readout_{name}"] = prediction_zero
+            if readout is not None and predictor is not None:
+                prediction = predictive_readout_loss(
+                    readout,
+                    predictor,
+                    outputs.core_outputs,
+                    mb["actions"],
+                    valids,
+                    mb["dones"],
+                    recurrence,
+                    n_dg,
+                    expanded,
+                    int(self.cfg.ca3_state_readout_horizon),
+                    float(self.cfg.ca3_state_readout_active_coeff),
+                    float(self.cfg.ca3_state_readout_zero_coeff),
+                )
+                encoder_loss = encoder_loss + float(self.cfg.ca3_state_readout_loss_coeff) * prediction.loss
+                additional_stats["ca3_readout_prediction_loss"] = prediction.loss.detach()
+                additional_stats["ca3_readout_active_loss"] = prediction.active_loss.detach()
+                additional_stats["ca3_readout_zero_loss"] = prediction.zero_loss.detach()
+                additional_stats["ca3_readout_valid_targets"] = prediction.valid_targets
+                additional_stats["ca3_readout_active_fraction"] = prediction.active_fraction
+                additional_stats["ca3_readout_state_shuffle_delta"] = prediction.state_shuffle_delta
+                additional_stats["ca3_readout_action_shuffle_delta"] = prediction.action_shuffle_delta
+                additional_stats["ca3_readout_enabled"] = prediction_zero + 1.0
+                if getattr(self.cfg, "ca3_graph_anchor_mode", "off") != "off":
+                    self._pending_contextual_anchors = (
+                        outputs.core_outputs[:, : n_dg * expanded].detach(),
+                        mb["actions"].detach(),
+                        valids.detach(),
+                        mb["dones"].detach(),
+                        mb["rnn_states"][:, : n_dg * expanded].detach(),
+                        int(recurrence),
+                    )
             additional_stats["encoder_loss"] = encoder_loss
             additional_stats["dg_transition_prediction_loss"] = transition_loss.detach()
             additional_stats["dg_transition_prediction_main_loss"] = transition_stats["main_loss"]
@@ -4872,6 +4921,20 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.ca3_predictor_hit_accuracy = var.additional_stats["ca3_predictor_hit_accuracy"].detach().float()
         stats.ca3_predictor_time_mae = var.additional_stats["ca3_predictor_time_mae"].detach().float()
         stats.ca3_predictor_positive_fraction = var.additional_stats["ca3_predictor_positive_fraction"].detach().float()
+        for name in (
+            "enabled",
+            "prediction_loss",
+            "active_loss",
+            "zero_loss",
+            "valid_targets",
+            "active_fraction",
+            "state_shuffle_delta",
+            "action_shuffle_delta",
+        ):
+            key = f"ca3_readout_{name}"
+            if key in var.additional_stats:
+                value = var.additional_stats[key]
+                stats[key] = value.detach().float() if torch.is_tensor(value) else float(value)
         for name in (
             "loss",
             "main_loss",

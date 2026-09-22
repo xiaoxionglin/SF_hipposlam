@@ -113,6 +113,40 @@ def maybe_overwrite_rnn_size(cfg):
     cfg.wandb_step_metric_namespaces = ("intrmotiv",)
     cfg.head_l1_size = int(cfg.Hippo_n_feature)
 
+    readout_mode = getattr(cfg, "ca3_state_readout_mode", "off")
+    goal_mode = getattr(cfg, "ca3_worker_goal_mode", "target_id")
+    anchor_mode = getattr(cfg, "ca3_graph_anchor_mode", "off")
+    if readout_mode != "off":
+        if getattr(cfg, "core_name", "BypassSS") != "BypassSS":
+            raise ValueError("CA3 predictive readout requires core_name=BypassSS")
+        if int(cfg.ca3_state_readout_dim) <= 0 or int(cfg.ca3_state_readout_horizon) <= 0:
+            raise ValueError("CA3 readout dimension and horizon must be positive")
+        if int(cfg.ca3_state_readout_horizon) >= int(cfg.recurrence):
+            raise ValueError("CA3 prediction horizon must be smaller than recurrence")
+        if not 0.0 < float(cfg.ca3_state_readout_lr_scale) <= 1.0:
+            raise ValueError("CA3 readout LR scale must be in (0, 1]")
+    if goal_mode != "target_id" and readout_mode != "worker":
+        raise ValueError("Continuous CA3 goals require ca3_state_readout_mode=worker")
+    if goal_mode != "target_id" and getattr(cfg, "controller_replay_state", "reconstruct") != "stored":
+        raise ValueError("Continuous-goal HER requires stored canonical CA3 endpoints")
+    if anchor_mode != "off":
+        if readout_mode == "off":
+            raise ValueError("Contextual anchors require the predictive CA3 readout")
+        if not (
+            getattr(cfg, "hrl_controllable_graph", False)
+            and getattr(cfg, "hrl_graph_memory", "episode") == "policy_buffer"
+            and getattr(cfg, "hrl_target_timing", "delayed") == "immediate"
+        ):
+            raise ValueError("Contextual anchors require immediate policy-buffer HRL")
+        if getattr(cfg, "controller_learning", "ppo") != "ddqn":
+            raise ValueError("Contextual anchor maintenance currently requires the stored-DDQN learner")
+        if int(cfg.ca3_context_calibration_min_pairs) > int(cfg.ca3_context_calibration_capacity):
+            raise ValueError("Calibration min pairs cannot exceed its bounded capacity")
+        if not 0.0 <= float(cfg.ca3_context_calibration_quantile) <= 1.0:
+            raise ValueError("Calibration quantile must be in [0, 1]")
+    if getattr(cfg, "ca3_graph_contextual_hits", False) and anchor_mode == "off":
+        raise ValueError("Contextual graph hits require contextual anchors")
+
     manager_mode = getattr(cfg, "hrl_manager_mode", "visit_direct")
     topological = manager_mode != "visit_direct"
     graph_recruitment = bool(getattr(cfg, "dg_orthogonal_recruitment", False)) and (
@@ -351,6 +385,7 @@ def maybe_overwrite_rnn_size(cfg):
             ("controller_fresh_version", [1]),
             ("controller_context", [context_size]),
             ("controller_condition", [n]),
+            ("controller_anchor_generation", [1]),
             ("controller_input_state", [int(cfg.rnn_size)]),
             ("controller_memory_stats", [3]),
         )

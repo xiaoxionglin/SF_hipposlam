@@ -22,7 +22,7 @@ def canonical(core, row):
     return row.worker_state[: core.core_output_size].reshape(core.Hippo_n_feature, core.expanded_length)[:, 0]
 
 
-def example_from_replay(learner, key):
+def example_from_replay(learner, key, allow_stale_anchor=False):
     _, rows = learner.replay.sequence(key, 0, 2)
     row = rows[0]
     if row.worker_state is None:
@@ -42,6 +42,13 @@ def example_from_replay(learner, key):
     generation = int(learner.actor_critic.core.policy_graph.representation_generation)
     if row.generation != generation or successor.generation != generation:
         raise ReplayRejected("stale_structural_generation")
+    graph = learner.actor_critic.core.policy_graph
+    if graph.contextual and not allow_stale_anchor:
+        target = np.flatnonzero(row.condition[: graph.n_nodes] > 0)
+        if len(target) == 1:
+            node = int(target[0])
+            if not bool(graph.selectable_mask()[node]) or row.anchor_generation != int(graph.anchor_generation[node]):
+                raise ReplayRejected("stale_anchor_generation")
     if successor.worker_state is None:
         raise ReplayRejected("stored_worker_state_missing")
     return TransitionInput((row, successor), 0)
@@ -69,7 +76,7 @@ def hindsight_examples(learner, examples):
                 goals.append(int(active[0]))
         # A certified final observation is a future achievement too. Its label
         # was encoded once before fresh DG learning, not reconstructed in replay.
-        if future:
+        if future and getattr(core, "worker_goal_mode", "target_id") == "target_id":
             last = future[-1]
             if last.index - row.index < budget and last.generation == row.generation and last.terminal_dg is not None:
                 active = np.flatnonzero(last.terminal_dg > 0)
@@ -78,7 +85,24 @@ def hindsight_examples(learner, examples):
         if not goals:
             learner.replay.reject("her_no_future_achievement")
             continue
-        result.append(replace(example, virtual_goal=goals[int(learner.her_rng.integers(len(goals)))], remaining=budget))
+        goal = goals[int(learner.her_rng.integers(len(goals)))]
+        endpoint = next(
+            (
+                candidate
+                for candidate in future[1:]
+                if candidate.worker_state is not None and canonical(core, candidate)[goal] > 0
+            ),
+            None,
+        )
+        goal_state = None if endpoint is None else endpoint.worker_state[: core.core_output_size].copy()
+        result.append(
+            replace(
+                example,
+                virtual_goal=goal,
+                remaining=budget,
+                virtual_goal_state=goal_state,
+            )
+        )
     return result
 
 
@@ -87,6 +111,8 @@ def _q_batch(model, examples):
     # are constants even when their generating representation has since changed.
     device = next(model.parameters()).device
     outputs = []
+    goal_states = []
+    goal_masks = []
     for example in examples:
         for row in example.rows:
             condition = row.condition
@@ -94,7 +120,21 @@ def _q_batch(model, examples):
                 condition = np.zeros_like(condition)
                 condition[example.virtual_goal] = 1
             outputs.append(np.concatenate((row.worker_state, condition)))
-    hidden = model.controller_hidden(torch.as_tensor(np.stack(outputs), device=device))
+            goal_states.append(
+                example.virtual_goal_state
+                if example.virtual_goal_state is not None
+                else np.zeros(model.core.core_output_size, dtype=row.worker_state.dtype)
+            )
+            goal_masks.append(example.virtual_goal_state is not None)
+    output_tensor = torch.as_tensor(np.stack(outputs), device=device)
+    if getattr(model.core, "readout_mode", "off") == "worker":
+        hidden = model.controller_hidden(
+            output_tensor,
+            torch.as_tensor(np.stack(goal_states), device=device),
+            torch.as_tensor(goal_masks, device=device),
+        )
+    else:
+        hidden = model.controller_hidden(output_tensor)
     result = [None] * len(examples)
     for auxiliary in (False, True):
         indices = [i for i, e in enumerate(examples) if (e.virtual_goal is not None) == auxiliary]

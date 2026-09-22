@@ -164,6 +164,8 @@ def command_collect_online(args: argparse.Namespace) -> None:
         fixed_window=fixed_window,
         latest_common=args.latest_common,
         progress=lambda done, total, name: print(f"Loaded {done}/{total}: {name}", flush=True),
+        history_output_dir=args.output_dir / "histories" if args.export_histories else None,
+        loader_backend=args.loader_backend,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "per_run.csv", records)
@@ -174,8 +176,11 @@ def command_collect_online(args: argparse.Namespace) -> None:
         "mode": "latest_common" if args.latest_common else "fixed" if fixed_window else "per_run_terminal",
         "step_tag": study.analysis.get("step_tag", "train/env_steps"),
         "windows": sorted({(row["window_low"], row["window_high"]) for row in records}),
-        "scalar_size_guidance": 0 if args.latest_common else study.analysis.get("scalar_size_guidance", 30000),
-        "loader_backend": study.analysis.get("loader_backend", "thread"),
+        "scalar_size_guidance": (
+            0 if args.latest_common or args.export_histories else study.analysis.get("scalar_size_guidance", 30000)
+        ),
+        "loader_backend": args.loader_backend or study.analysis.get("loader_backend", "thread"),
+        "exported_histories": str(args.output_dir / "histories") if args.export_histories else None,
     }
     _write_json(manifest_path, manifest)
     if args.latest_common:
@@ -307,6 +312,16 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("output_dir", type=Path)
     collect.add_argument("--window-low", type=int)
     collect.add_argument("--window-high", type=int)
+    collect.add_argument(
+        "--export-histories",
+        action="store_true",
+        help="save all selected scalar events for plots without another TensorBoard scan",
+    )
+    collect.add_argument(
+        "--loader-backend",
+        choices=("thread", "process"),
+        help="override the collection executor; recorded in analysis provenance",
+    )
     collect.add_argument(
         "--latest-common",
         action="store_true",
