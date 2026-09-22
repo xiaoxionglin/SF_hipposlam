@@ -63,6 +63,7 @@ def test_followup_production_is_complete_factorial_with_flat_tracking():
 def test_followup_gpu_copy_has_isolated_flat_groups_and_output_namespaces():
     cases = [
         ("ca3_state_goal_followup_20260922_gpu_preflight.study.json", 4, [99], 2_000_000),
+        ("ca3_state_goal_followup_20260922_gpu_preflight_v2.study.json", 4, [99], 2_000_000),
         ("ca3_state_goal_followup_20260922_gpu_production.study.json", 12, [8, 99, 123], 300_000_000),
     ]
     for name, expected_runs, seeds, frames in cases:
@@ -80,3 +81,17 @@ def test_followup_gpu_copy_has_isolated_flat_groups_and_output_namespaces():
         for run in runs:
             assert run.condition.startswith("GPU_CTX_")
             assert f"--wandb_tags={run.condition}" in run.args
+
+
+def test_followup_gpu_release_uses_qualified_sampler_geometry_without_changing_learning_budget():
+    for name in (
+        "ca3_state_goal_followup_20260922_gpu_preflight_v2.study.json",
+        "ca3_state_goal_followup_20260922_gpu_production.study.json",
+    ):
+        args = _raw(name)["training"]["common_args"]
+        assert "--num_workers=32" in args
+        assert "--num_envs_per_worker=8" in args
+        assert "--worker_num_splits=8" in args
+        assert "--num_epochs=1" in args
+        assert "--batch_size=2048" in args
+        assert "--num_batches_per_epoch=2" in args
