@@ -14,15 +14,15 @@ source ~/miniforge3/etc/profile.d/conda.sh
 conda activate SFgit
 cd "$${SLURM_SUBMIT_DIR:?Submit from the intended source checkout}" || exit 1
 
-export PYTHONPATH="/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/torch_cuda_2_9_1:/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/controller_terminal_binding_v1:$${PYTHONPATH:-}"
+WORKSPACE_ROOT=$${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-corridor-geometry}
+RUNTIME_ROOT=$${INTRMOTIV_RUNTIME_ROOT:-$$WORKSPACE_ROOT/IntrMotiv/SF_hipposlam/runtime}
+export PYTHONPATH="$$RUNTIME_ROOT/torch_cuda_2_9_1:$$RUNTIME_ROOT/controller_terminal_binding_v1:$${PYTHONPATH:-}"
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-WORKSPACE_ROOT=$${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-train}
-RUNTIME_ROOT=$${INTRMOTIV_RUNTIME_ROOT:-$$WORKSPACE_ROOT/IntrMotiv/SF_hipposlam/runtime}
 export XDG_CACHE_HOME="$$RUNTIME_ROOT/cache"
 export MPLCONFIGDIR="$$RUNTIME_ROOT/matplotlib"
 export WANDB_CACHE_DIR="$$RUNTIME_ROOT/wandb_cache"
