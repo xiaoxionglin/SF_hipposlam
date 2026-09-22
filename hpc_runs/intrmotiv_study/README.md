@@ -8,7 +8,7 @@ The synchronized NEMO2 runtime copy is
 Keep its version and file contents aligned with this canonical copy before
 using new workflow features on the cluster.
 
-Current implementation version: `1.4.1`; current schema:
+Current implementation version: `1.11.0`; current schema:
 `intrmotiv/study/v1`.
 
 The version constants in `version.py` are authoritative. Do not copy this

@@ -25,6 +25,11 @@ def hipposlam_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    # Study identity is tracking metadata only. The canonical StudySpec workflow
+    # emits these fields so dashboards can group by one seed-independent key.
+    p.add_argument("--study_id", default=None, type=str)
+    p.add_argument("--study_condition", default=None, type=str)
+    p.add_argument("--study_base", default=None, type=str)
     p.add_argument("--controller_learning", choices=["ppo", "shadow", "ddqn"], default="ppo")
     p.add_argument("--controller_replay_state", choices=("reconstruct", "stored"), default="reconstruct")
     p.add_argument("--controller_her", type=str2bool, default=False)
