@@ -190,10 +190,20 @@ class ControllerLearner(DistanceLearnerReward):
                 "hrl_control_outcome_id",
                 "hrl_control_reward_magnitude",
             )
+            # Convert complete columns once.  Calling float() on individual
+            # CUDA elements serializes the learner on every replay row.
+            rewards = buff["rewards"].detach().cpu().numpy()
+            event_columns = {
+                name: buff[name].detach().cpu().numpy()
+                for name in labels
+                if name in buff
+            }
             for index, (stream, episode, decision, serial) in enumerate(identities):
                 key = ((self.replay.session, int(stream)), int(episode), int(decision))
                 self.replay.annotate(
-                    key, buff["rewards"][index], {name: float(buff[name][index]) for name in labels if name in buff}
+                    key,
+                    rewards[index],
+                    {name: float(values[index]) for name, values in event_columns.items()},
                 )
         return buff, size, invalid
 
@@ -435,37 +445,76 @@ class ControllerLearner(DistanceLearnerReward):
         return stats
 
     def _ingest(self, batch):
-        # Shared SF buffers may be reused immediately after this transaction.
-        def cpu(x):
-            return x.detach().cpu().numpy().copy()
+        """Copy rollout columns once, then perform replay bookkeeping on CPU.
+
+        Shared SF buffers may be reused immediately after this transaction, so
+        replay owns every copied array.  The column-wise transfer is essential:
+        per-row CUDA ``item()``/``cpu()`` calls turn thousands of small replay
+        records into thousands of device synchronizations.
+        """
+        def cpu_array(tensor):
+            return tensor.detach().cpu().numpy().copy()
+
+        def scalar(value):
+            return np.asarray(value).reshape(()).item()
 
         n, t = batch["actions"].shape[:2]
         layout = HRLStateLayout(self.cfg.Hippo_n_feature)
         stored = getattr(self.cfg, "controller_replay_state", "reconstruct") == "stored"
+
+        identities = cpu_array(batch["obs"][IDENTITY_KEY])
+        actions = cpu_array(batch["actions"])
+        dones = cpu_array(batch["dones"])
+        final_valids = cpu_array(batch["controller_final_valid"])
+        contexts = cpu_array(batch["controller_context"])
+        conditions = cpu_array(batch["controller_condition"])
+        policy_versions = cpu_array(batch["policy_version"])
+        terminated = cpu_array(batch["controller_terminated"])
+        time_outs = cpu_array(batch["time_outs"])
+        physical_frames = cpu_array(batch["controller_frames"])
+        anchor_generations = cpu_array(batch["controller_anchor_generation"])
+        memory_stats = cpu_array(batch["controller_memory_stats"])
+        worker_states = cpu_array(batch["controller_worker_state"]) if stored else None
+        observations_cpu = (
+            None
+            if stored
+            else {key: cpu_array(value) for key, value in batch["obs"].items() if key != IDENTITY_KEY}
+        )
+        visuals_cpu = cpu_array(batch["controller_visual"]) if not stored and self.cfg.controller_cache_visual else None
+        final_observations_cpu = (
+            None
+            if stored
+            else {
+                key: cpu_array(value)
+                for key, value in batch["controller_final_obs"].items()
+                if key != IDENTITY_KEY
+            }
+        )
+
         terminal_labels = {}
         if stored:
             from .controller_history import reconstruction_head
 
             mask = batch["dones"].bool() & batch["controller_final_valid"].bool()
-            if mask.any():
-                coordinates = mask.nonzero().cpu().tolist()
+            coordinates = mask.nonzero().cpu().tolist()
+            if coordinates:
                 observations = {k: v[mask] for k, v in batch["controller_final_obs"].items() if k != IDENTITY_KEY}
                 with torch.no_grad():
                     dg = reconstruction_head(self.published, observations)[:, : self.cfg.Hippo_n_feature].cpu().numpy()
                 terminal_labels = {tuple(key): value.copy() for key, value in zip(coordinates, dg)}
         for i in range(n):
             for j in range(t):
-                stream, episode, index, serial = map(int, cpu(batch["obs"][IDENTITY_KEY][i, j]))
-                obs = {} if stored else {k: cpu(v[i, j]) for k, v in batch["obs"].items() if k != IDENTITY_KEY}
+                stream, episode, index, serial = map(int, identities[i, j])
+                obs = {} if stored else {key: value[i, j] for key, value in observations_cpu.items()}
                 if not stored and self.cfg.controller_cache_visual:
-                    obs = cached_observation(obs, cpu(batch["controller_visual"][i, j]))
-                done = bool(batch["dones"][i, j])
-                valid = bool(batch["controller_final_valid"][i, j])
+                    obs = cached_observation(obs, visuals_cpu[i, j])
+                done = bool(scalar(dones[i, j]))
+                valid = bool(scalar(final_valids[i, j]))
                 successor = None
                 if done and valid and not stored:
-                    successor = {k: cpu(v[i, j]) for k, v in batch["controller_final_obs"].items() if k != IDENTITY_KEY}
+                    successor = {key: value[i, j] for key, value in final_observations_cpu.items()}
                     # Terminal RGB is retained. It is converted once when sampled.
-                context = cpu(batch["controller_context"][i, j])
+                context = contexts[i, j]
                 self.replay.receive(
                     PhysicalDecision(
                         (self.replay.session, stream),
@@ -473,25 +522,25 @@ class ControllerLearner(DistanceLearnerReward):
                         index,
                         serial,
                         obs,
-                        int(batch["actions"][i, j].item()),
-                        cpu(batch["controller_condition"][i, j]),
+                        int(scalar(actions[i, j])),
+                        conditions[i, j],
                         context,
-                        int(batch["policy_version"][i, j]),
+                        int(scalar(policy_versions[i, j])),
                         int(context[layout.persistent_start]),
-                        bool(batch["controller_terminated"][i, j]),
-                        bool(batch["time_outs"][i, j]),
-                        int(batch["controller_frames"][i, j]),
+                        bool(scalar(terminated[i, j])),
+                        bool(scalar(time_outs[i, j])),
+                        int(scalar(physical_frames[i, j])),
                         successor,
                         valid,
-                        worker_state=cpu(batch["controller_worker_state"][i, j]) if stored else None,
+                        worker_state=worker_states[i, j] if stored else None,
                         terminal_dg=terminal_labels.get((i, j)),
                         terminal_publication=self.publication if (i, j) in terminal_labels else None,
-                        anchor_generation=int(batch["controller_anchor_generation"][i, j].item()),
+                        anchor_generation=int(scalar(anchor_generations[i, j])),
                     )
                 )
-        self.controller_stats["actor_memory_rebuilds"] = float(batch["controller_memory_stats"][..., 0].max())
-        self.controller_stats["actor_memory_rebuild_seconds"] = float(batch["controller_memory_stats"][..., 2].max())
-        self.controller_stats["actor_memory_version_failures"] = float(batch["controller_memory_stats"][..., 1].max())
+        self.controller_stats["actor_memory_rebuilds"] = float(memory_stats[..., 0].max())
+        self.controller_stats["actor_memory_rebuild_seconds"] = float(memory_stats[..., 2].max())
+        self.controller_stats["actor_memory_version_failures"] = float(memory_stats[..., 1].max())
 
     def _example(self, key, allow_stale_anchor=False):
         if getattr(self.cfg, "controller_replay_state", "reconstruct") == "stored":
@@ -781,17 +830,24 @@ class ControllerLearner(DistanceLearnerReward):
 
     def train(self, batch):
         started = time.perf_counter()
+        phase_started = started
         self._ingest(batch)
+        ingest_seconds = time.perf_counter() - phase_started
         before = self.env_steps
+        phase_started = time.perf_counter()
         if self.cfg.controller_learning == "ddqn":
             with fresh_dg_parameter_owner(self.actor_critic):
                 stats = super().train(batch)
         else:
             stats = super().train(batch)
+        fresh_dg_update_seconds = time.perf_counter() - phase_started
         self.env_steps = before + (
             int(batch["controller_frames"].sum()) if self.cfg.summaries_use_frameskip else batch["actions"].numel()
         )
+        phase_started = time.perf_counter()
         self._controller_updates()
+        controller_update_seconds = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         with torch.no_grad(), self.param_server.policy_lock:
             self.actor_critic.controller_q.environment_decisions.fill_(self.replay.accepted)
             self.publication += 1
@@ -801,7 +857,10 @@ class ControllerLearner(DistanceLearnerReward):
             if self.device.type == "cuda":
                 torch.cuda.synchronize(self.device)
             self._published_versions[self.policy_id] = self.publication
+        publication_seconds = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         self._save_completed_frame_targets(before)
+        milestone_seconds = time.perf_counter() - phase_started
         stats = stats or {POLICY_ID_KEY: self.policy_id}
         stats[LEARNER_ENV_STEPS] = self.env_steps
         self.controller_stats.update(
@@ -815,6 +874,11 @@ class ControllerLearner(DistanceLearnerReward):
             update_debt=self.clock.due(self.replay.accepted),
             fresh_dg_steps=self.fresh_dg_steps,
             fresh_graph_batches=self.fresh_graph_batches,
+            ingest_seconds=ingest_seconds,
+            fresh_dg_update_seconds=fresh_dg_update_seconds,
+            controller_update_seconds=controller_update_seconds,
+            publication_seconds=publication_seconds,
+            milestone_seconds=milestone_seconds,
             transaction_seconds=time.perf_counter() - started,
         )
         graph = self.actor_critic.core.policy_graph
