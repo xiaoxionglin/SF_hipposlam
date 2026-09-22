@@ -202,6 +202,19 @@ class ControllerLearner(DistanceLearnerReward):
             return torch.cat((head_outputs, mb.controller_condition), -1)
         return super()._prepare_recurrent_replay_head(head_outputs, mb)
 
+    def _recurrent_replay_conditions(self, mb):
+        """Return commands recorded during acting for causal recurrent replay.
+
+        Graph planning is an acting-time operation.  Recomputing it inside PPO
+        replay is both semantically wrong (the graph may have changed) and very
+        expensive on CUDA because the planner contains discrete host control
+        flow.  The rollout already transports the authoritative command.
+        """
+        if self.cfg.controller_learning == "ddqn":
+            return mb.controller_condition
+        parent = getattr(super(), "_recurrent_replay_conditions", None)
+        return None if parent is None else parent(mb)
+
     def _override_core_outputs_for_replay(self, core_outputs, mb):
         if self.cfg.controller_learning == "ddqn":
             out = core_outputs.clone()

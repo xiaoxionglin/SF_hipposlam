@@ -934,13 +934,17 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 from .ca3_memory import finite_shift_history
 
                 base, hrl, _, _ = self._split_state(rnn_states)
-                if (
-                    self.action_feature_size
-                    or self.context_action_history_size
-                    or base[:, : self.core_output_size].count_nonzero()
-                ):
-                    raise ValueError("Finite replay requires zero trace initialization and no contextual actions")
-                trace = finite_shift_history(padded[:, :, : self.Hippo_n_feature], self.R, self.expanded_length)
+                if self.action_feature_size or self.context_action_history_size:
+                    raise ValueError("Finite replay does not support contextual action histories")
+                initial_ca3 = base[:, : self.core_output_size].view(
+                    B, self.Hippo_n_feature, self.expanded_length
+                )
+                trace = finite_shift_history(
+                    padded[:, :, : self.Hippo_n_feature],
+                    self.R,
+                    self.expanded_length,
+                    initial_state=initial_ca3,
+                )
                 trace = trace.flatten(2)
                 bypass = padded[:, :, self.Hippo_n_feature :]
                 output = torch.cat((trace, bypass, replay_conditions), -1)

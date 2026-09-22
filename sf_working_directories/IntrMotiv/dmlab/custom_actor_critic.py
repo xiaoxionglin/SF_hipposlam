@@ -289,8 +289,10 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
         self._maybe_sample_actions(sample_actions, result)
         return result
 
-    def forward_core(self, head_output, rnn_states):
-        output, state = super().forward_core(head_output, rnn_states)
+    def forward_core(self, head_output, rnn_states, **core_kwargs):
+        # Replay may supply acting-time manager commands.  Passing them to the
+        # core prevents mutable graph state from replanning historical steps.
+        output, state = self.core(head_output, rnn_states, **core_kwargs)
         if getattr(self, "controller_learning", "ppo") != "ppo":
             self._controller_core_output = output
         return output, state
