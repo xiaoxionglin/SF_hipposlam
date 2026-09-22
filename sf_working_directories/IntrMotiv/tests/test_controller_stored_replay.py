@@ -172,6 +172,27 @@ def test_contextual_her_hit_does_not_require_virtual_goal_slot_equality():
     assert learner.replay.rejected["her_contextual_positive_hit"] == 1
 
 
+def test_contextual_hindsight_batches_all_action_probe_comparisons():
+    learner, _, rows = fixture()
+    _enable_contextual_goals(learner)
+    example = example_from_replay(learner, rows[0].key)
+    calls = []
+
+    def no_start_hits(_core, candidates, goals):
+        calls.append((np.asarray(candidates).shape, np.asarray(goals).shape))
+        return torch.zeros(len(candidates), dtype=torch.bool)
+
+    with patch(
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hits",
+        side_effect=no_start_hits,
+    ):
+        selected = hindsight_examples(learner, [example] * 8)
+    assert selected
+    assert len(calls) == 1
+    assert calls[0][0] == calls[0][1]
+    assert calls[0][0][0] >= len(selected)
+
+
 def test_contextual_her_records_same_dg_wrong_context_and_never_falls_back_to_id():
     learner, _, rows = fixture()
     _enable_contextual_goals(learner)

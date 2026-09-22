@@ -28,18 +28,28 @@ def raw_ca3(core, row):
 
 
 @torch.no_grad()
-def contextual_goal_hit(core, candidate_ca3, goal_ca3) -> bool:
-    """Semantic contextual hit; the DG address is not an identity label."""
+def contextual_goal_hits(core, candidate_ca3, goal_ca3):
+    """Batched semantic contextual hits; DG addresses are not identity labels."""
     graph = core.policy_graph
     if graph is None or not graph.contextual or not bool(graph.calibration_ready):
-        return False
+        count = len(candidate_ca3) if np.asarray(candidate_ca3).ndim > 1 else 1
+        return torch.zeros(count, dtype=torch.bool, device=graph.anchor_ca3.device if graph is not None else "cpu")
     candidate = torch.as_tensor(candidate_ca3, device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
     goal = torch.as_tensor(goal_ca3, device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
-    dg = candidate.reshape(core.Hippo_n_feature, core.expanded_length)[:, 0]
-    if not bool((dg > 0).any()):
-        return False
+    candidate = candidate.reshape(-1, core.core_output_size)
+    goal = goal.reshape(-1, core.core_output_size)
+    if candidate.shape[0] != goal.shape[0]:
+        raise ValueError("contextual candidate and goal batches must have equal length")
+    dg = candidate.reshape(-1, core.Hippo_n_feature, core.expanded_length)[:, :, 0]
+    real_event = (dg > 0).any(dim=1)
     similarity = contextual_similarity(core.state_readout, core.innovation_predictor, candidate, goal)
-    return bool(similarity >= graph.recognition_threshold)
+    return real_event & (similarity >= graph.recognition_threshold)
+
+
+@torch.no_grad()
+def contextual_goal_hit(core, candidate_ca3, goal_ca3) -> bool:
+    """Scalar compatibility wrapper around :func:`contextual_goal_hits`."""
+    return bool(contextual_goal_hits(core, candidate_ca3, goal_ca3)[0])
 
 
 def example_from_replay(learner, key, allow_stale_anchor=False):
@@ -78,6 +88,10 @@ def hindsight_examples(learner, examples):
     core = learner.actor_critic.core
     layout = HRLStateLayout(core.Hippo_n_feature)
     result = []
+    contextual_mode = getattr(core, "worker_goal_mode", "target_id") == "state_readout" and core.policy_graph.contextual
+    contextual_records = []
+    contextual_candidates = []
+    contextual_goals = []
     for example in examples:
         row = example.rows[0]
         budget = int(row.context[layout.countdown])
@@ -86,7 +100,7 @@ def hindsight_examples(learner, examples):
             continue
         _, future = learner.replay.sequence(row.key, 0, budget + 1)
         start = canonical(core, row)
-        contextual = getattr(core, "worker_goal_mode", "target_id") == "state_readout" and core.policy_graph.contextual
+        contextual = contextual_mode
         if contextual and not bool(core.policy_graph.calibration_ready):
             learner.replay.reject("her_contextual_missing_calibration")
             continue
@@ -100,10 +114,9 @@ def hindsight_examples(learner, examples):
                 if len(active):
                     learner.replay.reject("her_contextual_candidate")
                     goal_state = raw_ca3(core, candidate).copy()
-                    if contextual_goal_hit(core, raw_ca3(core, row), goal_state):
-                        learner.replay.reject("her_start_already_achieved_contextual")
-                        continue
-                    goals.append((int(active[np.argmax(dg[active])]), goal_state))
+                    contextual_records.append((len(result), int(active[np.argmax(dg[active])]), goal_state))
+                    contextual_candidates.append(raw_ca3(core, row))
+                    contextual_goals.append(goal_state)
             elif len(active) == 1 and start[active[0]] <= 0:
                 goals.append(int(active[0]))
         # A certified final observation is a future achievement too. Its label
@@ -114,6 +127,11 @@ def hindsight_examples(learner, examples):
                 active = np.flatnonzero(last.terminal_dg > 0)
                 if len(active) == 1 and start[active[0]] <= 0:
                     goals.append(int(active[0]))
+        if contextual:
+            # Defer hit testing and goal selection so all action-probe
+            # signatures in the HER transaction share one predictor forward.
+            result.append((example, goals))
+            continue
         if not goals:
             learner.replay.reject("her_no_future_achievement")
             continue
@@ -139,7 +157,31 @@ def hindsight_examples(learner, examples):
                 virtual_goal_state=goal_state,
             )
         )
-    return result
+    if not contextual_mode:
+        return result
+
+    hits = (
+        contextual_goal_hits(core, np.stack(contextual_candidates), np.stack(contextual_goals)).tolist()
+        if contextual_candidates
+        else []
+    )
+    goals_by_example = [[] for _ in result]
+    for (owner, slot, goal_state), hit in zip(contextual_records, hits):
+        if hit:
+            learner.replay.reject("her_start_already_achieved_contextual")
+        else:
+            goals_by_example[owner].append((slot, goal_state))
+    contextual_result = []
+    for owner, (example, _) in enumerate(result):
+        goals = goals_by_example[owner]
+        if not goals:
+            learner.replay.reject("her_no_future_achievement")
+            continue
+        goal, goal_state = goals[int(learner.her_rng.integers(len(goals)))]
+        contextual_result.append(
+            replace(example, virtual_goal=goal, remaining=int(example.rows[0].context[layout.countdown]), virtual_goal_state=goal_state)
+        )
+    return contextual_result
 
 
 def _q_batch(model, examples):
