@@ -834,6 +834,21 @@ class ControllerLearner(DistanceLearnerReward):
         self._ingest(batch)
         ingest_seconds = time.perf_counter() - phase_started
         before = self.env_steps
+        learner_timing_keys = (
+            "prepare_batch",
+            "train",
+            "calculate_losses",
+            "forward_head",
+            "bptt_initial",
+            "bptt",
+            "bptt_forward_core",
+            "tail",
+            "post_forward",
+            "losses",
+            "update",
+            "after_optimizer",
+        )
+        timing_before = {name: float(self.timing.get(name, 0.0)) for name in learner_timing_keys}
         phase_started = time.perf_counter()
         if self.cfg.controller_learning == "ddqn":
             with fresh_dg_parameter_owner(self.actor_critic):
@@ -841,6 +856,10 @@ class ControllerLearner(DistanceLearnerReward):
         else:
             stats = super().train(batch)
         fresh_dg_update_seconds = time.perf_counter() - phase_started
+        learner_timing_delta = {
+            f"fresh_dg_timing/{name}": float(self.timing.get(name, 0.0)) - timing_before[name]
+            for name in learner_timing_keys
+        }
         self.env_steps = before + (
             int(batch["controller_frames"].sum()) if self.cfg.summaries_use_frameskip else batch["actions"].numel()
         )
@@ -881,6 +900,7 @@ class ControllerLearner(DistanceLearnerReward):
             milestone_seconds=milestone_seconds,
             transaction_seconds=time.perf_counter() - started,
         )
+        self.controller_stats.update(learner_timing_delta)
         graph = self.actor_critic.core.policy_graph
         if graph is not None:
             self.controller_stats.setdefault("calibration_seconds", 0.0)
