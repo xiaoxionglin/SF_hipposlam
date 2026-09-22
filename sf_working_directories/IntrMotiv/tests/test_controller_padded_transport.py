@@ -47,14 +47,18 @@ def test_padded_transport_cannot_change_default_acting_api():
         model.core(torch.zeros(1, 16), torch.zeros(1, model.core.total_state_size), replay_padded=True)
 
 
-def test_replay_conditions_skip_planning_with_nonzero_initial_ca3(monkeypatch):
-    model = RewardModel(False).eval()
-    conditions = torch.zeros(3, 2, model.core.hrl_condition_size)
+@pytest.mark.parametrize(
+    "device",
+    ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))],
+)
+def test_replay_conditions_skip_planning_with_nonzero_initial_ca3(monkeypatch, device):
+    model = RewardModel(False).to(device).eval()
+    conditions = torch.zeros(3, 2, model.core.hrl_condition_size, device=device)
     conditions[..., 2] = 1
-    inputs = torch.rand(3, 2, 16)
+    inputs = torch.rand(3, 2, 16, device=device)
     packet = pack_padded_sequence(inputs, [3, 2], enforce_sorted=False)
-    initial = torch.zeros(2, model.core.total_state_size)
-    initial[0, : model.core.core_output_size] = torch.arange(model.core.core_output_size).float()
+    initial = torch.zeros(2, model.core.total_state_size, device=device)
+    initial[0, : model.core.core_output_size] = torch.arange(model.core.core_output_size, device=device).float()
 
     def historical_replanning_is_a_bug(*args, **kwargs):
         raise AssertionError("learner replay must not invoke graph planning")
@@ -62,7 +66,7 @@ def test_replay_conditions_skip_planning_with_nonzero_initial_ca3(monkeypatch):
     monkeypatch.setattr(model.core, "_update_hrl", historical_replanning_is_a_bug)
     output, _ = model.core(packet, initial, replay_conditions=conditions)
     padded, _ = pad_packed_sequence(output)
-    valid = torch.arange(3).unsqueeze(1) < torch.tensor([3, 2]).unsqueeze(0)
+    valid = torch.arange(3, device=device).unsqueeze(1) < torch.tensor([3, 2], device=device).unsqueeze(0)
     torch.testing.assert_close(
         padded[:, :, -model.core.hrl_condition_size :][valid],
         conditions[valid],

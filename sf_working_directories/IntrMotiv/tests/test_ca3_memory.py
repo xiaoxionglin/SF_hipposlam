@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from sf_working_directories.IntrMotiv.dmlab.ca3_memory import (
@@ -12,10 +13,17 @@ from sf_working_directories.IntrMotiv.dmlab.ca3_memory import (
 from sf_working_directories.IntrMotiv.dmlab.custom_core import FiniteMemoryCore
 
 
-def test_finite_shift_history_matches_iterative_nonzero_initial_state_and_gradients():
+DEVICES = [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")),
+]
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_finite_shift_history_matches_iterative_nonzero_initial_state_and_gradients(device):
     torch.manual_seed(7)
-    activity = torch.rand(5, 3, 4, requires_grad=True)
-    initial = torch.rand(3, 4, 6)
+    activity = torch.rand(5, 3, 4, device=device, requires_grad=True)
+    initial = torch.rand(3, 4, 6, device=device)
     actual = finite_shift_history(activity, 2, 6, initial)
 
     state = initial.clone()
