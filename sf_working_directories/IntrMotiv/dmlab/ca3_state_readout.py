@@ -71,12 +71,48 @@ class CausalDGInnovationPredictor(nn.Module):
 @dataclass(frozen=True)
 class ReadoutPrediction:
     loss: Tensor
+    prediction_loss: Tensor
     active_loss: Tensor
     zero_loss: Tensor
+    var_loss: Tensor
+    cov_loss: Tensor
+    latent_std_mean: Tensor
+    latent_std_min: Tensor
     valid_targets: Tensor
     active_fraction: Tensor
     state_shuffle_delta: Tensor
     action_shuffle_delta: Tensor
+
+
+def _variance_covariance_losses(latent: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """VICReg-style anti-collapse losses over unique current states."""
+    if not latent.numel():
+        zero = latent.sum() * 0.0
+        return zero, zero, zero.detach(), zero.detach()
+    centered = latent - latent.mean(dim=0, keepdim=True)
+    std = torch.sqrt(centered.square().mean(dim=0) + 1e-4)
+    var_loss = F.relu(1.0 - std).mean()
+    if latent.size(0) < 2:
+        cov_loss = latent.sum() * 0.0
+    else:
+        covariance = centered.T @ centered / float(latent.size(0) - 1)
+        off_diagonal = covariance - torch.diag_embed(torch.diagonal(covariance))
+        cov_loss = off_diagonal.square().sum() / float(max(1, latent.size(1)))
+    return var_loss, cov_loss, std.mean().detach(), std.min().detach()
+
+
+def _within_horizon_permutation(horizons: Tensor) -> tuple[Tensor, Tensor]:
+    """Deterministically rotate each horizon group by half its size."""
+    permutation = torch.arange(horizons.numel(), device=horizons.device)
+    shuffled = torch.zeros_like(horizons, dtype=torch.bool)
+    for horizon in torch.unique(horizons):
+        indices = torch.where(horizons == horizon)[0]
+        if indices.numel() < 2:
+            continue
+        shift = max(1, int(indices.numel()) // 2)
+        permutation[indices] = indices.roll(shift)
+        shuffled[indices] = True
+    return permutation, shuffled
 
 
 def _stratified_smooth_l1(prediction: Tensor, target: Tensor, active_coeff: float, zero_coeff: float):
@@ -151,6 +187,8 @@ def predictive_readout_loss(
     horizon: int,
     active_coeff: float = 1.0,
     zero_coeff: float = 0.1,
+    var_coeff: float = 0.1,
+    cov_coeff: float = 0.01,
 ) -> ReadoutPrediction:
     ca3_size = n_dg * expanded
     states, prefixes, horizons, targets = prediction_windows(
@@ -158,20 +196,47 @@ def predictive_readout_loss(
     )
     if not states.numel():
         zero = readout.linear.weight.sum() * 0.0
-        return ReadoutPrediction(zero, zero, zero, zero.detach(), zero.detach(), zero.detach(), zero.detach())
+        return ReadoutPrediction(
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero.detach(),
+            zero.detach(),
+            zero.detach(),
+            zero.detach(),
+            zero.detach(),
+            zero.detach(),
+        )
     latent = readout(states)
     prediction = predictor(latent, prefixes, horizons)
-    loss, active, zero = _stratified_smooth_l1(prediction, targets.detach(), active_coeff, zero_coeff)
+    prediction_loss, active, zero = _stratified_smooth_l1(prediction, targets.detach(), active_coeff, zero_coeff)
+    valid_mask = valids.reshape(-1).bool()
+    current_states = core_outputs.detach()[:, :ca3_size][valid_mask]
+    current_latent = readout(current_states)
+    var_loss, cov_loss, std_mean, std_min = _variance_covariance_losses(current_latent)
+    loss = prediction_loss + float(var_coeff) * var_loss + float(cov_coeff) * cov_loss
     with torch.no_grad():
-        base = F.smooth_l1_loss(prediction.detach(), targets, reduction="mean")
-        shuffled_state = predictor(latent.detach().roll(1, 0), prefixes, horizons)
-        shuffled_action = predictor(latent.detach(), prefixes.roll(1, 0), horizons)
-        state_delta = F.smooth_l1_loss(shuffled_state, targets, reduction="mean") - base
-        action_delta = F.smooth_l1_loss(shuffled_action, targets, reduction="mean") - base
+        permutation, shuffled = _within_horizon_permutation(horizons)
+        if shuffled.any():
+            base = F.smooth_l1_loss(prediction.detach()[shuffled], targets[shuffled], reduction="mean")
+            shuffled_state = predictor(latent.detach()[permutation], prefixes, horizons)
+            shuffled_action = predictor(latent.detach(), prefixes[permutation], horizons)
+            state_delta = F.smooth_l1_loss(shuffled_state[shuffled], targets[shuffled], reduction="mean") - base
+            action_delta = F.smooth_l1_loss(shuffled_action[shuffled], targets[shuffled], reduction="mean") - base
+        else:
+            state_delta = prediction.detach().sum() * 0.0
+            action_delta = prediction.detach().sum() * 0.0
     return ReadoutPrediction(
         loss,
+        prediction_loss,
         active,
         zero,
+        var_loss,
+        cov_loss,
+        std_mean,
+        std_min,
         targets.new_tensor(float(targets.size(0))),
         (targets > 0).float().mean(),
         state_delta,
@@ -274,8 +339,24 @@ def action_probe_signature(
     horizon_tensor = torch.cat(probe_horizons, dim=0)
     actions = actions.unsqueeze(0).expand(batch, -1, -1).reshape(-1, predictor.horizon)
     horizon_tensor = horizon_tensor.unsqueeze(0).expand(batch, -1).reshape(-1)
-    latent = readout(ca3).unsqueeze(1).expand(-1, len(horizons) * predictor.action_count, -1).reshape(
-        -1, readout.linear.out_features
+    latent = (
+        readout(ca3)
+        .unsqueeze(1)
+        .expand(-1, len(horizons) * predictor.action_count, -1)
+        .reshape(-1, readout.linear.out_features)
     )
     prediction = predictor(latent, actions, horizon_tensor)
     return prediction.reshape(batch, -1)
+
+
+def contextual_similarity(
+    readout: CA3StateReadout,
+    predictor: CausalDGInnovationPredictor,
+    left_ca3: Tensor,
+    right_ca3: Tensor,
+) -> Tensor:
+    """Cosine similarity of two raw CA3 states under the current probe model."""
+    left = F.normalize(action_probe_signature(readout, predictor, left_ca3), dim=-1)
+    right = F.normalize(action_probe_signature(readout, predictor, right_ca3), dim=-1)
+    similarity = (left * right).sum(-1)
+    return similarity.squeeze(0) if similarity.numel() == 1 else similarity

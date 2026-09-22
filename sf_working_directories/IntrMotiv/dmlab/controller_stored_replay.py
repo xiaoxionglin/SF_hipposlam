@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from .ca3_state_readout import contextual_similarity
 from .controller_q import continuing_double_q_target
 from .controller_snapshot import differentiable_replay, evaluate_replay
 from .controller_transition import ReplayRejected, TransitionInput
@@ -20,6 +21,25 @@ from .hrl_controllable_graph import HRLStateLayout
 
 def canonical(core, row):
     return row.worker_state[: core.core_output_size].reshape(core.Hippo_n_feature, core.expanded_length)[:, 0]
+
+
+def raw_ca3(core, row):
+    return row.worker_state[: core.core_output_size]
+
+
+@torch.no_grad()
+def contextual_goal_hit(core, candidate_ca3, goal_ca3) -> bool:
+    """Semantic contextual hit; the DG address is not an identity label."""
+    graph = core.policy_graph
+    if graph is None or not graph.contextual or not bool(graph.calibration_ready):
+        return False
+    candidate = torch.as_tensor(candidate_ca3, device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
+    goal = torch.as_tensor(goal_ca3, device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
+    dg = candidate.reshape(core.Hippo_n_feature, core.expanded_length)[:, 0]
+    if not bool((dg > 0).any()):
+        return False
+    similarity = contextual_similarity(core.state_readout, core.innovation_predictor, candidate, goal)
+    return bool(similarity >= graph.recognition_threshold)
 
 
 def example_from_replay(learner, key, allow_stale_anchor=False):
@@ -66,13 +86,25 @@ def hindsight_examples(learner, examples):
             continue
         _, future = learner.replay.sequence(row.key, 0, budget + 1)
         start = canonical(core, row)
+        contextual = getattr(core, "worker_goal_mode", "target_id") == "state_readout" and core.policy_graph.contextual
+        if contextual and not bool(core.policy_graph.calibration_ready):
+            learner.replay.reject("her_contextual_missing_calibration")
+            continue
         goals = []
         for candidate in future[1:]:
             if candidate.generation != row.generation or candidate.worker_state is None:
                 break
             dg = canonical(core, candidate)
             active = np.flatnonzero(dg > 0)
-            if len(active) == 1 and start[active[0]] <= 0:
+            if contextual:
+                if len(active):
+                    learner.replay.reject("her_contextual_candidate")
+                    goal_state = raw_ca3(core, candidate).copy()
+                    if contextual_goal_hit(core, raw_ca3(core, row), goal_state):
+                        learner.replay.reject("her_start_already_achieved_contextual")
+                        continue
+                    goals.append((int(active[np.argmax(dg[active])]), goal_state))
+            elif len(active) == 1 and start[active[0]] <= 0:
                 goals.append(int(active[0]))
         # A certified final observation is a future achievement too. Its label
         # was encoded once before fresh DG learning, not reconstructed in replay.
@@ -85,16 +117,20 @@ def hindsight_examples(learner, examples):
         if not goals:
             learner.replay.reject("her_no_future_achievement")
             continue
-        goal = goals[int(learner.her_rng.integers(len(goals)))]
-        endpoint = next(
-            (
-                candidate
-                for candidate in future[1:]
-                if candidate.worker_state is not None and canonical(core, candidate)[goal] > 0
-            ),
-            None,
-        )
-        goal_state = None if endpoint is None else endpoint.worker_state[: core.core_output_size].copy()
+        selected = goals[int(learner.her_rng.integers(len(goals)))]
+        if contextual:
+            goal, goal_state = selected
+        else:
+            goal = selected
+            endpoint = next(
+                (
+                    candidate
+                    for candidate in future[1:]
+                    if candidate.worker_state is not None and canonical(core, candidate)[goal] > 0
+                ),
+                None,
+            )
+            goal_state = None if endpoint is None else endpoint.worker_state[: core.core_output_size].copy()
         result.append(
             replace(
                 example,
@@ -168,11 +204,26 @@ def evaluate_pairs(learner, examples):
         reward = row.real_reward
         ended = physical
         if e.virtual_goal is not None:
-            if canonical(core, row)[e.virtual_goal] > 0:
+            contextual = (
+                getattr(core, "worker_goal_mode", "target_id") == "state_readout"
+                and core.policy_graph.contextual
+                and e.virtual_goal_state is not None
+            )
+            if contextual:
+                if not bool(core.policy_graph.calibration_ready):
+                    results[i] = "her_contextual_missing_calibration"
+                    continue
+                if contextual_goal_hit(core, raw_ca3(core, row), e.virtual_goal_state):
+                    results[i] = "her_start_already_achieved_contextual"
+                    continue
+            elif canonical(core, row)[e.virtual_goal] > 0:
                 results[i] = "her_start_already_achieved"
                 continue
             if e.remaining is None or e.remaining < 1:
                 results[i] = "her_budget_expired"
+                continue
+            if physical and contextual:
+                results[i] = "her_terminal_successor_ca3_missing"
                 continue
             dg = row.terminal_dg if physical else canonical(core, successor)
             if dg is None:
@@ -184,8 +235,17 @@ def evaluate_pairs(learner, examples):
                 continue
             active = np.flatnonzero(dg > 0)
             node = int(active[0]) if len(active) == 1 else -1
-            hit = node == e.virtual_goal
-            wrong = node >= 0 and node != e.virtual_goal and node != int(row.context[layout.source]) - 1
+            if contextual:
+                hit = contextual_goal_hit(core, raw_ca3(core, successor), e.virtual_goal_state)
+                same_slot = e.virtual_goal in active
+                if hit:
+                    learner.replay.reject("her_contextual_positive_hit")
+                elif same_slot:
+                    learner.replay.reject("her_contextual_same_dg_wrong_context")
+                wrong = len(active) > 0 and not hit
+            else:
+                hit = node == e.virtual_goal
+                wrong = node >= 0 and node != e.virtual_goal and node != int(row.context[layout.source]) - 1
             reward = worker_reward_from_magnitude(
                 torch.tensor([[magnitude]]),
                 torch.tensor([[hit]]),

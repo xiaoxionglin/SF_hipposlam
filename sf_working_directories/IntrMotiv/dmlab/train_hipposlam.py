@@ -125,6 +125,8 @@ def maybe_overwrite_rnn_size(cfg):
             raise ValueError("CA3 prediction horizon must be smaller than recurrence")
         if not 0.0 < float(cfg.ca3_state_readout_lr_scale) <= 1.0:
             raise ValueError("CA3 readout LR scale must be in (0, 1]")
+        if float(cfg.ca3_state_readout_var_coeff) < 0 or float(cfg.ca3_state_readout_cov_coeff) < 0:
+            raise ValueError("CA3 readout variance/covariance coefficients must be nonnegative")
     if goal_mode != "target_id" and readout_mode != "worker":
         raise ValueError("Continuous CA3 goals require ca3_state_readout_mode=worker")
     if goal_mode != "target_id" and getattr(cfg, "controller_replay_state", "reconstruct") != "stored":
@@ -144,6 +146,12 @@ def maybe_overwrite_rnn_size(cfg):
             raise ValueError("Calibration min pairs cannot exceed its bounded capacity")
         if not 0.0 <= float(cfg.ca3_context_calibration_quantile) <= 1.0:
             raise ValueError("Calibration quantile must be in [0, 1]")
+        if not 0.0 < float(cfg.ca3_graph_anchor_ema_alpha) <= 1.0:
+            raise ValueError("EMA anchor alpha must be in (0, 1]")
+        if int(cfg.ca3_graph_anchor_ema_min_confirmations) < 1:
+            raise ValueError("EMA anchors require at least one confirmation")
+        if float(cfg.ca3_graph_anchor_ema_margin) < 0:
+            raise ValueError("EMA anchor margin must be nonnegative")
     if getattr(cfg, "ca3_graph_contextual_hits", False) and anchor_mode == "off":
         raise ValueError("Contextual graph hits require contextual anchors")
 

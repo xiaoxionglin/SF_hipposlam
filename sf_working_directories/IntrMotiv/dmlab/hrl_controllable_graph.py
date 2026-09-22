@@ -9,6 +9,7 @@ from torch import Tensor, nn
 
 from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import (
     action_probe_signature,
+    contextual_similarity,
     predictive_window_consistency,
 )
 
@@ -438,6 +439,8 @@ class PolicyControllableGraph(nn.Module):
         contextual: bool = False,
         calibration_capacity: int = 512,
         prediction_horizon: int = 0,
+        signature_dim: int = 0,
+        candidate_mode: str = "exclusive",
     ):
         super().__init__()
         self.n_nodes = int(n_nodes)
@@ -445,6 +448,8 @@ class PolicyControllableGraph(nn.Module):
         self.contextual = bool(contextual)
         self.calibration_capacity = int(calibration_capacity)
         self.prediction_horizon = int(prediction_horizon)
+        self.signature_dim = int(signature_dim)
+        self.candidate_mode = str(candidate_mode)
         self.register_buffer("node_visits", torch.zeros(self.n_nodes))
         self.register_buffer("tctrl", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("edge_confidence", torch.zeros(self.n_nodes, self.n_nodes))
@@ -472,6 +477,8 @@ class PolicyControllableGraph(nn.Module):
         self.register_buffer("active_goal_mask", torch.zeros(self.n_nodes, dtype=torch.bool))
         self.register_buffer("active_generation", torch.full((self.n_nodes,), -1, dtype=torch.int64))
         self.register_buffer("confirmation_count", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("anchor_signature", torch.zeros(self.n_nodes, self.signature_dim))
+        self.register_buffer("anchor_signature_valid", torch.zeros(self.n_nodes, dtype=torch.bool))
         self.register_buffer("command_count", torch.zeros(self.n_nodes, dtype=torch.int64))
         self.register_buffer("empty_set_exploration_count", torch.zeros((), dtype=torch.int64))
         self.register_buffer("recognition_threshold", torch.zeros(()))
@@ -489,12 +496,37 @@ class PolicyControllableGraph(nn.Module):
         self.register_buffer("calibration_count", torch.zeros((), dtype=torch.int64))
         self.register_buffer("calibration_cursor", torch.zeros((), dtype=torch.int64))
         self.register_buffer("calibration_last_decision", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("diagnostic_left", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer("diagnostic_right", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer("diagnostic_count", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("diagnostic_cursor", torch.zeros((), dtype=torch.int64))
+        for name in (
+            "positive_similarity_q10",
+            "positive_similarity_q50",
+            "positive_similarity_q90",
+            "background_similarity_q50",
+            "background_similarity_q90",
+            "background_similarity_q99",
+            "background_above_threshold_fraction",
+            "active_anchor_collision_fraction",
+            "anchor_centrality_gain_sum",
+            "anchor_age_sum",
+        ):
+            self.register_buffer(name, torch.zeros(()))
         for name in (
             "anchor_registrations",
             "confirmation_attempts",
             "confirmation_successes",
             "anchor_replacements",
             "anchor_deactivations",
+            "anchor_refinement_attempts",
+            "anchor_refinements",
+            "anchor_age_count",
+            "context_raw_multi_activation",
+            "context_accepted_events",
+            "context_unique_rescues",
+            "context_zero_match",
+            "context_multi_match",
         ):
             self.register_buffer(name, torch.zeros((), dtype=torch.int64))
         self.register_buffer("activation_latency_sum", torch.zeros((), dtype=torch.float64))
@@ -547,6 +579,8 @@ class PolicyControllableGraph(nn.Module):
             "active_goal_mask",
             "active_generation",
             "confirmation_count",
+            "anchor_signature",
+            "anchor_signature_valid",
             "command_count",
             "empty_set_exploration_count",
             "recognition_threshold",
@@ -560,11 +594,33 @@ class PolicyControllableGraph(nn.Module):
             "calibration_count",
             "calibration_cursor",
             "calibration_last_decision",
+            "diagnostic_left",
+            "diagnostic_right",
+            "diagnostic_count",
+            "diagnostic_cursor",
+            "positive_similarity_q10",
+            "positive_similarity_q50",
+            "positive_similarity_q90",
+            "background_similarity_q50",
+            "background_similarity_q90",
+            "background_similarity_q99",
+            "background_above_threshold_fraction",
+            "active_anchor_collision_fraction",
+            "anchor_centrality_gain_sum",
+            "anchor_age_sum",
             "anchor_registrations",
             "confirmation_attempts",
             "confirmation_successes",
             "anchor_replacements",
             "anchor_deactivations",
+            "anchor_refinement_attempts",
+            "anchor_refinements",
+            "anchor_age_count",
+            "context_raw_multi_activation",
+            "context_accepted_events",
+            "context_unique_rescues",
+            "context_zero_match",
+            "context_multi_match",
             "activation_latency_sum",
             "activation_latency_count",
             "prospective_attempts",
@@ -605,6 +661,7 @@ class PolicyControllableGraph(nn.Module):
         self.active_goal_mask[node] = False
         self.active_generation[node] = -1
         self.confirmation_count[node] = 0
+        self.anchor_signature_valid[node] = False
         self.anchor_registrations.add_(1)
 
     @torch.no_grad()
@@ -618,6 +675,17 @@ class PolicyControllableGraph(nn.Module):
         self.calibration_targets[cursor].copy_(targets.detach().to(self.calibration_targets))
         self.calibration_cursor.add_(1)
         self.calibration_count.fill_(min(int(self.calibration_count.item()) + 1, self.calibration_capacity))
+
+    @torch.no_grad()
+    def add_diagnostic_pair(self, left: Tensor, right: Tensor) -> None:
+        """Retain a bounded unknown/background pair for telemetry only."""
+        if not self.contextual or not self.calibration_capacity:
+            return
+        cursor = int(self.diagnostic_cursor.item()) % self.calibration_capacity
+        self.diagnostic_left[cursor].copy_(left.detach().to(self.diagnostic_left))
+        self.diagnostic_right[cursor].copy_(right.detach().to(self.diagnostic_right))
+        self.diagnostic_cursor.add_(1)
+        self.diagnostic_count.fill_(min(int(self.diagnostic_count.item()) + 1, self.calibration_capacity))
 
     @torch.no_grad()
     def recalibrate(
@@ -651,17 +719,51 @@ class PolicyControllableGraph(nn.Module):
         )
         upper_quantile = 1.0 - float(quantile)
         self.recognition_threshold.copy_(torch.quantile(similarities, float(quantile)))
+        self.positive_similarity_q10.copy_(torch.quantile(similarities, 0.10))
+        self.positive_similarity_q50.copy_(torch.quantile(similarities, 0.50))
+        self.positive_similarity_q90.copy_(torch.quantile(similarities, 0.90))
         self.prediction_absolute_threshold.copy_(torch.quantile(absolute, upper_quantile))
         self.prediction_excess_threshold.copy_(torch.quantile(excess, upper_quantile))
         self.calibration_ready.fill_(True)
         self.calibration_last_decision.fill_(int(decision))
+        diagnostic_count = int(self.diagnostic_count.item())
+        if diagnostic_count:
+            diagnostic_similarity = contextual_similarity(
+                readout,
+                predictor,
+                self.diagnostic_left[:diagnostic_count],
+                self.diagnostic_right[:diagnostic_count],
+            )
+            self.background_similarity_q50.copy_(torch.quantile(diagnostic_similarity, 0.50))
+            self.background_similarity_q90.copy_(torch.quantile(diagnostic_similarity, 0.90))
+            self.background_similarity_q99.copy_(torch.quantile(diagnostic_similarity, 0.99))
+            self.background_above_threshold_fraction.copy_(
+                (diagnostic_similarity >= self.recognition_threshold).float().mean()
+            )
+        selectable = self.selectable_mask()
+        active = torch.where(selectable)[0]
+        if active.numel() > 1:
+            signatures = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[active]), dim=-1)
+            similarity = signatures @ signatures.T
+            upper = torch.triu(torch.ones_like(similarity, dtype=torch.bool), diagonal=1)
+            self.active_anchor_collision_fraction.copy_(
+                (similarity[upper] >= self.recognition_threshold).float().mean()
+            )
+        else:
+            self.active_anchor_collision_fraction.zero_()
+        if self.signature_dim:
+            valid = torch.where(self.anchor_valid)[0]
+            if valid.numel():
+                signatures = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[valid]), dim=-1)
+                if signatures.size(-1) != self.signature_dim:
+                    raise RuntimeError("Configured contextual signature dimension is inconsistent")
+                self.anchor_signature[valid].copy_(signatures)
+                self.anchor_signature_valid[valid] = True
         return True
 
     @torch.no_grad()
     def recognition_similarity(self, node: int, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
-        candidate = F.normalize(action_probe_signature(readout, predictor, ca3.detach()), dim=-1)
-        anchor = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[int(node)]), dim=-1)
-        return (candidate * anchor).sum()
+        return contextual_similarity(readout, predictor, ca3.detach(), self.anchor_ca3[int(node)])
 
     @torch.no_grad()
     def confirm_anchor(
@@ -703,16 +805,85 @@ class PolicyControllableGraph(nn.Module):
         return True
 
     @torch.no_grad()
+    def refine_anchor_ema(
+        self,
+        node: int,
+        ca3: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        decision: int,
+        alpha: float,
+        min_confirmations: int,
+        margin: float,
+    ) -> bool:
+        """Refine a raw anchor without changing its semantic generation."""
+        node = int(node)
+        candidate = F.normalize(action_probe_signature(readout, predictor, ca3.detach()), dim=-1).squeeze(0)
+        if not self.anchor_signature_valid[node]:
+            self.anchor_signature[node].copy_(
+                F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[node]), dim=-1).squeeze(0)
+            )
+            self.anchor_signature_valid[node] = True
+        prototype = self.anchor_signature[node]
+        anchor_age = max(0, int(decision) - int(self.anchor_last_update[node]))
+        refined = False
+        if int(self.confirmation_count[node]) >= int(min_confirmations):
+            self.anchor_refinement_attempts.add_(1)
+            incumbent = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[node]), dim=-1).squeeze(
+                0
+            )
+            gain = torch.dot(candidate, prototype) - torch.dot(incumbent, prototype)
+            if gain >= float(margin):
+                self.anchor_ca3[node].copy_(ca3.detach().to(self.anchor_ca3))
+                self.anchor_last_update[node] = int(decision)
+                self.anchor_last_score[node] = float(gain)
+                self.anchor_refinements.add_(1)
+                self.anchor_centrality_gain_sum.add_(gain)
+                refined = True
+        updated = F.normalize((1.0 - float(alpha)) * prototype + float(alpha) * candidate, dim=0)
+        self.anchor_signature[node].copy_(updated)
+        self.anchor_age_sum.add_(float(anchor_age))
+        self.anchor_age_count.add_(1)
+        return refined
+
+    @torch.no_grad()
     def contextual_activity(self, dg_activity: Tensor, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
-        """Recognize only exclusive, currently selectable anchor generations."""
-        exclusive = (dg_activity > 0).sum(-1) == 1
-        node = dg_activity.argmax(-1)
-        allowed = exclusive & self.selectable_mask()[node]
+        """Recognize events using the configured selectable-anchor candidate rule."""
+        counts = (dg_activity > 0).sum(-1)
+        has_event = counts > 0
+        self.context_raw_multi_activation.add_((counts > 1).sum())
         result = torch.zeros_like(dg_activity)
-        for row in torch.where(allowed)[0].tolist():
-            j = int(node[row])
-            if self.recognition_similarity(j, ca3[row], readout, predictor) >= self.recognition_threshold:
-                result[row, j] = dg_activity[row, j]
+        selectable = self.selectable_mask()
+        for row in torch.where(has_event)[0].tolist():
+            raw_node = int(dg_activity[row].argmax())
+            matched = []
+            if self.candidate_mode == "exclusive":
+                if counts[row] == 1 and selectable[raw_node]:
+                    matched = [raw_node]
+            elif self.candidate_mode == "dominant":
+                if selectable[raw_node]:
+                    matched = [raw_node]
+            elif self.candidate_mode == "unique_contextual":
+                for node in torch.where(selectable)[0].tolist():
+                    if self.recognition_similarity(node, ca3[row], readout, predictor) >= self.recognition_threshold:
+                        matched.append(int(node))
+                if not matched:
+                    self.context_zero_match.add_(1)
+                elif len(matched) > 1:
+                    self.context_multi_match.add_(1)
+            else:
+                raise ValueError(f"Unknown contextual candidate mode: {self.candidate_mode}")
+            if self.candidate_mode != "unique_contextual" and matched:
+                node = matched[0]
+                if self.recognition_similarity(node, ca3[row], readout, predictor) < self.recognition_threshold:
+                    matched = []
+                    self.context_zero_match.add_(1)
+            if len(matched) == 1:
+                node = matched[0]
+                result[row, node] = dg_activity[row].max()
+                self.context_accepted_events.add_(1)
+                if counts[row] > 1 and self.candidate_mode == "unique_contextual":
+                    self.context_unique_rescues.add_(1)
         return result
 
     @torch.no_grad()
@@ -760,6 +931,7 @@ class PolicyControllableGraph(nn.Module):
         self.active_goal_mask[node] = False
         self.active_generation[node] = -1
         self.confirmation_count[node] = 0
+        self.anchor_signature_valid[node] = False
         self.anchor_replacements.add_(1)
 
     @torch.no_grad()
@@ -776,6 +948,7 @@ class PolicyControllableGraph(nn.Module):
             self.active_goal_mask[node] = False
             self.active_generation[node] = -1
             self.confirmation_count[node] = 0
+            self.anchor_signature_valid[node] = False
             self.anchor_generation[node].add_(1)
         self.representation_generation.add_(1)
 

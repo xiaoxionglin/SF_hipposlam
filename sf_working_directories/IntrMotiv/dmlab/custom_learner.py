@@ -3409,9 +3409,14 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             prediction_zero = outputs.core_outputs.sum() * 0.0
             additional_stats["ca3_readout_enabled"] = prediction_zero
             for name in (
+                "total_loss",
                 "prediction_loss",
                 "active_loss",
                 "zero_loss",
+                "var_loss",
+                "cov_loss",
+                "latent_std_mean",
+                "latent_std_min",
                 "valid_targets",
                 "active_fraction",
                 "state_shuffle_delta",
@@ -3432,11 +3437,18 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     int(self.cfg.ca3_state_readout_horizon),
                     float(self.cfg.ca3_state_readout_active_coeff),
                     float(self.cfg.ca3_state_readout_zero_coeff),
+                    float(self.cfg.ca3_state_readout_var_coeff),
+                    float(self.cfg.ca3_state_readout_cov_coeff),
                 )
                 encoder_loss = encoder_loss + float(self.cfg.ca3_state_readout_loss_coeff) * prediction.loss
-                additional_stats["ca3_readout_prediction_loss"] = prediction.loss.detach()
+                additional_stats["ca3_readout_total_loss"] = prediction.loss.detach()
+                additional_stats["ca3_readout_prediction_loss"] = prediction.prediction_loss.detach()
                 additional_stats["ca3_readout_active_loss"] = prediction.active_loss.detach()
                 additional_stats["ca3_readout_zero_loss"] = prediction.zero_loss.detach()
+                additional_stats["ca3_readout_var_loss"] = prediction.var_loss.detach()
+                additional_stats["ca3_readout_cov_loss"] = prediction.cov_loss.detach()
+                additional_stats["ca3_readout_latent_std_mean"] = prediction.latent_std_mean
+                additional_stats["ca3_readout_latent_std_min"] = prediction.latent_std_min
                 additional_stats["ca3_readout_valid_targets"] = prediction.valid_targets
                 additional_stats["ca3_readout_active_fraction"] = prediction.active_fraction
                 additional_stats["ca3_readout_state_shuffle_delta"] = prediction.state_shuffle_delta
@@ -4923,9 +4935,14 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.ca3_predictor_positive_fraction = var.additional_stats["ca3_predictor_positive_fraction"].detach().float()
         for name in (
             "enabled",
+            "total_loss",
             "prediction_loss",
             "active_loss",
             "zero_loss",
+            "var_loss",
+            "cov_loss",
+            "latent_std_mean",
+            "latent_std_min",
             "valid_targets",
             "active_fraction",
             "state_shuffle_delta",

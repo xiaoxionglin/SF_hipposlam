@@ -39,6 +39,7 @@ def test_contextual_alias_diagnostics_uses_largest_recognized_component():
     assert result["contextual_alias_component_count"].tolist() == [2, 0]
     assert result["contextual_alias_recognized_count"].tolist() == [4, 0]
     assert np.isclose(result["contextual_alias_off_primary_fraction"][0], 0.25)
+    assert np.isclose(result["contextual_alias_false_accept_fraction"][0], 0.25)
 
 
 def test_pre_threshold_maps_preserve_signed_logits_and_occupancy():

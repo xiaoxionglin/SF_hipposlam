@@ -622,6 +622,10 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 bool(getattr(cfg, "ca3_state_readout_action_conditioning", True)),
             )
         contextual_anchors = self.anchor_mode != "off"
+        signature_dim = 0
+        if contextual_anchors:
+            probe_horizons = {1, max(1, self.innovation_predictor.horizon // 2), self.innovation_predictor.horizon}
+            signature_dim = len(probe_horizons) * self.innovation_predictor.action_count * self.Hippo_n_feature
         self.policy_graph = (
             PolicyControllableGraph(
                 self.Hippo_n_feature,
@@ -629,6 +633,8 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 contextual_anchors,
                 int(getattr(cfg, "ca3_context_calibration_capacity", 512)),
                 int(getattr(cfg, "ca3_state_readout_horizon", 16)) if contextual_anchors else 0,
+                signature_dim,
+                getattr(cfg, "ca3_context_candidate_mode", "exclusive"),
             )
             if self.hrl_enabled and self.hrl_graph_memory == "policy_buffer"
             else None

@@ -318,7 +318,11 @@ def validated_paths(
     known = reliable_edges(graph, confidence_threshold, reliability_threshold)
     selectable = graph.selectable_mask()
     known &= selectable[:, None] & selectable[None, :]
-    dist = torch.where(known, graph.tctrl, torch.full_like(graph.tctrl, torch.inf)).clone()
+    costs = torch.where(known, graph.tctrl, torch.full_like(graph.tctrl, torch.inf))
+    cached = getattr(graph, "_validated_paths_cache", None)
+    if cached is not None and _same_graph_tensor(cached[0], costs) and _same_graph_tensor(cached[1], known):
+        return tuple(value.clone() for value in cached[2])
+    dist = costs.clone()
     idx = torch.arange(n, device=dist.device)
     dist[idx, idx] = 0.0
     next_hop = torch.where(known, idx.view(1, n).expand(n, n), torch.full((n, n), -1, device=dist.device))
@@ -332,6 +336,11 @@ def validated_paths(
         next_hop = torch.where(better, next_hop[:, k].unsqueeze(1), next_hop)
         candidate_hops = hops[:, k].unsqueeze(1) + hops[k, :].unsqueeze(0)
         hops = torch.where(better, candidate_hops, hops)
+    graph._validated_paths_cache = (
+        costs.detach().clone(),
+        known.detach().clone(),
+        (dist.clone(), next_hop.clone(), hops.clone()),
+    )
     return dist, next_hop, hops
 
 
@@ -439,6 +448,24 @@ def _transitive_reachability(adjacency: Tensor) -> Tensor:
     return reach
 
 
+def _same_graph_tensor(previous: Tensor, current: Tensor) -> bool:
+    return previous.device == current.device and previous.dtype == current.dtype and torch.equal(previous, current)
+
+
+def _graph_connectivity_gains(graph, adjacency: Tensor) -> Tensor:
+    """All insertion gains from one closure, cached by effective adjacency."""
+    cached = getattr(graph, "_connectivity_gains_cache", None)
+    if cached is not None and _same_graph_tensor(cached[0], adjacency):
+        return cached[1]
+    reach = _transitive_reachability(adjacency)
+    missing = ~reach
+    missing.fill_diagonal_(False)
+    ancestors = reach.to(torch.float64).T
+    gains = ancestors @ missing.to(torch.float64) @ ancestors
+    graph._connectivity_gains_cache = (adjacency.detach().clone(), gains)
+    return gains
+
+
 def _connectivity_gain_from_reachability(reach: Tensor, source: int, destination: int) -> float:
     # Every newly reachable path uses the inserted edge once: an old path to
     # source, the edge, then an old path from destination. Cycles do not require
@@ -468,9 +495,9 @@ def select_connectivity_probe(
     attempts = graph.control_attempts
     successes = graph.edge_confidence
     total_attempts = attempts.sum()
-    reach = _transitive_reachability(reliable)
     edge_pairs = edge_ids.tolist()
-    gains = [_connectivity_gain_from_reachability(reach, source, destination) for source, destination in edge_pairs]
+    all_gains = _graph_connectivity_gains(graph, reliable)
+    gains = all_gains[edge_ids[:, 0], edge_ids[:, 1]].tolist()
     max_gain = max(gains) if gains else 0.0
     best_pair = None
     best_score = -math.inf

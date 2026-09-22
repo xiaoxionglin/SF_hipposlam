@@ -243,6 +243,9 @@ def contextual_alias_diagnostics(pose: pd.DataFrame, activity: np.ndarray, grain
         "contextual_alias_component_count": component_count,
         "contextual_alias_recognized_count": recognized_count,
         "contextual_alias_off_primary_fraction": off_primary_fraction,
+        # This is a privileged, rollout-conditioned proxy for spatial false
+        # acceptance, not a reconstruction of online confirmation history.
+        "contextual_alias_false_accept_fraction": off_primary_fraction.copy(),
     }
 
 
@@ -664,6 +667,10 @@ def main():
                 "mean_off_primary_fraction": (
                     float(alias["contextual_alias_off_primary_fraction"][eligible].mean()) if eligible.any() else 0.0
                 ),
+                "rollout_conditioned_false_accept_fraction": (
+                    float(alias["contextual_alias_false_accept_fraction"][eligible].mean()) if eligible.any() else 0.0
+                ),
+                "historical_confirmation_rate": None,
             }
             (run_out / "contextual_alias_diagnostics.json").write_text(json.dumps(alias_summary, indent=2) + "\n")
         pre_threshold_summary = {}

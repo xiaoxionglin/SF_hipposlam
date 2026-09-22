@@ -372,9 +372,19 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--ca3_state_readout_loss_coeff", default=1.0, type=float)
     p.add_argument("--ca3_state_readout_active_coeff", default=1.0, type=float)
     p.add_argument("--ca3_state_readout_zero_coeff", default=0.1, type=float)
+    p.add_argument("--ca3_state_readout_var_coeff", default=0.1, type=float)
+    p.add_argument("--ca3_state_readout_cov_coeff", default=0.01, type=float)
     p.add_argument("--ca3_state_readout_lr_scale", default=0.2, type=float)
     p.add_argument("--ca3_worker_goal_mode", default="target_id", choices=("target_id", "raw_ca3", "state_readout"))
-    p.add_argument("--ca3_graph_anchor_mode", default="off", choices=("off", "fixed", "champion"))
+    p.add_argument("--ca3_graph_anchor_mode", default="off", choices=("off", "fixed", "champion", "ema"))
+    p.add_argument("--ca3_graph_anchor_ema_alpha", default=0.05, type=float)
+    p.add_argument("--ca3_graph_anchor_ema_min_confirmations", default=8, type=int)
+    p.add_argument("--ca3_graph_anchor_ema_margin", default=0.01, type=float)
+    p.add_argument(
+        "--ca3_context_candidate_mode",
+        default="exclusive",
+        choices=("exclusive", "dominant", "unique_contextual"),
+    )
     p.add_argument("--ca3_graph_contextual_hits", default=False, type=str2bool)
     p.add_argument("--ca3_context_calibration_capacity", default=512, type=int)
     p.add_argument("--ca3_context_calibration_min_pairs", default=256, type=int)

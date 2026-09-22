@@ -291,6 +291,7 @@ class ControllerLearner(DistanceLearnerReward):
                 continue
             future = dg[stream, start + 1 : start + horizon + 1]
             action_window = actions[stream, start : start + horizon]
+            graph.add_diagnostic_pair(graph.anchor_ca3[node], candidate)
             if complete and getattr(self.cfg, "ca3_graph_anchor_mode", "fixed") == "champion":
                 mean, lower, score = paired_anchor_improvement(
                     core.state_readout,
@@ -305,7 +306,7 @@ class ControllerLearner(DistanceLearnerReward):
                 if lower > 0:
                     graph.replace_anchor(node, candidate, decision, float(score))
                     continue
-            graph.confirm_anchor(
+            confirmed = graph.confirm_anchor(
                 node,
                 candidate,
                 core.state_readout,
@@ -316,6 +317,17 @@ class ControllerLearner(DistanceLearnerReward):
                 float(self.cfg.ca3_state_readout_zero_coeff),
                 decision,
             )
+            if confirmed and getattr(self.cfg, "ca3_graph_anchor_mode", "fixed") == "ema":
+                graph.refine_anchor_ema(
+                    node,
+                    candidate,
+                    core.state_readout,
+                    core.innovation_predictor,
+                    decision,
+                    float(self.cfg.ca3_graph_anchor_ema_alpha),
+                    int(self.cfg.ca3_graph_anchor_ema_min_confirmations),
+                    float(self.cfg.ca3_graph_anchor_ema_margin),
+                )
 
     def _calculate_losses(self, mb, num_invalids, iterative_phase, **kwargs):
         if self.cfg.controller_learning != "ddqn":
@@ -785,10 +797,44 @@ class ControllerLearner(DistanceLearnerReward):
                     else 0.0
                 ),
                 empty_set_exploration=float(graph.empty_set_exploration_count),
+                anchor_refinement_attempts=float(graph.anchor_refinement_attempts),
+                anchor_refinements=float(graph.anchor_refinements),
+                anchor_centrality_gain_mean=float(
+                    graph.anchor_centrality_gain_sum / graph.anchor_refinements.clamp_min(1)
+                ),
+                anchor_age_mean=float(graph.anchor_age_sum / graph.anchor_age_count.clamp_min(1)),
+                context_raw_multi_activation=float(graph.context_raw_multi_activation),
+                context_accepted_events=float(graph.context_accepted_events),
+                context_unique_rescues=float(graph.context_unique_rescues),
+                context_zero_match=float(graph.context_zero_match),
+                context_multi_match=float(graph.context_multi_match),
+                positive_similarity_q10=float(graph.positive_similarity_q10),
+                positive_similarity_q50=float(graph.positive_similarity_q50),
+                positive_similarity_q90=float(graph.positive_similarity_q90),
+                background_similarity_q50=float(graph.background_similarity_q50),
+                background_similarity_q90=float(graph.background_similarity_q90),
+                background_similarity_q99=float(graph.background_similarity_q99),
+                background_above_threshold_fraction=float(graph.background_above_threshold_fraction),
+                active_anchor_collision_fraction=float(graph.active_anchor_collision_fraction),
             )
             self.controller_stats.update(
                 {f"command_slot_{slot:02d}": float(value) for slot, value in enumerate(graph.command_count)}
             )
+        rejection_metrics = {
+            "her_contextual_candidates": "her_contextual_candidate",
+            "her_contextual_positive_hits": "her_contextual_positive_hit",
+            "her_contextual_wrong_context": "her_contextual_same_dg_wrong_context",
+            "her_contextual_start_achieved": "her_start_already_achieved_contextual",
+            "her_contextual_missing_calibration": "her_contextual_missing_calibration",
+            "her_terminal_successor_ca3_missing": "her_terminal_successor_ca3_missing",
+        }
+        self.controller_stats.update(
+            {name: float(self.replay.rejected.get(reason, 0)) for name, reason in rejection_metrics.items()}
+        )
+        candidates = self.controller_stats["her_contextual_candidates"]
+        self.controller_stats["her_contextual_positive_rate"] = (
+            self.controller_stats["her_contextual_positive_hits"] / candidates if candidates else 0.0
+        )
         for group, counts in self._optimizer_step_counts().items():
             self.controller_stats[group + "_optimizer_steps_min"] = min(counts.values(), default=0)
             self.controller_stats[group + "_optimizer_steps_max"] = max(counts.values(), default=0)

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 
@@ -93,14 +94,78 @@ def test_prediction_windows_are_causal_and_gradients_stop_at_canonical_ca3():
     done = torch.zeros(recurrence, dtype=torch.bool)
     readout = CA3StateReadout(n * expanded, 4)
     predictor = CausalDGInnovationPredictor(4, 3, horizon, n)
-    result = predictive_readout_loss(
-        readout, predictor, ca3, actions, valid, done, recurrence, n, expanded, horizon
-    )
+    result = predictive_readout_loss(readout, predictor, ca3, actions, valid, done, recurrence, n, expanded, horizon)
     result.loss.backward()
     assert ca3.grad is None
     assert readout.linear.weight.grad is not None
     assert any(parameter.grad is not None for parameter in predictor.parameters())
     assert int(result.valid_targets) == (recurrence - 1) + (recurrence - 2)
+
+
+def test_readout_regularizers_are_finite_and_only_update_the_readout():
+    n, expanded, recurrence, horizon = 3, 2, 4, 2
+    ca3 = torch.ones(recurrence, n * expanded, requires_grad=True)
+    readout = CA3StateReadout(n * expanded, 4)
+    predictor = CausalDGInnovationPredictor(4, 2, horizon, n)
+    result = predictive_readout_loss(
+        readout,
+        predictor,
+        ca3,
+        torch.zeros(recurrence, 1, dtype=torch.long),
+        torch.ones(recurrence, dtype=torch.bool),
+        torch.zeros(recurrence, dtype=torch.bool),
+        recurrence,
+        n,
+        expanded,
+        horizon,
+    )
+    assert torch.isfinite(torch.stack((result.loss, result.var_loss, result.cov_loss))).all()
+    assert result.var_loss > 0
+    result.var_loss.backward()
+    assert ca3.grad is None
+    assert readout.linear.weight.grad is not None
+    assert all(parameter.grad is None for parameter in predictor.parameters())
+
+
+def test_ema_refinement_preserves_generation_and_graph_evidence():
+    graph = PolicyControllableGraph(2, ca3_size=4, contextual=True, signature_dim=8, candidate_mode="dominant")
+    readout = CA3StateReadout(4, 2)
+    predictor = CausalDGInnovationPredictor(2, 2, 2, 2, hidden_size=4)
+    anchor = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    candidate = torch.tensor([0.0, 1.0, 0.0, 0.0])
+    graph.register_anchor(0, anchor, 1)
+    graph.active_goal_mask[0] = True
+    graph.active_generation[0] = graph.anchor_generation[0]
+    graph.confirmation_count[0] = 8
+    graph.node_visits[0] = 7
+    graph.edge_confidence[0, 1] = 3
+    generation = int(graph.anchor_generation[0])
+    graph.refine_anchor_ema(0, candidate, readout, predictor, 10, 0.05, 8, -1.0)
+    assert int(graph.anchor_generation[0]) == generation
+    assert graph.selectable_mask()[0]
+    assert graph.node_visits[0] == 7 and graph.edge_confidence[0, 1] == 3
+    assert int(graph.anchor_refinements) == 1
+
+
+def test_unique_contextual_recognition_rescues_one_multi_active_match_and_abstains_on_ambiguity():
+    graph = PolicyControllableGraph(3, ca3_size=3, contextual=True, candidate_mode="unique_contextual")
+    graph.active_goal_mask[:2] = True
+    graph.anchor_valid[:2] = True
+    graph.active_generation[:2] = graph.anchor_generation[:2]
+    graph.recognition_threshold.fill_(0.5)
+    activity = torch.tensor([[1.0, 2.0, 0.0]])
+    with torch.no_grad(), patch.object(
+        graph, "recognition_similarity", side_effect=[torch.tensor(0.9), torch.tensor(0.1)]
+    ):
+        result = graph.contextual_activity(activity, torch.ones(1, 3), None, None)
+    assert result.tolist() == [[2.0, 0.0, 0.0]]
+    assert int(graph.context_unique_rescues) == 1
+    with torch.no_grad(), patch.object(
+        graph, "recognition_similarity", side_effect=[torch.tensor(0.9), torch.tensor(0.8)]
+    ):
+        result = graph.contextual_activity(activity, torch.ones(1, 3), None, None)
+    assert not result.any()
+    assert int(graph.context_multi_match) == 1
 
 
 def test_contextual_checkpoint_round_trip_preserves_calibration_and_generations():

@@ -145,3 +145,63 @@ def test_replay_checkpoint_retains_stored_states_and_terminal_provenance():
         np.testing.assert_array_equal(restored.rows[key].worker_state, row.worker_state)
         assert restored.rows[key].real_events == row.real_events
     assert restored.session == learner.replay.session + 1
+
+
+def _enable_contextual_goals(learner):
+    core = learner.actor_critic.core
+    core.worker_goal_mode = "state_readout"
+    core.policy_graph.contextual = True
+    core.policy_graph.calibration_ready.fill_(True)
+    for snapshot in (learner.online_snapshot.model, learner.target_snapshot.model):
+        snapshot.core.worker_goal_mode = "state_readout"
+        snapshot.core.policy_graph.contextual = True
+        snapshot.core.policy_graph.calibration_ready.fill_(True)
+
+
+def test_contextual_her_hit_does_not_require_virtual_goal_slot_equality():
+    learner, _, rows = fixture()
+    _enable_contextual_goals(learner)
+    goal_state = rows[1].worker_state[: learner.actor_critic.core.core_output_size].copy()
+    example = TransitionInput(tuple(rows[:2]), 0, virtual_goal=2, remaining=3, virtual_goal_state=goal_state)
+    with patch(
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hit",
+        side_effect=[False, True],
+    ):
+        result = evaluate_pairs(learner, [example])[0]
+    assert not isinstance(result, str)
+    assert learner.replay.rejected["her_contextual_positive_hit"] == 1
+
+
+def test_contextual_her_records_same_dg_wrong_context_and_never_falls_back_to_id():
+    learner, _, rows = fixture()
+    _enable_contextual_goals(learner)
+    goal_state = rows[1].worker_state[: learner.actor_critic.core.core_output_size].copy()
+    example = TransitionInput(tuple(rows[:2]), 0, virtual_goal=1, remaining=3, virtual_goal_state=goal_state)
+    with patch(
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hit",
+        side_effect=[False, False],
+    ):
+        result = evaluate_pairs(learner, [example])[0]
+    assert not isinstance(result, str)
+    assert learner.replay.rejected["her_contextual_same_dg_wrong_context"] == 1
+    learner.actor_critic.core.policy_graph.calibration_ready.fill_(False)
+    assert evaluate_pairs(learner, [example])[0] == "her_contextual_missing_calibration"
+
+
+def test_contextual_terminal_her_requires_real_successor_ca3():
+    learner, _, rows = fixture()
+    _enable_contextual_goals(learner)
+    terminal = replace(rows[0], terminated=True, successor_valid=True, terminal_dg=np.ones(3))
+    learner.replay = PhysicalReplay(10, 99)
+    learner.replay.receive(terminal)
+    example = replace(
+        example_from_replay(learner, terminal.key),
+        virtual_goal=1,
+        remaining=3,
+        virtual_goal_state=np.ones(learner.actor_critic.core.core_output_size, dtype=np.float32),
+    )
+    with patch(
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hit",
+        return_value=False,
+    ):
+        assert evaluate_pairs(learner, [example])[0] == "her_terminal_successor_ca3_missing"
