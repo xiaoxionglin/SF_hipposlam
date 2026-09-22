@@ -58,3 +58,25 @@ def test_followup_production_is_complete_factorial_with_flat_tracking():
         assert "--ca3_state_readout_horizon=32" in run.args
         assert "--ca3_state_readout_var_coeff=0.1" in run.args
         assert "--ca3_state_readout_cov_coeff=0.01" in run.args
+
+
+def test_followup_gpu_copy_has_isolated_flat_groups_and_output_namespaces():
+    cases = [
+        ("ca3_state_goal_followup_20260922_gpu_preflight.study.json", 4, [99], 2_000_000),
+        ("ca3_state_goal_followup_20260922_gpu_production.study.json", 12, [8, 99, 123], 300_000_000),
+    ]
+    for name, expected_runs, seeds, frames in cases:
+        study = load_study(STUDIES / name)
+        raw = _raw(name)
+        runs = study.expand_runs()
+        assert len(runs) == expected_runs
+        assert raw["seeds"] == seeds
+        assert raw["metadata"]["training_steps"] == frames
+        assert "gpu" in raw["study_id"]
+        assert "gpu" in raw["training"]["batch_name"]
+        assert "gpu" in raw["training"]["output_root"]
+        assert "--device=gpu" in raw["training"]["common_args"]
+        assert "--device=cpu" not in raw["training"]["common_args"]
+        for run in runs:
+            assert run.condition.startswith("GPU_CTX_")
+            assert f"--wandb_tags={run.condition}" in run.args
