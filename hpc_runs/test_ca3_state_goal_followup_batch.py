@@ -23,6 +23,23 @@ def test_followup_preflight_is_four_fresh_seed99_two_million_frame_runs():
     assert "intervention" not in raw["telemetry"]
 
 
+def test_followup_optimized_preflight_has_a_collision_free_namespace():
+    name = "ca3_state_goal_followup_20260922_preflight_v2.study.json"
+    study = load_study(STUDIES / name)
+    raw = _raw(name)
+    runs = study.expand_runs()
+    assert len(runs) == 4
+    assert raw["seeds"] == [99]
+    assert raw["study_id"].endswith("_preflight_v2")
+    assert raw["training"]["batch_name"].endswith("_preflight_v2")
+    assert raw["training"]["output_root"].endswith("_preflight_v2")
+    assert raw["training"]["run_name_template"].startswith("CA3FU2_")
+    assert "--wandb_group=ca3_state_goal_followup_20260922_preflight_v2" in raw["training"]["common_args"]
+    for run in runs:
+        assert f"--study_condition={run.condition}" in run.args
+        assert f"--wandb_tags={run.condition}" in run.args
+
+
 def test_followup_production_is_complete_factorial_with_flat_tracking():
     name = "ca3_state_goal_followup_20260922_production.study.json"
     study = load_study(STUDIES / name)
