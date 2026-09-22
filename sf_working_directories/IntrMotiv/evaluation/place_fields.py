@@ -643,6 +643,12 @@ def main():
                 worker_spatial_information=worker_si,
                 worker_active_fraction=worker_fraction,
             )
+            artifact.update(
+                {
+                    "worker_" + key: value
+                    for key, value in spatial_details_for_artifact(pose, worker, args.grain).items()
+                }
+            )
         if "contextual_goal_activity" in graph_arrays:
             contextual = graph_arrays["contextual_goal_activity"]
             alias = contextual_alias_diagnostics(pose, contextual, args.grain)
@@ -660,12 +666,6 @@ def main():
                 ),
             }
             (run_out / "contextual_alias_diagnostics.json").write_text(json.dumps(alias_summary, indent=2) + "\n")
-            artifact.update(
-                {
-                    "worker_" + key: value
-                    for key, value in spatial_details_for_artifact(pose, worker, args.grain).items()
-                }
-            )
         pre_threshold_summary = {}
         if pre_threshold_logits is not None:
             _, pre_threshold_maps, pre_threshold_mean, pre_threshold_std = compute_pre_threshold_maps(
