@@ -152,20 +152,26 @@ def test_unique_contextual_recognition_rescues_one_multi_active_match_and_abstai
     graph.active_goal_mask[:2] = True
     graph.anchor_valid[:2] = True
     graph.active_generation[:2] = graph.anchor_generation[:2]
+    graph.anchor_ca3[0] = torch.tensor([1.0, 0.0, 0.0])
+    graph.anchor_ca3[1] = torch.tensor([0.0, 1.0, 0.0])
     graph.recognition_threshold.fill_(0.5)
     activity = torch.tensor([[1.0, 2.0, 0.0]])
-    with torch.no_grad(), patch.object(
-        graph, "recognition_similarity", side_effect=[torch.tensor(0.9), torch.tensor(0.1)]
-    ):
-        result = graph.contextual_activity(activity, torch.ones(1, 3), None, None)
+    with torch.no_grad(), patch(
+        "sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph.action_probe_signature",
+        side_effect=lambda readout, predictor, ca3: ca3 if ca3.ndim == 2 else ca3.unsqueeze(0),
+    ) as signature:
+        result = graph.contextual_activity(activity, torch.tensor([[1.0, 0.0, 0.0]]), None, None)
     assert result.tolist() == [[2.0, 0.0, 0.0]]
     assert int(graph.context_unique_rescues) == 1
-    with torch.no_grad(), patch.object(
-        graph, "recognition_similarity", side_effect=[torch.tensor(0.9), torch.tensor(0.8)]
-    ):
-        result = graph.contextual_activity(activity, torch.ones(1, 3), None, None)
+    assert signature.call_count == 2
+    with torch.no_grad(), patch(
+        "sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph.action_probe_signature",
+        side_effect=lambda readout, predictor, ca3: ca3 if ca3.ndim == 2 else ca3.unsqueeze(0),
+    ) as signature:
+        result = graph.contextual_activity(activity, torch.tensor([[1.0, 1.0, 0.0]]), None, None)
     assert not result.any()
     assert int(graph.context_multi_match) == 1
+    assert signature.call_count == 2
 
 
 def test_contextual_checkpoint_round_trip_preserves_calibration_and_generations():

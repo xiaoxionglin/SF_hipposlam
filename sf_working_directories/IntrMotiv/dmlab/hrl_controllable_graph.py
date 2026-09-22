@@ -854,36 +854,52 @@ class PolicyControllableGraph(nn.Module):
         self.context_raw_multi_activation.add_((counts > 1).sum())
         result = torch.zeros_like(dg_activity)
         selectable = self.selectable_mask()
-        for row in torch.where(has_event)[0].tolist():
-            raw_node = int(dg_activity[row].argmax())
-            matched = []
-            if self.candidate_mode == "exclusive":
-                if counts[row] == 1 and selectable[raw_node]:
-                    matched = [raw_node]
-            elif self.candidate_mode == "dominant":
-                if selectable[raw_node]:
-                    matched = [raw_node]
-            elif self.candidate_mode == "unique_contextual":
-                for node in torch.where(selectable)[0].tolist():
-                    if self.recognition_similarity(node, ca3[row], readout, predictor) >= self.recognition_threshold:
-                        matched.append(int(node))
-                if not matched:
-                    self.context_zero_match.add_(1)
-                elif len(matched) > 1:
-                    self.context_multi_match.add_(1)
-            else:
-                raise ValueError(f"Unknown contextual candidate mode: {self.candidate_mode}")
-            if self.candidate_mode != "unique_contextual" and matched:
-                node = matched[0]
-                if self.recognition_similarity(node, ca3[row], readout, predictor) < self.recognition_threshold:
-                    matched = []
-                    self.context_zero_match.add_(1)
-            if len(matched) == 1:
-                node = matched[0]
-                result[row, node] = dg_activity[row].max()
-                self.context_accepted_events.add_(1)
-                if counts[row] > 1 and self.candidate_mode == "unique_contextual":
-                    self.context_unique_rescues.add_(1)
+        event_rows = torch.where(has_event)[0]
+        if not event_rows.numel():
+            return result
+
+        if self.candidate_mode == "unique_contextual":
+            nodes = torch.where(selectable)[0]
+            if not nodes.numel():
+                self.context_zero_match.add_(event_rows.numel())
+                return result
+            event_signatures = F.normalize(action_probe_signature(readout, predictor, ca3[event_rows]), dim=-1)
+            anchor_signatures = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[nodes]), dim=-1)
+            passing = event_signatures @ anchor_signatures.T >= self.recognition_threshold
+            match_count = passing.sum(-1)
+            self.context_zero_match.add_((match_count == 0).sum())
+            self.context_multi_match.add_((match_count > 1).sum())
+            accepted = match_count == 1
+            if accepted.any():
+                accepted_rows = event_rows[accepted]
+                accepted_nodes = nodes[passing[accepted].to(torch.int64).argmax(-1)]
+                result[accepted_rows, accepted_nodes] = dg_activity[accepted_rows].amax(-1)
+                self.context_accepted_events.add_(accepted.sum())
+                self.context_unique_rescues.add_((counts[accepted_rows] > 1).sum())
+            return result
+
+        if self.candidate_mode not in ("exclusive", "dominant"):
+            raise ValueError(f"Unknown contextual candidate mode: {self.candidate_mode}")
+        raw_nodes = dg_activity[event_rows].argmax(-1)
+        eligible = selectable[raw_nodes]
+        if self.candidate_mode == "exclusive":
+            eligible &= counts[event_rows] == 1
+        if eligible.any():
+            candidate_rows = event_rows[eligible]
+            candidate_nodes = raw_nodes[eligible]
+            similarities = contextual_similarity(
+                readout,
+                predictor,
+                ca3[candidate_rows],
+                self.anchor_ca3[candidate_nodes],
+            )
+            accepted = similarities >= self.recognition_threshold
+            self.context_zero_match.add_((~accepted).sum())
+            if accepted.any():
+                accepted_rows = candidate_rows[accepted]
+                accepted_nodes = candidate_nodes[accepted]
+                result[accepted_rows, accepted_nodes] = dg_activity[accepted_rows].amax(-1)
+                self.context_accepted_events.add_(accepted.sum())
         return result
 
     @torch.no_grad()
