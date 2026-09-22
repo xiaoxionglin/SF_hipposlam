@@ -1,7 +1,7 @@
 {
   "schema": "intrmotiv/study/v1",
   "workflow_version": "1.11.0",
-  "study_id": "ca3_state_goal_followup_20260923_g500_preflight",
+  "study_id": "ca3_state_goal_followup_20260923_g500_preflight_v2",
   "description": "Four fresh seed-99 2M-frame G500 gates for the corrected contextual HER and readout mechanism, using the workstation-qualified high-throughput Sample Factory sampler geometry.",
   "expected_runs": 4,
   "metadata": {
@@ -64,10 +64,10 @@
   },
   "training": {
     "mode": "sample_factory",
-    "batch_name": "ca3_state_goal_followup_20260923_g500_preflight",
+    "batch_name": "ca3_state_goal_followup_20260923_g500_preflight_v2",
     "workspace_root": "/scratch/lin/IntrMotiv",
-    "output_root": "/scratch/lin/IntrMotiv/train_dir/ca3_state_goal_followup_20260923_g500_preflight",
-    "run_name_template": "CA3G500Q_CTX_{anchor_update}_{candidate_rule}_H32_{controller}_S{seed}",
+    "output_root": "/scratch/lin/IntrMotiv/train_dir/ca3_state_goal_followup_20260923_g500_preflight_v2",
+    "run_name_template": "CA3G500Q2_CTX_{anchor_update}_{candidate_rule}_H32_{controller}_S{seed}",
     "condition_name_template": "G500_CTX_{anchor_update}_{candidate_rule}_H32",
     "seed_arg": "--seed={seed}",
     "common_args": [
@@ -235,7 +235,7 @@
       "--ca3_graph_anchor_ema_alpha=0.05",
       "--ca3_graph_anchor_ema_min_confirmations=8",
       "--ca3_graph_anchor_ema_margin=0.01",
-      "--wandb_group=ca3_state_goal_followup_20260923_g500_preflight",
+      "--wandb_group=ca3_state_goal_followup_20260923_g500_preflight_v2",
       "--train_for_env_steps=2000000",
       "--checkpoint_frame_targets=2000000",
       "--online_spatial_snapshot_targets=2000000",
