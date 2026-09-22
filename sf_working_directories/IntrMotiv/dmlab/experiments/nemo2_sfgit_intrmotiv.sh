@@ -2,6 +2,7 @@
 #SBATCH --job-name=$NAME
 #SBATCH --time=$TIMEOUT
 #SBATCH $PARTITION
+$GPU_DIRECTIVE
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=$CPU
 #SBATCH --mem=$MEMORY
