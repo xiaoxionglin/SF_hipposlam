@@ -28,6 +28,23 @@ from .custom_learner import DistanceLearnerReward
 from .hrl_controllable_graph import HRLStateLayout, current_dg_from_activity
 
 
+def controller_policy_lag(curr_policy_version, minibatch, policy_id):
+    """Measure actor freshness in the version domain used for DDQN validity.
+
+    Controller publication advances once per consumed rollout, while
+    ``train_step`` advances once per fresh-DG optimizer minibatch. Comparing
+    ``policy_version`` with ``train_step`` therefore reports artificial lag.
+    Controller actors transport ``controller_fresh_version`` for this exact
+    comparison; retain the standard field only for compatibility.
+    """
+
+    versions = minibatch.get("controller_fresh_version", minibatch["policy_version"])
+    if versions.ndim > minibatch["policy_version"].ndim:
+        versions = versions.squeeze(-1)
+    same_policy = minibatch["policy_id"] == policy_id
+    return (curr_policy_version - versions)[same_policy]
+
+
 class ControllerLearner(DistanceLearnerReward):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -391,6 +408,18 @@ class ControllerLearner(DistanceLearnerReward):
             encoder_loss,
             summaries,
         )
+
+    def _record_summaries(self, train_loop_vars):
+        stats = super()._record_summaries(train_loop_vars)
+        version_diff = controller_policy_lag(
+            train_loop_vars.curr_policy_version,
+            train_loop_vars.mb,
+            self.policy_id,
+        )
+        stats.version_diff_avg = version_diff.mean().item()
+        stats.version_diff_min = version_diff.min().item()
+        stats.version_diff_max = version_diff.max().item()
+        return stats
 
     def _ingest(self, batch):
         # Shared SF buffers may be reused immediately after this transaction.

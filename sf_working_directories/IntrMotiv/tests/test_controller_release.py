@@ -2,8 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import torch
 
 from sf_working_directories.IntrMotiv.dmlab import custom_learner
+from sf_working_directories.IntrMotiv.dmlab.controller_learner import controller_policy_lag
 
 
 @pytest.mark.parametrize("state,preflight", [("stored", False), ("stored", True), ("reconstruct", True)])
@@ -33,3 +35,26 @@ def test_ppo_factory_unchanged():
     )
     with patch.object(custom_learner, "DistanceLearnerReward") as factory:
         assert custom_learner.make_hipposlam_learner(cfg, None, None, 0, None) is factory.return_value
+
+
+def test_controller_policy_lag_uses_fresh_optimizer_version():
+    minibatch = {
+        "policy_id": torch.tensor([0, 0, 1]),
+        "policy_version": torch.tensor([4, 4, 4]),
+        "controller_fresh_version": torch.tensor([[118], [115], [117]]),
+    }
+
+    lag = controller_policy_lag(120, minibatch, policy_id=0)
+
+    assert lag.tolist() == [2, 5]
+
+
+def test_controller_policy_lag_keeps_legacy_fallback():
+    minibatch = {
+        "policy_id": torch.tensor([0, 1]),
+        "policy_version": torch.tensor([17, 18]),
+    }
+
+    lag = controller_policy_lag(20, minibatch, policy_id=0)
+
+    assert lag.tolist() == [3]
