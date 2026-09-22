@@ -36,8 +36,29 @@ def test_single_submission_command_has_no_array_or_dependency():
         "/work/classic/fr_xl1014-train/analysis/c05",
     ]
     assert f"INTRMOTIV_RUNTIME_SOURCE={SOURCE_ROOT}" in command[7]
+    assert "INTRMOTIV_WORKSPACE_ROOT=/work/classic/fr_xl1014-train" in command[7]
     assert "PLACE_FIELD_MAX_FRAMES=10000" in command[7]
     assert "PLACE_FIELD_REPLAY_PANEL=/work/classic/fr_xl1014-train/panel.npz" in command[7]
+
+
+def test_submission_command_propagates_workspace_override():
+    workspace = Path("/work/classic/fr_xl1014-corridor-geometry")
+    row = ManifestRow(0, {"label_suffix": "ca3_context"})
+    command = build_sbatch_command(
+        row=row,
+        manifest=workspace / "manifest.tsv",
+        output_dir=workspace / "analysis/ca3",
+        runner=Path("/source/run_place_field_sweep_single.sh"),
+        partition="cpu",
+        cpus=4,
+        memory="16G",
+        time_limit="00:20:00",
+        max_num_frames=500,
+        job_name_prefix="pf",
+        workspace_root=workspace,
+    )
+
+    assert f"INTRMOTIV_WORKSPACE_ROOT={workspace}" in command[7]
 
 
 def test_row_selectors_are_sorted_unique_and_bounded():

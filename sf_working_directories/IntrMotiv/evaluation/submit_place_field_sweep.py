@@ -40,16 +40,20 @@ class ManifestRow:
         return self.values["label_suffix"]
 
 
-def workspace_path(value: str | pathlib.Path, label: str) -> pathlib.Path:
+def workspace_path(
+    value: str | pathlib.Path,
+    label: str,
+    workspace_root: pathlib.Path = WORKSPACE_ROOT,
+) -> pathlib.Path:
     path = pathlib.Path(value).expanduser().resolve(strict=False)
     try:
-        path.relative_to(WORKSPACE_ROOT)
+        path.relative_to(workspace_root)
     except ValueError as error:
-        raise ValueError(f"{label} must be under {WORKSPACE_ROOT}, got {path}") from error
+        raise ValueError(f"{label} must be under {workspace_root}, got {path}") from error
     return path
 
 
-def load_manifest(path: pathlib.Path) -> list[ManifestRow]:
+def load_manifest(path: pathlib.Path, workspace_root: pathlib.Path = WORKSPACE_ROOT) -> list[ManifestRow]:
     with path.open(newline="") as stream:
         reader = csv.DictReader(stream, delimiter="\t")
         if tuple(reader.fieldnames or ()) != REQUIRED_COLUMNS:
@@ -61,8 +65,8 @@ def load_manifest(path: pathlib.Path) -> list[ManifestRow]:
     if len(labels) != len(set(labels)):
         raise ValueError("Manifest label_suffix values must be unique")
     for row in rows:
-        checkpoint = workspace_path(row.values["checkpoint"], f"row {row.index} checkpoint")
-        run_dir = workspace_path(row.values["run_dir"], f"row {row.index} run_dir")
+        checkpoint = workspace_path(row.values["checkpoint"], f"row {row.index} checkpoint", workspace_root)
+        run_dir = workspace_path(row.values["run_dir"], f"row {row.index} run_dir", workspace_root)
         if not checkpoint.is_file():
             raise FileNotFoundError(checkpoint)
         if not run_dir.is_dir():
@@ -108,6 +112,7 @@ def build_sbatch_command(
     time_limit: str,
     max_num_frames: int,
     job_name_prefix: str,
+    workspace_root: pathlib.Path = WORKSPACE_ROOT,
     record_observation_panel: pathlib.Path | None = None,
     replay_observation_panel: pathlib.Path | None = None,
 ) -> list[str]:
@@ -117,6 +122,7 @@ def build_sbatch_command(
         (
             "ALL",
             f"INTRMOTIV_RUNTIME_SOURCE={SOURCE_ROOT}",
+            f"INTRMOTIV_WORKSPACE_ROOT={workspace_root}",
             f"PLACE_FIELD_MAX_FRAMES={max_num_frames}",
             f"TMPDIR={output_dir / 'tmp'}",
             f"DMLAB_CACHE_DIR={output_dir / 'dmlab_cache'}",
@@ -130,7 +136,7 @@ def build_sbatch_command(
         ("PLACE_FIELD_REPLAY_PANEL", replay_observation_panel),
     ):
         if value is not None:
-            path = workspace_path(value, "Observation panel")
+            path = workspace_path(value, "Observation panel", workspace_root)
             if "," in str(path):
                 raise ValueError("Observation panel path cannot contain Slurm export delimiters")
             export += f",{key}={path}"
@@ -164,6 +170,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest", type=pathlib.Path, required=True)
     parser.add_argument("--output-dir", type=pathlib.Path, required=True)
     parser.add_argument(
+        "--workspace-root",
+        type=pathlib.Path,
+        default=WORKSPACE_ROOT,
+        help="Workspace root allowed for manifests, checkpoints, outputs, caches, and temporary data.",
+    )
+    parser.add_argument(
         "--row",
         action="append",
         default=[],
@@ -194,10 +206,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    manifest = workspace_path(args.manifest, "Manifest")
-    output_dir = workspace_path(args.output_dir, "Output directory")
+    workspace_root = args.workspace_root.expanduser().resolve(strict=True)
+    manifest = workspace_path(args.manifest, "Manifest", workspace_root)
+    output_dir = workspace_path(args.output_dir, "Output directory", workspace_root)
     runner = args.runner.expanduser().resolve(strict=True)
-    rows = load_manifest(manifest)
+    rows = load_manifest(manifest, workspace_root)
     chosen = [rows[index] for index in selected_indices(args.row, len(rows))]
     if args.record_observation_panel and len(chosen) != 1:
         raise ValueError("Exactly one job may write a common observation panel")
@@ -217,6 +230,7 @@ def main() -> None:
             time_limit=args.time_limit,
             max_num_frames=args.max_num_frames,
             job_name_prefix=args.job_name_prefix,
+            workspace_root=workspace_root,
             record_observation_panel=args.record_observation_panel,
             replay_observation_panel=args.replay_observation_panel,
         )
