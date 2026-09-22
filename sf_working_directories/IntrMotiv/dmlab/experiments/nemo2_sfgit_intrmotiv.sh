@@ -21,13 +21,14 @@ export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-RUNTIME_ROOT=$${INTRMOTIV_RUNTIME_ROOT:-/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime}
+WORKSPACE_ROOT=$${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-train}
+RUNTIME_ROOT=$${INTRMOTIV_RUNTIME_ROOT:-$$WORKSPACE_ROOT/IntrMotiv/SF_hipposlam/runtime}
 export XDG_CACHE_HOME="$$RUNTIME_ROOT/cache"
 export MPLCONFIGDIR="$$RUNTIME_ROOT/matplotlib"
 export WANDB_CACHE_DIR="$$RUNTIME_ROOT/wandb_cache"
 export WANDB_DATA_DIR="$$RUNTIME_ROOT/wandb_data"
 export WANDB_DIR="$$RUNTIME_ROOT/wandb"
-export TMPDIR="/work/classic/fr_xl1014-train/tmp/intrmotiv_$${SLURM_JOB_ID:-manual}"
+export TMPDIR="$$WORKSPACE_ROOT/tmp/intrmotiv_$${SLURM_JOB_ID:-manual}"
 mkdir -p "$$XDG_CACHE_HOME" "$$MPLCONFIGDIR" "$$WANDB_CACHE_DIR" "$$WANDB_DATA_DIR" "$$WANDB_DIR" "$$TMPDIR"
 
 exec python -m sf_working_directories.IntrMotiv.dmlab.train_hipposlam $CMD \

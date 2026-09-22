@@ -18,7 +18,8 @@ fi
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 PYTHON=${SFGIT_PYTHON:-/home/fr/fr_xl1014/.conda/envs/SFgit/bin/python}
-TRAIN_ROOT=${INTRMOTIV_TRAIN_ROOT:-/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir}
+WORKSPACE_ROOT=${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-train}
+TRAIN_ROOT=${INTRMOTIV_TRAIN_ROOT:-$WORKSPACE_ROOT/IntrMotiv/SF_hipposlam/train_dir}
 RUN_NAME=$(
   "$PYTHON" -c 'import importlib, sys; print(importlib.import_module(sys.argv[1]).RUN_DESCRIPTION.run_name)' "$RUN_MODULE"
 )
