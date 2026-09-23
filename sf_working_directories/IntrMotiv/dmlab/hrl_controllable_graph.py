@@ -441,6 +441,7 @@ class PolicyControllableGraph(nn.Module):
         prediction_horizon: int = 0,
         signature_dim: int = 0,
         candidate_mode: str = "exclusive",
+        similarity_space: str = "probe",
     ):
         super().__init__()
         self.n_nodes = int(n_nodes)
@@ -450,6 +451,9 @@ class PolicyControllableGraph(nn.Module):
         self.prediction_horizon = int(prediction_horizon)
         self.signature_dim = int(signature_dim)
         self.candidate_mode = str(candidate_mode)
+        self.similarity_space = str(similarity_space)
+        if self.similarity_space not in ("probe", "z"):
+            raise ValueError(f"Unknown contextual similarity space: {self.similarity_space}")
         self.register_buffer("node_visits", torch.zeros(self.n_nodes))
         self.register_buffer("tctrl", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("edge_confidence", torch.zeros(self.n_nodes, self.n_nodes))
@@ -735,9 +739,13 @@ class PolicyControllableGraph(nn.Module):
             return False
         left = self.calibration_left[:count]
         right = self.calibration_right[:count]
-        left_signature = F.normalize(action_probe_signature(readout, predictor, left), dim=-1)
-        right_signature = F.normalize(action_probe_signature(readout, predictor, right), dim=-1)
-        similarities = (left_signature * right_signature).sum(-1)
+        similarities = contextual_similarity(
+            readout,
+            predictor,
+            left,
+            right,
+            space=self.similarity_space,
+        )
         absolute, excess = predictive_window_consistency(
             readout,
             predictor,
@@ -764,6 +772,7 @@ class PolicyControllableGraph(nn.Module):
                 predictor,
                 self.diagnostic_left[:diagnostic_count],
                 self.diagnostic_right[:diagnostic_count],
+                space=self.similarity_space,
             )
             self.background_similarity_q50.copy_(torch.quantile(diagnostic_similarity, 0.50))
             self.background_similarity_q90.copy_(torch.quantile(diagnostic_similarity, 0.90))
@@ -774,8 +783,12 @@ class PolicyControllableGraph(nn.Module):
         selectable = self.selectable_mask()
         active = torch.where(selectable)[0]
         if active.numel() > 1:
-            signatures = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[active]), dim=-1)
-            similarity = signatures @ signatures.T
+            anchor_states = self.anchor_ca3[active]
+            if self.similarity_space == "z":
+                embeddings = F.normalize(readout(anchor_states), dim=-1)
+            else:
+                embeddings = F.normalize(action_probe_signature(readout, predictor, anchor_states), dim=-1)
+            similarity = embeddings @ embeddings.T
             upper = torch.triu(torch.ones_like(similarity, dtype=torch.bool), diagonal=1)
             self.active_anchor_collision_fraction.copy_(
                 (similarity[upper] >= self.recognition_threshold).float().mean()
@@ -794,7 +807,13 @@ class PolicyControllableGraph(nn.Module):
 
     @torch.no_grad()
     def recognition_similarity(self, node: int, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
-        return contextual_similarity(readout, predictor, ca3.detach(), self.anchor_ca3[int(node)])
+        return contextual_similarity(
+            readout,
+            predictor,
+            ca3.detach(),
+            self.anchor_ca3[int(node)],
+            space=self.similarity_space,
+        )
 
     @torch.no_grad()
     def confirm_anchor(
@@ -1025,9 +1044,15 @@ class PolicyControllableGraph(nn.Module):
             if not nodes.numel():
                 self.context_zero_match.add_(event_rows.numel())
                 return result
-            event_signatures = F.normalize(action_probe_signature(readout, predictor, ca3[event_rows]), dim=-1)
-            anchor_signatures = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[nodes]), dim=-1)
-            passing = event_signatures @ anchor_signatures.T >= self.recognition_threshold
+            if self.similarity_space == "z":
+                event_embeddings = F.normalize(readout(ca3[event_rows]), dim=-1)
+                anchor_embeddings = F.normalize(readout(self.anchor_ca3[nodes]), dim=-1)
+            else:
+                event_embeddings = F.normalize(action_probe_signature(readout, predictor, ca3[event_rows]), dim=-1)
+                anchor_embeddings = F.normalize(
+                    action_probe_signature(readout, predictor, self.anchor_ca3[nodes]), dim=-1
+                )
+            passing = event_embeddings @ anchor_embeddings.T >= self.recognition_threshold
             match_count = passing.sum(-1)
             self.context_zero_match.add_((match_count == 0).sum())
             self.context_multi_match.add_((match_count > 1).sum())
@@ -1054,6 +1079,7 @@ class PolicyControllableGraph(nn.Module):
                 predictor,
                 ca3[candidate_rows],
                 self.anchor_ca3[candidate_nodes],
+                space=self.similarity_space,
             )
             accepted = similarities >= self.recognition_threshold
             self.context_zero_match.add_((~accepted).sum())
