@@ -59,7 +59,7 @@
     "anchor_factor": "Fixed for this study: EMA-signature-refined real raw-CA3 anchor.",
     "candidate_factor": "Fixed for this study: dominant raw DG address, contextual similarity gates semantic hit.",
     "source_branch": "xiaoxionglin/SF_hipposlam:codex/ca3-state-goal-followup-20260922",
-    "source_commit": "0b8d67463d8d5fb269c261e19b389c12db1913ed"
+    "source_commit": "d9d8ce6653a95be718814bf226c44e852df931ea"
   },
   "training": {
     "mode": "sample_factory",
