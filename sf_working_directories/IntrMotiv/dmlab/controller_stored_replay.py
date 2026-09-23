@@ -42,7 +42,13 @@ def contextual_goal_hits(core, candidate_ca3, goal_ca3):
         raise ValueError("contextual candidate and goal batches must have equal length")
     dg = candidate.reshape(-1, core.Hippo_n_feature, core.expanded_length)[:, :, 0]
     real_event = (dg > 0).any(dim=1)
-    similarity = contextual_similarity(core.state_readout, core.innovation_predictor, candidate, goal)
+    similarity = contextual_similarity(
+        core.state_readout,
+        core.innovation_predictor,
+        candidate,
+        goal,
+        space=graph.similarity_space,
+    )
     return real_event & (similarity >= graph.recognition_threshold)
 
 
@@ -172,7 +178,14 @@ def hindsight_examples(learner, examples):
         starts = torch.as_tensor(np.stack(contextual_starts), device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
         goals = torch.as_tensor(np.stack(contextual_goals), device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
         owners = torch.tensor([record[0] for record in contextual_records], device=graph.anchor_ca3.device)
-        similarities = indexed_contextual_similarity(core.state_readout, core.innovation_predictor, starts, goals, owners)
+        similarities = indexed_contextual_similarity(
+            core.state_readout,
+            core.innovation_predictor,
+            starts,
+            goals,
+            owners,
+            space=graph.similarity_space,
+        )
         start_dg = starts.reshape(-1, core.Hippo_n_feature, core.expanded_length)[:, :, 0]
         real_events = (start_dg > 0).any(dim=1)
         hits = (real_events[owners] & (similarities >= graph.recognition_threshold)).tolist()
