@@ -635,6 +635,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 int(getattr(cfg, "ca3_state_readout_horizon", 16)) if contextual_anchors else 0,
                 signature_dim,
                 getattr(cfg, "ca3_context_candidate_mode", "exclusive"),
+                getattr(cfg, "ca3_context_similarity_space", "probe"),
             )
             if self.hrl_enabled and self.hrl_graph_memory == "policy_buffer"
             else None
