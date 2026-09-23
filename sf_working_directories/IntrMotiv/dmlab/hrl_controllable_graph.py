@@ -809,31 +809,162 @@ class PolicyControllableGraph(nn.Module):
         zero_coeff: float,
         decision: int | None = None,
     ) -> bool:
-        node = int(node)
-        if not self.anchor_valid[node] or not bool(self.calibration_ready):
-            return False
-        self.confirmation_attempts.add_(1)
+        confirmed, _ = self.confirm_anchors(
+            torch.as_tensor([node], device=self.anchor_ca3.device),
+            ca3.unsqueeze(0) if ca3.ndim == 1 else ca3,
+            readout,
+            predictor,
+            actions.unsqueeze(0) if actions.ndim == 1 else actions,
+            targets.unsqueeze(0) if targets.ndim == 2 else targets,
+            active_coeff,
+            zero_coeff,
+            decision,
+        )
+        return bool(confirmed[0])
+
+    @torch.no_grad()
+    def confirm_anchors(
+        self,
+        nodes: Tensor,
+        ca3: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        actions: Tensor,
+        targets: Tensor,
+        active_coeff: float,
+        zero_coeff: float,
+        decision: int | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """Confirm a rollout's contextual occurrences in one predictor call.
+
+        The second result is the per-occurrence confirmation count immediately
+        after that occurrence.  EMA refinement uses it to preserve the scalar
+        minimum-confirmation semantics even when a node appears repeatedly in
+        one learner batch.
+        """
+        nodes = nodes.to(device=self.anchor_ca3.device, dtype=torch.long)
+        if not nodes.numel():
+            empty = torch.zeros(0, dtype=torch.bool, device=self.anchor_ca3.device)
+            return empty, nodes
+        ready = self.calibration_ready.bool()
+        eligible = self.anchor_valid[nodes] & ready
         absolute, excess = predictive_window_consistency(
             readout,
             predictor,
-            self.anchor_ca3[node],
+            self.anchor_ca3[nodes],
             ca3,
             actions,
             targets,
             active_coeff,
             zero_coeff,
         )
-        if absolute > self.prediction_absolute_threshold or excess > self.prediction_excess_threshold:
-            return False
-        self.confirmation_count[node].add_(1)
-        if not self.selectable_mask()[node]:
-            self.active_goal_mask[node] = True
-            self.active_generation[node] = self.anchor_generation[node]
-            self.confirmation_successes.add_(1)
-            if decision is not None:
-                self.activation_latency_sum.add_(float(max(0, int(decision) - int(self.anchor_last_update[node]))))
-                self.activation_latency_count.add_(1)
-        return True
+        confirmed = (
+            eligible
+            & (absolute <= self.prediction_absolute_threshold)
+            & (excess <= self.prediction_excess_threshold)
+        )
+        self.confirmation_attempts.add_(eligible.sum())
+        increments = torch.zeros_like(self.confirmation_count)
+        increments.scatter_add_(0, nodes, confirmed.to(increments.dtype))
+        counts_before = self.confirmation_count[nodes].clone()
+        self.confirmation_count.add_(increments)
+
+        order = torch.arange(nodes.numel(), device=nodes.device)
+        prior = (nodes[:, None] == nodes[None, :]) & (order[None, :] < order[:, None]) & confirmed[None, :]
+        count_after_occurrence = counts_before + prior.sum(-1) + confirmed.to(counts_before.dtype)
+
+        previously_selectable = self.selectable_mask()
+        activation_nodes = torch.unique(nodes[confirmed & ~previously_selectable[nodes]])
+        self.active_goal_mask[activation_nodes] = True
+        self.active_generation[activation_nodes] = self.anchor_generation[activation_nodes]
+        self.confirmation_successes.add_(activation_nodes.numel())
+        if decision is not None and activation_nodes.numel():
+            latency = (int(decision) - self.anchor_last_update[activation_nodes]).clamp_min(0)
+            self.activation_latency_sum.add_(latency.sum())
+            self.activation_latency_count.add_(activation_nodes.numel())
+        return confirmed, count_after_occurrence
+
+    @torch.no_grad()
+    def refine_anchors_ema(
+        self,
+        nodes: Tensor,
+        ca3: Tensor,
+        confirmation_counts: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        decision: int,
+        alpha: float,
+        min_confirmations: int,
+        margin: float,
+    ) -> Tensor:
+        """Apply ordered EMA refinements with one GPU signature batch.
+
+        Refinement decisions are a tiny discrete state machine.  Signatures are
+        computed together on CUDA and the ordered comparisons run on CPU, then
+        final prototypes and selected raw anchors are copied back once.
+        """
+        if not nodes.numel():
+            return torch.zeros(0, dtype=torch.bool, device=self.anchor_ca3.device)
+        nodes = nodes.to(device=self.anchor_ca3.device, dtype=torch.long)
+        candidate_signatures = F.normalize(action_probe_signature(readout, predictor, ca3.detach()), dim=-1)
+        unique_nodes = torch.unique(nodes, sorted=True)
+        incumbent_signatures = F.normalize(
+            action_probe_signature(readout, predictor, self.anchor_ca3[unique_nodes]), dim=-1
+        )
+        node_cpu = nodes.cpu()
+        count_cpu = confirmation_counts.cpu()
+        candidate_cpu = candidate_signatures.cpu()
+        unique_cpu = unique_nodes.cpu()
+        prototype_cpu = self.anchor_signature[unique_nodes].cpu()
+        prototype_valid_cpu = self.anchor_signature_valid[unique_nodes].cpu()
+        incumbent_cpu = incumbent_signatures.cpu()
+        last_update_cpu = self.anchor_last_update[unique_nodes].cpu()
+        node_to_local = {int(node): index for index, node in enumerate(unique_cpu.tolist())}
+        selected = torch.full((unique_nodes.numel(),), -1, dtype=torch.long)
+        scores = torch.zeros(unique_nodes.numel(), dtype=self.anchor_last_score.dtype)
+        refined = torch.zeros(nodes.numel(), dtype=torch.bool)
+        attempts = refinements = 0
+        gain_sum = 0.0
+        age_sum = 0.0
+        age_count = 0
+        for occurrence, node in enumerate(node_cpu.tolist()):
+            local = node_to_local[node]
+            candidate = candidate_cpu[occurrence]
+            if not bool(prototype_valid_cpu[local]):
+                prototype_cpu[local] = incumbent_cpu[local]
+                prototype_valid_cpu[local] = True
+            prototype = prototype_cpu[local]
+            age_sum += float(max(0, int(decision) - int(last_update_cpu[local])))
+            age_count += 1
+            if int(count_cpu[occurrence]) >= int(min_confirmations):
+                attempts += 1
+                gain = torch.dot(candidate, prototype) - torch.dot(incumbent_cpu[local], prototype)
+                if float(gain) >= float(margin):
+                    selected[local] = occurrence
+                    scores[local] = gain
+                    incumbent_cpu[local] = candidate
+                    last_update_cpu[local] = int(decision)
+                    refinements += 1
+                    gain_sum += float(gain)
+                    refined[occurrence] = True
+            prototype_cpu[local] = F.normalize(
+                (1.0 - float(alpha)) * prototype + float(alpha) * candidate, dim=0
+            )
+        self.anchor_signature[unique_nodes] = prototype_cpu.to(self.anchor_signature)
+        self.anchor_signature_valid[unique_nodes] = prototype_valid_cpu.to(self.anchor_signature_valid)
+        selected_nodes = selected >= 0
+        if selected_nodes.any():
+            destination_nodes = unique_nodes[selected_nodes]
+            source_rows = selected[selected_nodes].to(ca3.device)
+            self.anchor_ca3[destination_nodes] = ca3[source_rows].detach().to(self.anchor_ca3)
+            self.anchor_last_update[destination_nodes] = int(decision)
+            self.anchor_last_score[destination_nodes] = scores[selected_nodes].to(self.anchor_last_score)
+        self.anchor_refinement_attempts.add_(attempts)
+        self.anchor_refinements.add_(refinements)
+        self.anchor_centrality_gain_sum.add_(gain_sum)
+        self.anchor_age_sum.add_(age_sum)
+        self.anchor_age_count.add_(age_count)
+        return refined.to(self.anchor_ca3.device)
 
     @torch.no_grad()
     def refine_anchor_ema(

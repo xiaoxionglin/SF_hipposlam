@@ -211,3 +211,70 @@ def test_batched_calibration_ring_keeps_exact_sequential_order():
     assert graph.diagnostic_left[:, 0].tolist() == [6.0, 4.0, 5.0]
     assert int(graph.calibration_cursor) == 7 and int(graph.calibration_count) == 3
     assert int(graph.diagnostic_cursor) == 7 and int(graph.diagnostic_count) == 3
+
+
+def test_batched_confirmation_preserves_duplicate_node_counts_and_single_activation():
+    graph = PolicyControllableGraph(2, ca3_size=4, contextual=True, prediction_horizon=2)
+    readout = CA3StateReadout(4, 2)
+    predictor = CausalDGInnovationPredictor(2, 2, 2, 2, hidden_size=4)
+    graph.anchor_valid[:] = True
+    graph.anchor_ca3.copy_(torch.eye(2, 4))
+    graph.calibration_ready.fill_(True)
+    graph.prediction_absolute_threshold.fill_(torch.inf)
+    graph.prediction_excess_threshold.fill_(torch.inf)
+    nodes = torch.tensor([0, 0, 1])
+    candidates = torch.stack((graph.anchor_ca3[0], graph.anchor_ca3[0], graph.anchor_ca3[1]))
+    actions = torch.zeros(3, 2, dtype=torch.long)
+    targets = torch.zeros(3, 2, 2)
+
+    confirmed, counts = graph.confirm_anchors(
+        nodes, candidates, readout, predictor, actions, targets, 1.0, 0.1, decision=10
+    )
+
+    assert confirmed.tolist() == [True, True, True]
+    assert counts.tolist() == [1, 2, 1]
+    assert graph.confirmation_count.tolist() == [2, 1]
+    assert int(graph.confirmation_attempts) == 3
+    assert int(graph.confirmation_successes) == 2
+    assert graph.selectable_mask().tolist() == [True, True]
+
+
+def test_batched_ema_refinement_matches_ordered_scalar_updates():
+    scalar = PolicyControllableGraph(2, ca3_size=4, contextual=True, signature_dim=8)
+    batched = PolicyControllableGraph(2, ca3_size=4, contextual=True, signature_dim=8)
+    readout = CA3StateReadout(4, 2)
+    predictor = CausalDGInnovationPredictor(2, 2, 2, 2, hidden_size=4)
+    anchor = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    candidates = torch.tensor([[0.9, 0.1, 0.0, 0.0], [0.8, 0.2, 0.0, 0.0]])
+    for graph in (scalar, batched):
+        graph.register_anchor(0, anchor, 1)
+    for count, candidate in zip((8, 9), candidates):
+        scalar.confirmation_count[0] = count
+        scalar.refine_anchor_ema(0, candidate, readout, predictor, 20, 0.05, 8, -1.0)
+    batched.confirmation_count[0] = 9
+    refined = batched.refine_anchors_ema(
+        torch.tensor([0, 0]),
+        candidates,
+        torch.tensor([8, 9]),
+        readout,
+        predictor,
+        20,
+        0.05,
+        8,
+        -1.0,
+    )
+
+    assert refined.tolist() == [True, True]
+    for name in (
+        "anchor_ca3",
+        "anchor_signature",
+        "anchor_signature_valid",
+        "anchor_last_update",
+        "anchor_last_score",
+        "anchor_refinement_attempts",
+        "anchor_refinements",
+        "anchor_centrality_gain_sum",
+        "anchor_age_sum",
+        "anchor_age_count",
+    ):
+        torch.testing.assert_close(getattr(batched, name), getattr(scalar, name), rtol=1e-5, atol=1e-6)

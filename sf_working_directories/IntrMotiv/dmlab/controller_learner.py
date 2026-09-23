@@ -246,6 +246,7 @@ class ControllerLearner(DistanceLearnerReward):
     @torch.no_grad()
     def _update_contextual_anchors(self):
         """Consume maximal exclusive-DG occurrences after W has been updated."""
+        update_started = time.perf_counter()
         pending = getattr(self, "_pending_contextual_anchors", None)
         self._pending_contextual_anchors = None
         if pending is None:
@@ -295,6 +296,8 @@ class ControllerLearner(DistanceLearnerReward):
                         # its true onset may register or confirm an anchor.
                         continue
                 runs.append((stream, start, t, node))
+        self.controller_stats["contextual_anchor_scan_seconds"] = time.perf_counter() - update_started
+        pair_started = time.perf_counter()
         positive_pairs = []
         for stream, start, end, node in runs:
             if end - start > 1:
@@ -315,6 +318,7 @@ class ControllerLearner(DistanceLearnerReward):
                     [dg[stream, offset + 1 : offset + horizon + 1] for stream, _start, offset in positive_pairs]
                 ),
             )
+        self.controller_stats["contextual_positive_pair_seconds"] = time.perf_counter() - pair_started
         calibration_started = time.perf_counter()
         calibrated = graph.recalibrate(
             core.state_readout,
@@ -328,7 +332,11 @@ class ControllerLearner(DistanceLearnerReward):
         )
         if calibrated:
             self.controller_stats["calibration_seconds"] = time.perf_counter() - calibration_started
-        diagnostic_pairs = []
+        confirmation_started = time.perf_counter()
+        anchor_mode = getattr(self.cfg, "ca3_graph_anchor_mode", "fixed")
+        anchor_valid_cpu = graph.anchor_valid.cpu().numpy().copy()
+        candidates = []
+        champion_diagnostics = []
         for stream, start, _end, node in runs:
             complete = start + horizon < recurrence
             if complete:
@@ -336,16 +344,17 @@ class ControllerLearner(DistanceLearnerReward):
                     stream, start : start + horizon
                 ].any()
             candidate = states[stream, start]
-            if not graph.anchor_valid[node]:
+            if not anchor_valid_cpu[node]:
                 if complete:
                     graph.register_anchor(node, candidate, decision)
+                    anchor_valid_cpu[node] = True
                 continue
             if not complete:
                 continue
             future = dg[stream, start + 1 : start + horizon + 1]
             action_window = actions[stream, start : start + horizon]
-            diagnostic_pairs.append((node, candidate))
-            if complete and getattr(self.cfg, "ca3_graph_anchor_mode", "fixed") == "champion":
+            if anchor_mode == "champion":
+                champion_diagnostics.append((graph.anchor_ca3[node].clone(), candidate))
                 mean, lower, score = paired_anchor_improvement(
                     core.state_readout,
                     core.innovation_predictor,
@@ -359,21 +368,47 @@ class ControllerLearner(DistanceLearnerReward):
                 if lower > 0:
                     graph.replace_anchor(node, candidate, decision, float(score))
                     continue
-            confirmed = graph.confirm_anchor(
-                node,
-                candidate,
+                graph.confirm_anchor(
+                    node,
+                    candidate,
+                    core.state_readout,
+                    core.innovation_predictor,
+                    action_window,
+                    future,
+                    float(self.cfg.ca3_state_readout_active_coeff),
+                    float(self.cfg.ca3_state_readout_zero_coeff),
+                    decision,
+                )
+            else:
+                candidates.append((node, candidate, action_window, future))
+        if champion_diagnostics:
+            graph.add_diagnostic_pairs(
+                torch.stack([anchor for anchor, _candidate in champion_diagnostics]),
+                torch.stack([candidate for _anchor, candidate in champion_diagnostics]),
+            )
+        if candidates:
+            nodes = torch.as_tensor([item[0] for item in candidates], device=states.device, dtype=torch.long)
+            candidate_states = torch.stack([item[1] for item in candidates])
+            action_windows = torch.stack([item[2] for item in candidates])
+            futures = torch.stack([item[3] for item in candidates])
+            diagnostic_anchors = graph.anchor_ca3[nodes].clone()
+            confirmed, confirmation_counts = graph.confirm_anchors(
+                nodes,
+                candidate_states,
                 core.state_readout,
                 core.innovation_predictor,
-                action_window,
-                future,
+                action_windows,
+                futures,
                 float(self.cfg.ca3_state_readout_active_coeff),
                 float(self.cfg.ca3_state_readout_zero_coeff),
                 decision,
             )
-            if confirmed and getattr(self.cfg, "ca3_graph_anchor_mode", "fixed") == "ema":
-                graph.refine_anchor_ema(
-                    node,
-                    candidate,
+            confirmed_rows = torch.where(confirmed)[0]
+            if anchor_mode == "ema" and confirmed_rows.numel():
+                graph.refine_anchors_ema(
+                    nodes[confirmed_rows],
+                    candidate_states[confirmed_rows],
+                    confirmation_counts[confirmed_rows],
                     core.state_readout,
                     core.innovation_predictor,
                     decision,
@@ -381,11 +416,9 @@ class ControllerLearner(DistanceLearnerReward):
                     int(self.cfg.ca3_graph_anchor_ema_min_confirmations),
                     float(self.cfg.ca3_graph_anchor_ema_margin),
                 )
-        if diagnostic_pairs:
-            graph.add_diagnostic_pairs(
-                torch.stack([graph.anchor_ca3[node] for node, _candidate in diagnostic_pairs]),
-                torch.stack([candidate for _node, candidate in diagnostic_pairs]),
-            )
+            graph.add_diagnostic_pairs(diagnostic_anchors, candidate_states)
+        self.controller_stats["contextual_confirmation_seconds"] = time.perf_counter() - confirmation_started
+        self.controller_stats["contextual_anchor_total_seconds"] = time.perf_counter() - update_started
 
     def _calculate_losses(self, mb, num_invalids, iterative_phase, **kwargs):
         if self.cfg.controller_learning != "ddqn":
