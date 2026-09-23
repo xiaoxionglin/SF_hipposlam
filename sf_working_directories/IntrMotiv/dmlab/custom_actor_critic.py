@@ -154,6 +154,48 @@ class WorkerGoalFiLMDecoder(nn.Module):
         return self.decoder_out_size
 
 
+class WorkerGoalRelationDecoder(nn.Module):
+    """Same-space worker decoder for detached z-state and z-goal.
+
+    The first state_readout_dim coordinates of the worker view are z_t.  The
+    goal slice is z_g.  Exposing z_g-z_t gives the controller an immediate
+    relative-state signal without learning a second coordinate transform.
+    """
+
+    def __init__(self, core, hidden_size: int = 128):
+        super().__init__()
+        if core.worker_goal_mode != "state_readout":
+            raise ValueError("ca3_worker_decoder=relation requires ca3_worker_goal_mode=state_readout")
+        self.target_condition_start = core.worker_target_condition_start
+        self.goal_size = core.worker_goal_size
+        self.state_dim = int(getattr(core.cfg, "ca3_state_readout_dim", self.goal_size))
+        if self.state_dim != self.goal_size:
+            raise ValueError("Relation decoder requires current state and goal in the same z-space")
+        canonical_suffix = core.get_out_size() - core.target_condition_start - core.Hippo_n_feature
+        worker_input_size = self.target_condition_start + self.goal_size + canonical_suffix
+        nong_goal_size = worker_input_size - self.goal_size - self.state_dim
+        input_size = 3 * self.state_dim + nong_goal_size
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+        )
+        self.decoder_out_size = hidden_size
+
+    def forward(self, worker_output: Tensor) -> Tensor:
+        start, end = self.target_condition_start, self.target_condition_start + self.goal_size
+        state_z = worker_output[:, : self.state_dim]
+        prefix_bypass = worker_output[:, self.state_dim:start]
+        goal_z = worker_output[:, start:end]
+        suffix = worker_output[:, end:]
+        features = torch.cat((state_z, goal_z, goal_z - state_z, prefix_bypass, suffix), dim=-1)
+        return self.network(features)
+
+    def get_out_size(self) -> int:
+        return self.decoder_out_size
+
+
 class ExplorationDecoder(nn.Module):
     def __init__(self, input_size: int, hidden_size: int):
         super().__init__()
@@ -186,7 +228,13 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
             self.dg_transition_predictor.apply(self.initialize_weights)
         goal_conditioning = getattr(cfg, "hrl_goal_conditioning", "legacy")
         if getattr(self.core, "readout_mode", "off") == "worker":
-            self.decoder = WorkerGoalFiLMDecoder(self.core)
+            worker_decoder = getattr(cfg, "ca3_worker_decoder", "film")
+            if worker_decoder == "relation":
+                self.decoder = WorkerGoalRelationDecoder(self.core)
+            elif worker_decoder == "film":
+                self.decoder = WorkerGoalFiLMDecoder(self.core)
+            else:
+                raise ValueError(f"Unknown ca3_worker_decoder={worker_decoder}")
         elif goal_conditioning == "target_trace":
             self.decoder = TargetRelativeDecoder(self.core)
         elif goal_conditioning == "target_id_film":
