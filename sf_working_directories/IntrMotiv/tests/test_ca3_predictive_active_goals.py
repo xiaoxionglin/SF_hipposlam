@@ -10,6 +10,7 @@ from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import (
     indexed_contextual_similarity,
     predictive_readout_loss,
 )
+from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import WorkerGoalRelationDecoder
 from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import PolicyControllableGraph
 from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
     select_least_tested_successor,
@@ -292,3 +293,37 @@ def test_batched_ema_refinement_matches_ordered_scalar_updates():
         "anchor_age_count",
     ):
         torch.testing.assert_close(getattr(batched, name), getattr(scalar, name), rtol=1e-5, atol=1e-6)
+
+
+def test_direct_z_contextual_similarity_uses_readout_not_probe_predictions():
+    readout = CA3StateReadout(4, 2)
+    predictor = CausalDGInnovationPredictor(2, 3, 4, 2, hidden_size=8)
+    with torch.no_grad():
+        readout.linear.weight.zero_()
+        readout.linear.weight[:, :2] = torch.eye(2)
+        for parameter in predictor.parameters():
+            parameter.zero_()
+    left = torch.tensor([[1.0, 0.0, 9.0, 9.0], [1.0, 0.0, -4.0, 3.0]])
+    right = torch.tensor([[1.0, 0.0, -8.0, 2.0], [0.0, 1.0, 1.0, 1.0]])
+    similarity = contextual_similarity(readout, predictor, left, right, space="z")
+    torch.testing.assert_close(similarity, torch.tensor([1.0, 0.0]), atol=1e-6, rtol=0)
+
+
+def test_relation_decoder_is_goal_dependent_at_initialization():
+    torch.manual_seed(7)
+    core = SimpleNamespace(
+        worker_goal_mode="state_readout",
+        worker_target_condition_start=4,
+        worker_goal_size=2,
+        target_condition_start=6,
+        Hippo_n_feature=3,
+        cfg=SimpleNamespace(ca3_state_readout_dim=2),
+        get_out_size=lambda: 9,
+    )
+    decoder = WorkerGoalRelationDecoder(core, hidden_size=8)
+    state_and_bypass = torch.tensor([[0.3, -0.2, 0.1, 0.4]])
+    goal_a = torch.tensor([[1.0, 0.0]])
+    goal_b = torch.tensor([[0.0, 1.0]])
+    out_a = decoder(torch.cat((state_and_bypass, goal_a), dim=-1))
+    out_b = decoder(torch.cat((state_and_bypass, goal_b), dim=-1))
+    assert not torch.allclose(out_a, out_b)
