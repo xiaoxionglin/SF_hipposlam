@@ -357,7 +357,7 @@ def build_matched_encoder_credit(
     reward_scale: float,
     recipient: str,
 ) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
-    """Align each arrival to a verified within-rollout predecessor onset."""
+    """Align arrivals to verified within-rollout predecessor onsets on-device."""
     if progression.shape != candidates.shape or progression.shape != dominant.shape:
         raise ValueError("progression and activation masks must have identical shapes")
     if valids.shape != progression.shape[:2]:
@@ -373,59 +373,69 @@ def build_matched_encoder_credit(
     # are not new-onset candidates. None of them is a predecessor.
     predecessor_age = progression.masked_fill(progression.eq(0), int(baseline) + 100)
     nearest_lag = predecessor_age.min(dim=-1).values
-    counts = {
-        name: progression.new_zeros((), dtype=torch.float)
-        for name in (
-            "total",
-            "matchable",
-            "credited",
-            "boundary_dropped",
-            "alignment_failure",
-            "invalid_interval",
-            "collisions",
-            "reward_mass",
-            "source_lag_sum",
-            "source_lag_max",
-        )
-    }
+    names = (
+        "total",
+        "matchable",
+        "credited",
+        "boundary_dropped",
+        "alignment_failure",
+        "invalid_interval",
+        "collisions",
+        "reward_mass",
+        "source_lag_sum",
+        "source_lag_max",
+    )
+    counts = {name: progression.new_zeros((), dtype=torch.float) for name in names}
+    events = torch.nonzero(event_mask, as_tuple=False)
+    if not events.numel():
+        return rewards, row_mask, counts
 
-    for stream, arrival_t in torch.nonzero(event_mask, as_tuple=False).tolist():
-        counts["total"].add_(1.0)
-        lag = int(nearest_lag[stream, arrival_t].item())
-        if lag >= int(baseline):
-            counts["alignment_failure"].add_(1.0)
-            continue
-        source_t = int(arrival_t) - lag
-        if source_t < 0:
-            counts["boundary_dropped"].add_(1.0)
-            continue
-        counts["matchable"].add_(1.0)
-        if not bool(valids[stream, source_t : arrival_t + 1].bool().all()):
-            counts["invalid_interval"].add_(1.0)
-            continue
-        # Several rows can enter CA3 on the same source decision. They have the
-        # same nearest lag, but only one carries the behavior-time dominant
-        # label. Resolve the row inside that nearest-lag tie rather than using
-        # the lowest DG index and spuriously rejecting the event.
-        nearest_rows = predecessor_age[stream, arrival_t].eq(lag)
-        verified_rows = nearest_rows & dominant[stream, source_t]
-        if not bool(verified_rows.any()):
-            counts["alignment_failure"].add_(1.0)
-            continue
-        source_row = int(torch.nonzero(verified_rows, as_tuple=False)[0].item())
-        arrival_row = int(torch.nonzero(dominant[stream, arrival_t], as_tuple=False)[0].item())
-        credit_t, credit_row = (arrival_t, arrival_row) if recipient == "arrival" else (source_t, source_row)
-        if bool(row_mask[stream, credit_t, credit_row]):
-            counts["collisions"].add_(1.0)
-        reward = float(reward_scale) * float(lag)
-        rewards[stream, credit_t, credit_row].add_(reward)
-        row_mask[stream, credit_t, credit_row] = True
-        counts["credited"].add_(1.0)
-        counts["reward_mass"].add_(reward)
-        counts["source_lag_sum"].add_(float(lag))
-        counts["source_lag_max"].copy_(
-            torch.maximum(counts["source_lag_max"], counts["source_lag_max"].new_tensor(float(lag)))
-        )
+    stream, arrival_t = events.unbind(dim=1)
+    lag = nearest_lag[stream, arrival_t].long()
+    aligned = lag < int(baseline)
+    source_t = arrival_t - lag
+    inside = aligned & (source_t >= 0)
+    safe_source_t = source_t.clamp(0, progression.size(1) - 1)
+
+    # Prefix counts turn every variable-length validity interval into two
+    # indexed reads. This replaces one Python slice and CUDA scalar read per
+    # event without changing inclusive [source, arrival] semantics.
+    invalid = (~valids.bool()).long()
+    invalid_prefix = F.pad(invalid.cumsum(dim=1), (1, 0))
+    invalid_count = invalid_prefix[stream, arrival_t + 1] - invalid_prefix[stream, safe_source_t]
+    interval_valid = invalid_count == 0
+
+    # Several rows can enter CA3 on the same source decision. They have the
+    # same nearest lag, but only the behavior-time dominant row is verified.
+    nearest_rows = predecessor_age[stream, arrival_t].eq(lag.unsqueeze(1))
+    verified_rows = nearest_rows & dominant[stream, safe_source_t]
+    verified = verified_rows.any(dim=1)
+    accepted = inside & interval_valid & verified
+    source_row = verified_rows.to(torch.int64).argmax(dim=1)
+    arrival_row = dominant[stream, arrival_t].to(torch.int64).argmax(dim=1)
+    credit_t = arrival_t if recipient == "arrival" else safe_source_t
+    credit_row = arrival_row if recipient == "arrival" else source_row
+
+    flat_index = (stream * progression.size(1) + credit_t) * progression.size(2) + credit_row
+    accepted_index = flat_index[accepted]
+    accepted_lag = lag[accepted].to(dtype=rewards.dtype)
+    reward_values = accepted_lag * float(reward_scale)
+    rewards.view(-1).scatter_add_(0, accepted_index, reward_values)
+    if accepted_index.numel():
+        row_mask.view(-1)[accepted_index.unique()] = True
+
+    accepted_count = accepted.sum().to(dtype=torch.float)
+    unique_count = accepted_index.unique().numel()
+    counts["total"] = events.new_tensor(events.size(0), dtype=torch.float)
+    counts["matchable"] = inside.sum().to(dtype=torch.float)
+    counts["credited"] = accepted_count
+    counts["boundary_dropped"] = (aligned & (source_t < 0)).sum().to(dtype=torch.float)
+    counts["alignment_failure"] = ((~aligned) | (inside & interval_valid & ~verified)).sum().to(dtype=torch.float)
+    counts["invalid_interval"] = (inside & ~interval_valid).sum().to(dtype=torch.float)
+    counts["collisions"] = accepted_count - float(unique_count)
+    counts["reward_mass"] = reward_values.sum()
+    counts["source_lag_sum"] = accepted_lag.sum()
+    counts["source_lag_max"] = accepted_lag.max() if accepted_lag.numel() else counts["source_lag_max"]
     return rewards, row_mask, counts
 
 
