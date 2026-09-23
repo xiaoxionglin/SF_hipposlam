@@ -15,6 +15,10 @@ class OrderedIngress:
     def __init__(self, max_pending):
         self.expected = defaultdict(int)
         self.waiting = defaultdict(dict)
+        # Replay-side annotations arrive by physical decision key rather than
+        # transport serial.  Keep a second, bounded index so callers never
+        # have to linearly scan an asynchronously reordered stream.
+        self.by_key = {}
         self.max_pending = max_pending
         self.received = 0
         self.emitted = 0
@@ -23,11 +27,17 @@ class OrderedIngress:
     def pending(self):
         return sum(len(q) for q in self.waiting.values())
 
+    @staticmethod
+    def _row_key(row):
+        return getattr(row, "key", (row.stream, row.episode, row.index))
+
     def add(self, stream, serial, row):
         queue = self.waiting[stream]
-        if row.stream != stream or serial < self.expected[stream] or serial in queue:
+        key = self._row_key(row)
+        if row.stream != stream or serial < self.expected[stream] or serial in queue or key in self.by_key:
             raise ValueError("duplicate or inconsistent SF stream packet")
         queue[serial] = row
+        self.by_key[key] = (stream, serial)
         self.received += 1
         if self.pending > self.max_pending:
             raise ValueError("SF reorder queue exceeded transport bound")
@@ -54,12 +64,26 @@ class OrderedIngress:
                     successor_valid=row.successor_valid if ended else True,
                 )
                 del queue[serial]
+                del self.by_key[self._row_key(row)]
                 self.expected[stream] += 1
                 self.emitted += 1
                 advanced = True
                 yield result
             if not advanced:
                 break
+
+    def replace_by_key(self, key, **changes):
+        """Replace one pending immutable row in constant time.
+
+        Returns whether the key still belongs to transport ingress.  The
+        serial-keyed queue remains authoritative for ordered draining.
+        """
+        location = self.by_key.get(key)
+        if location is None:
+            return False
+        stream, serial = location
+        self.waiting[stream][serial] = replace(self.waiting[stream][serial], **changes)
+        return True
 
 
 def updates_due(accepted, warmup, cadence, completed):

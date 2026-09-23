@@ -69,10 +69,23 @@ class PhysicalReplay:
         if key in self.rows:
             self.rows[key] = replace(self.rows[key], **changes)
             return
-        for serial, row in self.ingress.waiting.get(key[0], {}).items():
-            if row.key == key:
-                self.ingress.waiting[key[0]][serial] = replace(row, **changes)
-                return
+        self.ingress.replace_by_key(key, **changes)
+
+    def annotate_many(self, keys, rewards, event_columns):
+        """Attach one rollout's real labels without per-row searches/copies."""
+        names = tuple(event_columns)
+        values = tuple(event_columns[name] for name in names)
+        for index, key in enumerate(keys):
+            # Values are scalars owned by the replay.  Constructing the small
+            # mapping directly is sufficient; deepcopying it 16k times is not.
+            changes = dict(
+                real_reward=float(rewards[index]),
+                real_events={name: float(column[index]) for name, column in zip(names, values)},
+            )
+            if key in self.rows:
+                self.rows[key] = replace(self.rows[key], **changes)
+            else:
+                self.ingress.replace_by_key(key, **changes)
 
     def sequence(self, key, washout, future=1):
         row = self.rows[key]

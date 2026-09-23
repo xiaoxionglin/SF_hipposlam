@@ -179,9 +179,12 @@ class ControllerLearner(DistanceLearnerReward):
         return checkpoint
 
     def _prepare_batch(self, batch):
+        base_started = time.perf_counter()
         buff, size, invalid = super()._prepare_batch(batch)
+        self.controller_stats["prepare_batch_base_seconds"] = time.perf_counter() - base_started
+        annotation_started = time.perf_counter()
         if invalid < size:
-            identities = batch["obs"][IDENTITY_KEY][:, :-1].reshape(-1, 4).cpu().tolist()
+            identities = batch["obs"][IDENTITY_KEY][:, :-1].reshape(-1, 4).detach().cpu().numpy()
             labels = (
                 "hrl_control_correct_outcome",
                 "hrl_control_wrong_outcome",
@@ -198,13 +201,12 @@ class ControllerLearner(DistanceLearnerReward):
                 for name in labels
                 if name in buff
             }
-            for index, (stream, episode, decision, serial) in enumerate(identities):
-                key = ((self.replay.session, int(stream)), int(episode), int(decision))
-                self.replay.annotate(
-                    key,
-                    rewards[index],
-                    {name: float(values[index]) for name, values in event_columns.items()},
-                )
+            keys = [
+                ((self.replay.session, int(stream)), int(episode), int(decision))
+                for stream, episode, decision, _serial in identities
+            ]
+            self.replay.annotate_many(keys, rewards, event_columns)
+        self.controller_stats["replay_annotation_seconds"] = time.perf_counter() - annotation_started
         return buff, size, invalid
 
     def _prepare_recurrent_replay_head(self, head_outputs, mb):

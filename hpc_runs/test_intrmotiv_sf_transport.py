@@ -35,6 +35,19 @@ class TransportTest(unittest.TestCase):
         self.assertIs(result[0].successor, next_row.observation)
         self.assertEqual(ingress.pending, 1)
 
+    def test_pending_key_index_tracks_replacement_and_drain(self):
+        ingress = OrderedIngress(8)
+        first = row(0, 0)
+        key = (first.stream, first.episode, first.index)
+        ingress.add(0, 0, first)
+        self.assertTrue(ingress.replace_by_key(key, action=7))
+        self.assertEqual(ingress.waiting[0][0].action, 7)
+        ingress.add(0, 1, row(0, 1, done=True))
+        emitted = list(ingress.drain())
+        self.assertEqual(emitted[0].action, 7)
+        self.assertNotIn(key, ingress.by_key)
+        self.assertFalse(ingress.replace_by_key(key, action=8))
+
     def test_reset_is_never_used_as_terminal_successor(self):
         ingress = OrderedIngress(8)
         ingress.add(0, 0, row(0, 0, done=True))

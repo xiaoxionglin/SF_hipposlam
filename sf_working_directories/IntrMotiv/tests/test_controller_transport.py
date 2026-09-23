@@ -85,6 +85,24 @@ def test_out_of_order_packets_join_across_rollouts_and_keep_certified_terminal()
     assert replay.physical_frames == 12
 
 
+def test_batched_annotations_update_accepted_and_pending_rows():
+    replay = PhysicalReplay(100, 1)
+    first, pending = row(0), row(1)
+    replay.receive(first)
+    replay.receive(pending)
+    replay.annotate_many(
+        [first.key, pending.key],
+        np.array([1.5, 2.5]),
+        {"event": np.array([3.5, 4.5])},
+    )
+    assert replay.rows[first.key].real_reward == 1.5
+    assert replay.rows[first.key].real_events == {"event": 3.5}
+    pending_location = replay.ingress.by_key[pending.key]
+    annotated_pending = replay.ingress.waiting[pending_location[0]][pending_location[1]]
+    assert annotated_pending.real_reward == 2.5
+    assert annotated_pending.real_events == {"event": 4.5}
+
+
 def test_restart_retains_replay_but_starts_new_physical_stream_session():
     replay = PhysicalReplay(100, 1)
     replay.receive(row(0))
