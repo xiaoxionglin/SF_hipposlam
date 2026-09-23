@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import torch
 
-from hpc_runs.audit_full_system_controller_preflight import audit, restart_errors
+from hpc_runs.audit_full_system_controller_preflight import audit, restart_errors, terminal_successor_errors
 
 
 class ControllerRuntimeAudit(unittest.TestCase):
@@ -177,6 +177,18 @@ def test_optimizer_ownership_audit_uses_actual_adam_steps():
 
 
 class StoredReplayAudit(unittest.TestCase):
+    def test_terminal_successor_requirement_is_explicit_and_defaults_strict(self):
+        terminal = dict(terminated=True, truncated=False, successor_valid=False, terminal_dg=None)
+        self.assertEqual(
+            terminal_successor_errors([terminal], stored=True),
+            ["no certified terminal successors in real DMLab replay"],
+        )
+        self.assertEqual(terminal_successor_errors([terminal], stored=True, required=False), [])
+        self.assertEqual(
+            terminal_successor_errors([], stored=True, required=False),
+            ["physical episode end not exercised in retained replay"],
+        )
+
     def test_requires_stored_inputs_and_terminal_provenance(self):
         from hpc_runs.audit_full_system_controller_preflight import stored_replay_errors
 

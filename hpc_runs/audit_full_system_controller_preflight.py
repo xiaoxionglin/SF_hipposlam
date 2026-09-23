@@ -123,7 +123,34 @@ def stored_replay_errors(state, cfg):
     return errors
 
 
-def audit(study, jobs, root, required_frames=2000000, restart_baselines=None, reload_certificate=None):
+def terminal_successor_errors(terminals, stored, required=True):
+    """Validate terminal-successor transport only when the study declares it.
+
+    Contextual state-goal HER deliberately rejects terminal targets without a
+    certified raw-CA3 successor.  Those studies must not be failed merely for
+    omitting transport they explicitly forbid; older controller studies retain
+    the strict default.
+    """
+    if not terminals:
+        return ["physical episode end not exercised in retained replay"]
+    if required and not any(
+        item["successor_valid"]
+        and (item.get("terminal_dg") is not None if stored else item["successor"] is not None)
+        for item in terminals
+    ):
+        return ["no certified terminal successors in real DMLab replay"]
+    return []
+
+
+def audit(
+    study,
+    jobs,
+    root,
+    required_frames=2000000,
+    restart_baselines=None,
+    reload_certificate=None,
+    require_certified_terminal_successor=True,
+):
     result = audit_parent(study, jobs, root, required_frames)
     by_name = {r["run"]: r for r in result["runs"]}
     with Path(jobs).open() as stream:
@@ -190,14 +217,7 @@ def audit(study, jobs, root, required_frames=2000000, restart_baselines=None, re
         if stored:
             errors.extend(stored_replay_errors(state, cfg))
         terminals = [item for item in replay.get("rows", []) if item["terminated"] or item["truncated"]]
-        if not terminals:
-            errors.append("physical episode end not exercised in retained replay")
-        elif not any(
-            item["successor_valid"]
-            and (item.get("terminal_dg") is not None if stored else item["successor"] is not None)
-            for item in terminals
-        ):
-            errors.append("no certified terminal successors in real DMLab replay")
+        errors.extend(terminal_successor_errors(terminals, stored, require_certified_terminal_successor))
         debt = updates_due(
             replay["accepted"],
             cfg["controller_learning_starts"],

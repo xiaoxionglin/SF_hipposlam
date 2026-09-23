@@ -72,8 +72,21 @@ def _model_buffer(model, suffix):
     return matches[0]
 
 
-def audit(study, jobs, train_root, reload_certificate_root=None, telemetry_root=None):
-    result = audit_controller(study, jobs, train_root, required_frames=2_000_000)
+def audit(
+    study,
+    jobs,
+    train_root,
+    reload_certificate_root=None,
+    telemetry_root=None,
+    require_certified_terminal_successor=True,
+):
+    result = audit_controller(
+        study,
+        jobs,
+        train_root,
+        required_frames=2_000_000,
+        require_certified_terminal_successor=require_certified_terminal_successor,
+    )
     by_name = {row["run"]: row for row in result["runs"]}
     certificates = _certificates(reload_certificate_root)
     aliases = list(Path(telemetry_root).glob("**/contextual_alias_diagnostics.json")) if telemetry_root else []

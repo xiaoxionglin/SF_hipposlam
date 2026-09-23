@@ -41,7 +41,17 @@ def _latest(events, tag):
 
 
 def audit(study, jobs, train_root, reload_certificate_root, telemetry_root):
-    result = audit_parent(study, jobs, train_root, reload_certificate_root, telemetry_root)
+    # This follow-up intentionally introduces no terminal raw-CA3 transport.
+    # Contextual terminal HER targets are rejected, while ordinary terminal
+    # presence and every other stored-replay invariant remain audited.
+    result = audit_parent(
+        study,
+        jobs,
+        train_root,
+        reload_certificate_root,
+        telemetry_root,
+        require_certified_terminal_successor=False,
+    )
     rows = {row["run"]: row for row in result["runs"]}
     for job in csv.DictReader(Path(jobs).open(), delimiter="\t"):
         run = job["experiment"].removeprefix("00_")
