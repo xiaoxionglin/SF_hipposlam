@@ -760,6 +760,9 @@ class ControllerLearner(DistanceLearnerReward):
 
     def _controller_updates(self):
         main_seconds = her_seconds = 0.0
+        main_order_seconds = main_example_seconds = main_screen_seconds = 0.0
+        main_selected_seconds = main_backward_seconds = 0.0
+        her_order_seconds = 0.0
         # Under STOP, canonical recognition/events remain fixed between fresh
         # DG transactions and target refreshes. Q/worker updates cannot make a
         # rejected physical context compatible. JOINT invalidates every step.
@@ -774,8 +777,11 @@ class ControllerLearner(DistanceLearnerReward):
             examples = []
             started = time.perf_counter()
             keys = self.replay.candidate_order(incompatible)
+            ordered = time.perf_counter()
+            main_order_seconds += ordered - started
             width = self._reconstruction_width()
             for start in range(0, len(keys), width):
+                group_started = time.perf_counter()
                 group = []
                 group_keys = []
                 for key in keys[start : start + width]:
@@ -787,11 +793,14 @@ class ControllerLearner(DistanceLearnerReward):
                             raise
                         self.replay.reject(str(exc))
                         incompatible.add(key)
+                main_example_seconds += time.perf_counter() - group_started
                 # Eligibility search must not retain autograd graphs for every
                 # mostly-rejected candidate batch. Reconstruct the selected TD
                 # positions under the same snapshot only after selection ends.
+                screen_started = time.perf_counter()
                 with torch.no_grad():
                     results = self._evaluate_pairs(group)
+                main_screen_seconds += time.perf_counter() - screen_started
                 for key, example, result in zip(group_keys, group, results):
                     if isinstance(result, str):
                         self.replay.reject(result)
@@ -814,6 +823,7 @@ class ControllerLearner(DistanceLearnerReward):
                 examples.append(examples[int(self.replay.rng.integers(available))])
             started = time.perf_counter()
             selected_results = self._evaluate_pairs(examples)
+            main_selected_seconds += time.perf_counter() - started
             if any(isinstance(result, str) for result in selected_results):
                 raise RuntimeError("Replay eligibility changed within the same optimizer snapshot")
             losses = [result[0] for result in selected_results]
@@ -828,7 +838,10 @@ class ControllerLearner(DistanceLearnerReward):
                 # authority: obsolete/inactive anchors remain valid exact
                 # achieved endpoints, while structural DG generations do not.
                 selected = []
-                for key in self.replay.candidate_order():
+                her_order_started = time.perf_counter()
+                her_keys = self.replay.candidate_order()
+                her_order_seconds += time.perf_counter() - her_order_started
+                for key in her_keys:
                     try:
                         selected.append(self._example(key, allow_stale_anchor=True))
                     except (ReplayRejected, ValueError) as exc:
@@ -848,6 +861,7 @@ class ControllerLearner(DistanceLearnerReward):
             self.optimizer.zero_grad(set_to_none=True)
             started = time.perf_counter()
             main_loss.backward()
+            main_backward_seconds += time.perf_counter() - started
             main_seconds += time.perf_counter() - started
             if aux:
                 started = time.perf_counter()
@@ -877,7 +891,13 @@ class ControllerLearner(DistanceLearnerReward):
         )
         self.controller_stats.update(
             main_compute_seconds=main_seconds,
+            main_order_seconds=main_order_seconds,
+            main_example_seconds=main_example_seconds,
+            main_screen_seconds=main_screen_seconds,
+            main_selected_seconds=main_selected_seconds,
+            main_backward_seconds=main_backward_seconds,
             her_compute_seconds=her_seconds,
+            her_order_seconds=her_order_seconds,
             her_overhead_ratio=her_seconds / max(main_seconds, 1e-9),
         )
 
