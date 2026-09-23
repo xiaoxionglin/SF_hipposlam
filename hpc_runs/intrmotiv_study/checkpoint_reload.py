@@ -34,8 +34,42 @@ def assert_exact(left, right):
         assert left == right, (left, right)
 
 
-def certify(run_dir, checkpoint, output):
+def _load_cfg(run_dir, train_dir):
     from sample_factory.utils.attr_dict import AttrDict
+
+    cfg = AttrDict(json.loads((run_dir / "config.json").read_text()))
+    cfg.train_dir = str(train_dir)
+    cfg.cli_args = {}
+    cfg.with_wandb = False
+    # The temporary qualification environment must not consume training seeds.
+    cfg.dmlab_use_level_cache = False
+    return cfg
+
+
+def save_env_info(run_dir, output):
+    """Capture the common environment interface, then let DMLab exit.
+
+    G500 permits only one of these temporary DMLab API instances at a time.
+    The resulting interface is ordinary pickleable Sample Factory metadata;
+    independent learner restores can safely reuse it in parallel.
+    """
+    from sample_factory.algo.utils.env_info import extract_env_info
+    from sample_factory.algo.utils.make_env import make_env_func_batched
+    from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import register_dmlab_components
+
+    cfg = _load_cfg(Path(run_dir), output.parent / "unused_learner")
+    register_dmlab_components()
+    torch.set_num_threads(1)
+    env = make_env_func_batched(cfg, env_config=None)
+    try:
+        info = extract_env_info(env, cfg)
+    finally:
+        env.close()
+    torch.save(info, output)
+    return info
+
+
+def certify(run_dir, checkpoint, output, env_info=None):
     from sample_factory.algo.utils.env_info import extract_env_info
     from sample_factory.algo.utils.make_env import make_env_func_batched
     from sample_factory.algo.utils.model_sharing import ParameterServer
@@ -47,22 +81,20 @@ def certify(run_dir, checkpoint, output):
     output.mkdir(parents=True, exist_ok=False)
     immutable = output / checkpoint.name
     shutil.copy2(checkpoint, immutable)
-    cfg = AttrDict(json.loads((run_dir / "config.json").read_text()))
-    cfg.train_dir = str(output / "learner")
-    cfg.cli_args = {}
-    cfg.with_wandb = False
-    # The temporary qualification environment must not consume training seeds.
-    cfg.dmlab_use_level_cache = False
+    cfg = _load_cfg(run_dir, output / "learner")
     target = Path(cfg.train_dir) / cfg.experiment / "checkpoint_p0"
     target.mkdir(parents=True)
     os.link(immutable, target / checkpoint.name)
     register_dmlab_components()
     torch.set_num_threads(1)
-    env = make_env_func_batched(cfg, env_config=None)
-    try:
-        info = extract_env_info(env, cfg)
-    finally:
-        env.close()
+    if env_info is None:
+        env = make_env_func_batched(cfg, env_config=None)
+        try:
+            info = extract_env_info(env, cfg)
+        finally:
+            env.close()
+    else:
+        info = torch.load(Path(env_info), map_location="cpu", weights_only=False)
     versions = torch.zeros(1, dtype=torch.int32)
     server = ParameterServer(0, versions, False)
     mode = getattr(cfg, "controller_learning", "ppo")
@@ -109,6 +141,9 @@ def certify(run_dir, checkpoint, output):
         exact_restore=True, model_and_buffers_exact=True, optimizer_exact=True,
         counters_exact=True, device=str(learner.device), job_id=os.environ.get("SLURM_JOB_ID"),
     )
+    if env_info is not None:
+        result["env_info"] = str(Path(env_info).resolve())
+        result["env_info_sha256"] = hashlib.sha256(Path(env_info).read_bytes()).hexdigest()
     (output / "certificate.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
 
@@ -118,8 +153,14 @@ def main():
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--env-info", type=Path)
     args = parser.parse_args()
-    certify(args.run_dir.resolve(), args.checkpoint.resolve(), args.output_dir.resolve())
+    certify(
+        args.run_dir.resolve(),
+        args.checkpoint.resolve(),
+        args.output_dir.resolve(),
+        env_info=args.env_info.resolve() if args.env_info is not None else None,
+    )
 
 
 if __name__ == "__main__":
