@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from hpc_runs.intrmotiv_study.direct import atomic_json, log_status, source_digest
+from hpc_runs.intrmotiv_study.direct import atomic_json, log_status, source_digest, wandb_credentials_available
 
 
 def test_source_digest_detects_source_not_outputs(tmp_path):
@@ -32,6 +32,14 @@ def test_atomic_json_replaces(tmp_path):
     atomic_json(path, {"state": "done"})
     assert "done" in path.read_text()
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_wandb_credentials_accept_environment_or_official_netrc(tmp_path):
+    credential_file = tmp_path / "netrc"
+    credential_file.write_text("machine api.wandb.ai login user password stored-key\n")
+    assert wandb_credentials_available(environment={}, netrc_path=credential_file)
+    assert wandb_credentials_available(environment={"WANDB_API_KEY": "explicit-key"}, netrc_path=tmp_path / "missing")
+    assert not wandb_credentials_available(environment={}, netrc_path=tmp_path / "missing")
 
 
 def test_queue_records_failure_and_continues_with_later_runs(tmp_path, monkeypatch):

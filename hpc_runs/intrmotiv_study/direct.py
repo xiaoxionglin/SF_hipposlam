@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import netrc
 import os
 import re
 import signal
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .spec import load_study
 
@@ -94,11 +96,31 @@ def log_status(path):
     }
 
 
+def wandb_credentials_available(*, environment=None, netrc_path=None):
+    """Accept both explicit and official W&B CLI credential stores.
+
+    ``wandb login`` intentionally writes the API key to ``~/.netrc``.  Requiring
+    a duplicate environment variable rejects an otherwise authenticated host
+    and encourages putting secrets in launch commands.  This check only tests
+    for a non-empty credential; it never returns or logs the key.
+    """
+    environment = os.environ if environment is None else environment
+    if environment.get("WANDB_API_KEY"):
+        return True
+    base_url = environment.get("WANDB_BASE_URL", "https://api.wandb.ai")
+    hostname = urlparse(base_url).hostname or "api.wandb.ai"
+    try:
+        credentials = netrc.netrc(str(netrc_path) if netrc_path is not None else None).authenticators(hostname)
+    except (FileNotFoundError, netrc.NetrcParseError, OSError):
+        return False
+    return bool(credentials and credentials[2])
+
+
 def run_queue(manifest, resource_probe, *, poll_seconds=10):
     import psutil
 
-    if not os.environ.get("WANDB_API_KEY"):
-        raise RuntimeError("Supply W&B credentials in the environment")
+    if not wandb_credentials_available():
+        raise RuntimeError("Authenticate W&B with WANDB_API_KEY or `wandb login`")
     output = Path(manifest["output_root"])
     output.mkdir(parents=True, exist_ok=True)
     audit = output / "direct_execution"
