@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -4202,6 +4203,16 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
+            phase_started = time.perf_counter()
+
+            def record_phase(name):
+                nonlocal phase_started
+                stats = getattr(self, "controller_stats", None)
+                now = time.perf_counter()
+                if stats is not None:
+                    stats[f"prepare_phase/{name}"] = now - phase_started
+                phase_started = now
+
             # create a shallow copy so we can modify the dictionary
             # we still reference the same buffers though
             buff = shallow_recursive_copy(batch)
@@ -4260,6 +4271,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 return buff, dataset_size, dataset_size
             # for last T+1 step, we want to use the validity of the previous step
             buff["valids"][:, -1] = buff["valids"][:, -2]
+            record_phase("generation")
             graph_stats = self._update_policy_graph_from_rollout(buff["rnn_states"], buff["valids"][:, :-1])
             if graph_stats is not None:
                 self._last_graph_rollout_stats = {
@@ -4273,6 +4285,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     key: float(value.detach().cpu().item()) for key, value in passive_stats.items()
                 }
             self._queue_dg_recruitment_candidates(buff)
+            record_phase("graph")
             # log.info(f'RNN_states Shape: {buff["rnn_states"].shape}')
             # log.info(f'Internal Reward1: {buff["rewards"][:,:10]}')
             # log.info(f'Reward Shape1: {buff["rewards"].shape}')
@@ -4284,14 +4297,17 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
             del buff["obs"]  # don't need non-normalized obs anymore
+            record_phase("normalize_observations")
 
             # calculate estimated value for the next step (T+1)
             normalized_last_obs = buff["normalized_obs"][:, -1]
             additional_step = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)
             next_values = additional_step["values"]
             buff["values"][:, -1] = next_values
+            record_phase("bootstrap_forward")
 
             self._calculate_internal_reward(buff, additional_step)
+            record_phase("internal_reward")
 
             if self.cfg.normalize_returns and getattr(self.cfg, "controller_learning", "ppo") != "ddqn":
                 # Since our value targets are normalized, the values will also have normalized statistics.
@@ -4357,6 +4373,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 # likewise, some invalid values of log_prob_actions can cause NaNs or infs
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
+            record_phase("finalize")
             return buff, dataset_size, num_invalids
 
     def _record_goal_modulation_summaries(self, stats):
