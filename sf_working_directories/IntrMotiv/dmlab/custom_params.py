@@ -376,6 +376,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--ca3_state_readout_cov_coeff", default=0.01, type=float)
     p.add_argument("--ca3_state_readout_lr_scale", default=0.2, type=float)
     p.add_argument("--ca3_worker_goal_mode", default="target_id", choices=("target_id", "raw_ca3", "state_readout"))
+    p.add_argument(
+        "--ca3_worker_decoder",
+        default="film",
+        choices=("film", "relation"),
+        help="Worker goal interface: legacy FiLM or same-space [z_t,z_g,z_g-z_t] relation decoder.",
+    )
     p.add_argument("--ca3_graph_anchor_mode", default="off", choices=("off", "fixed", "champion", "ema"))
     p.add_argument("--ca3_graph_anchor_ema_alpha", default=0.05, type=float)
     p.add_argument("--ca3_graph_anchor_ema_min_confirmations", default=8, type=int)
@@ -386,6 +392,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         choices=("exclusive", "dominant", "unique_contextual"),
     )
     p.add_argument("--ca3_graph_contextual_hits", default=False, type=str2bool)
+    p.add_argument(
+        "--ca3_context_similarity_space",
+        default="probe",
+        choices=("probe", "z"),
+        help="Contextual online/HER recognition space. 'probe' preserves legacy predictor signatures; 'z' uses normalized W S directly.",
+    )
     p.add_argument("--ca3_context_calibration_capacity", default=512, type=int)
     p.add_argument("--ca3_context_calibration_min_pairs", default=256, type=int)
     p.add_argument("--ca3_context_calibration_interval", default=32768, type=int)
