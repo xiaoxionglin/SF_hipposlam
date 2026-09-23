@@ -349,15 +349,32 @@ def action_probe_signature(
     return prediction.reshape(batch, -1)
 
 
+def _context_embedding(
+    readout: CA3StateReadout,
+    predictor: CausalDGInnovationPredictor,
+    ca3: Tensor,
+    space: str,
+) -> Tensor:
+    """Return the normalized embedding used only for contextual recognition."""
+    if space == "z":
+        if ca3.ndim == 1:
+            ca3 = ca3.unsqueeze(0)
+        return F.normalize(readout(ca3), dim=-1)
+    if space == "probe":
+        return F.normalize(action_probe_signature(readout, predictor, ca3), dim=-1)
+    raise ValueError(f"Unknown contextual similarity space: {space}")
+
+
 def contextual_similarity(
     readout: CA3StateReadout,
     predictor: CausalDGInnovationPredictor,
     left_ca3: Tensor,
     right_ca3: Tensor,
+    space: str = "probe",
 ) -> Tensor:
-    """Cosine similarity of two raw CA3 states under the current probe model."""
-    left = F.normalize(action_probe_signature(readout, predictor, left_ca3), dim=-1)
-    right = F.normalize(action_probe_signature(readout, predictor, right_ca3), dim=-1)
+    """Cosine similarity in either direct z-space or the legacy probe space."""
+    left = _context_embedding(readout, predictor, left_ca3, space)
+    right = _context_embedding(readout, predictor, right_ca3, space)
     similarity = (left * right).sum(-1)
     return similarity.squeeze(0) if similarity.numel() == 1 else similarity
 
@@ -370,15 +387,9 @@ def indexed_contextual_similarity(
     right_ca3: Tensor,
     left_indices: Tensor,
     chunk_size: int = 4096,
+    space: str = "probe",
 ) -> Tensor:
-    """Compare many right states with indexed, reusable left signatures.
-
-    Contextual HER commonly compares every future event in an option with the
-    same start state.  Expanding the raw start state before signature creation
-    repeats the predictor forward up to the option horizon.  This formulation
-    computes each distinct left signature once and chunks only the independent
-    right signatures; it is exactly equivalent to pairwise cosine similarity.
-    """
+    """Compare many right states with indexed reusable contextual embeddings."""
     if left_ca3.ndim == 1:
         left_ca3 = left_ca3.unsqueeze(0)
     if right_ca3.ndim == 1:
@@ -389,11 +400,11 @@ def indexed_contextual_similarity(
     if not left_indices.numel():
         return left_ca3.new_zeros((0,))
     if int(left_indices.min()) < 0 or int(left_indices.max()) >= left_ca3.size(0):
-        raise ValueError("left signature index is out of range")
-    left = F.normalize(action_probe_signature(readout, predictor, left_ca3), dim=-1)
+        raise ValueError("left contextual index is out of range")
+    left = _context_embedding(readout, predictor, left_ca3, space)
     similarities = []
     for start in range(0, right_ca3.size(0), int(chunk_size)):
         stop = min(start + int(chunk_size), right_ca3.size(0))
-        right = F.normalize(action_probe_signature(readout, predictor, right_ca3[start:stop]), dim=-1)
+        right = _context_embedding(readout, predictor, right_ca3[start:stop], space)
         similarities.append((left[left_indices[start:stop]] * right).sum(-1))
     return torch.cat(similarities)
