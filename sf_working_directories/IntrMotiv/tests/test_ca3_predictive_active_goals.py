@@ -186,3 +186,28 @@ def test_contextual_checkpoint_round_trip_preserves_calibration_and_generations(
     assert clone.selectable_mask().tolist() == [False, True]
     assert int(clone.calibration_count) == 1
     assert int(clone.anchor_last_update[1]) == 7
+
+
+def test_batched_calibration_ring_keeps_exact_sequential_order():
+    graph = PolicyControllableGraph(2, ca3_size=1, contextual=True, calibration_capacity=3, prediction_horizon=2)
+
+    def append(start, stop):
+        values = torch.arange(start, stop, dtype=torch.float32)[:, None]
+        count = stop - start
+        graph.add_positive_pairs(
+            values,
+            values + 10,
+            torch.arange(count * 2).reshape(count, 2),
+            torch.arange(count * 4, dtype=torch.float32).reshape(count, 2, 2),
+        )
+        graph.add_diagnostic_pairs(values, values + 20)
+
+    append(0, 5)
+    assert graph.calibration_left[:, 0].tolist() == [3.0, 4.0, 2.0]
+    assert graph.diagnostic_left[:, 0].tolist() == [3.0, 4.0, 2.0]
+    append(5, 7)
+    assert graph.calibration_left[:, 0].tolist() == [6.0, 4.0, 5.0]
+    assert graph.calibration_right[:, 0].tolist() == [16.0, 14.0, 15.0]
+    assert graph.diagnostic_left[:, 0].tolist() == [6.0, 4.0, 5.0]
+    assert int(graph.calibration_cursor) == 7 and int(graph.calibration_count) == 3
+    assert int(graph.diagnostic_cursor) == 7 and int(graph.diagnostic_count) == 3

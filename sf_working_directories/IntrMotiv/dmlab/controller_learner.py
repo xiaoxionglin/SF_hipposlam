@@ -264,45 +264,57 @@ class ControllerLearner(DistanceLearnerReward):
         done = flat_dones.reshape(streams, recurrence).bool()
         previous = flat_previous.reshape(streams, recurrence, -1)[:, 0]
         previous_dg = previous.reshape(streams, n, expanded)[..., 0]
+        # Occurrence discovery is discrete bookkeeping.  Inspect its labels in
+        # one host transfer instead of issuing a CUDA scalar read for every
+        # stream and timestep.
+        dg_cpu = dg.detach().cpu().numpy()
+        valid_cpu = valid.detach().cpu().numpy()
+        done_cpu = done.detach().cpu().numpy()
+        previous_dg_cpu = previous_dg.detach().cpu().numpy()
         horizon = int(self.cfg.ca3_state_readout_horizon)
         decision = int(getattr(self.replay, "accepted", self.env_steps))
         runs = []
         for stream in range(streams):
             t = 0
             while t < recurrence:
-                active = torch.where(dg[stream, t] > 0)[0] if valid[stream, t] else torch.empty(0, device=dg.device)
-                if active.numel() != 1:
+                active = np.flatnonzero(dg_cpu[stream, t] > 0) if valid_cpu[stream, t] else np.empty(0, dtype=int)
+                if active.size != 1:
                     t += 1
                     continue
                 node, start = int(active[0]), t
                 t += 1
-                while t < recurrence and valid[stream, t] and not done[stream, t - 1]:
-                    next_active = torch.where(dg[stream, t] > 0)[0]
-                    if next_active.numel() != 1 or int(next_active[0]) != node:
+                while t < recurrence and valid_cpu[stream, t] and not done_cpu[stream, t - 1]:
+                    next_active = np.flatnonzero(dg_cpu[stream, t] > 0)
+                    if next_active.size != 1 or int(next_active[0]) != node:
                         break
                     t += 1
                 if start == 0:
-                    prior_active = torch.where(previous_dg[stream] > 0)[0]
-                    if prior_active.numel() == 1 and int(prior_active[0]) == node:
+                    prior_active = np.flatnonzero(previous_dg_cpu[stream] > 0)
+                    if prior_active.size == 1 and int(prior_active[0]) == node:
                         # This chunk begins inside a maximal occurrence; only
                         # its true onset may register or confirm an anchor.
                         continue
                 runs.append((stream, start, t, node))
+        positive_pairs = []
         for stream, start, end, node in runs:
             if end - start > 1:
                 for offset in range(start + 1, end):
                     pair_complete = offset + horizon < recurrence
                     if pair_complete:
-                        pair_complete = bool(valid[stream, offset : offset + horizon + 1].all()) and not bool(
-                            done[stream, offset : offset + horizon].any()
-                        )
+                        pair_complete = valid_cpu[stream, offset : offset + horizon + 1].all() and not done_cpu[
+                            stream, offset : offset + horizon
+                        ].any()
                     if pair_complete:
-                        graph.add_positive_pair(
-                            states[stream, start],
-                            states[stream, offset],
-                            actions[stream, offset : offset + horizon],
-                            dg[stream, offset + 1 : offset + horizon + 1],
-                        )
+                        positive_pairs.append((stream, start, offset))
+        if positive_pairs:
+            graph.add_positive_pairs(
+                torch.stack([states[stream, start] for stream, start, _offset in positive_pairs]),
+                torch.stack([states[stream, offset] for stream, _start, offset in positive_pairs]),
+                torch.stack([actions[stream, offset : offset + horizon] for stream, _start, offset in positive_pairs]),
+                torch.stack(
+                    [dg[stream, offset + 1 : offset + horizon + 1] for stream, _start, offset in positive_pairs]
+                ),
+            )
         calibration_started = time.perf_counter()
         calibrated = graph.recalibrate(
             core.state_readout,
@@ -316,12 +328,13 @@ class ControllerLearner(DistanceLearnerReward):
         )
         if calibrated:
             self.controller_stats["calibration_seconds"] = time.perf_counter() - calibration_started
+        diagnostic_pairs = []
         for stream, start, _end, node in runs:
             complete = start + horizon < recurrence
             if complete:
-                complete = bool(valid[stream, start : start + horizon + 1].all()) and not bool(
-                    done[stream, start : start + horizon].any()
-                )
+                complete = valid_cpu[stream, start : start + horizon + 1].all() and not done_cpu[
+                    stream, start : start + horizon
+                ].any()
             candidate = states[stream, start]
             if not graph.anchor_valid[node]:
                 if complete:
@@ -331,7 +344,7 @@ class ControllerLearner(DistanceLearnerReward):
                 continue
             future = dg[stream, start + 1 : start + horizon + 1]
             action_window = actions[stream, start : start + horizon]
-            graph.add_diagnostic_pair(graph.anchor_ca3[node], candidate)
+            diagnostic_pairs.append((node, candidate))
             if complete and getattr(self.cfg, "ca3_graph_anchor_mode", "fixed") == "champion":
                 mean, lower, score = paired_anchor_improvement(
                     core.state_readout,
@@ -368,6 +381,11 @@ class ControllerLearner(DistanceLearnerReward):
                     int(self.cfg.ca3_graph_anchor_ema_min_confirmations),
                     float(self.cfg.ca3_graph_anchor_ema_margin),
                 )
+        if diagnostic_pairs:
+            graph.add_diagnostic_pairs(
+                torch.stack([graph.anchor_ca3[node] for node, _candidate in diagnostic_pairs]),
+                torch.stack([candidate for _node, candidate in diagnostic_pairs]),
+            )
 
     def _calculate_losses(self, mb, num_invalids, iterative_phase, **kwargs):
         if self.cfg.controller_learning != "ddqn":

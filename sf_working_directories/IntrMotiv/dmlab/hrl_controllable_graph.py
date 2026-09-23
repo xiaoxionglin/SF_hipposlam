@@ -666,26 +666,57 @@ class PolicyControllableGraph(nn.Module):
 
     @torch.no_grad()
     def add_positive_pair(self, left: Tensor, right: Tensor, actions: Tensor, targets: Tensor) -> None:
+        self.add_positive_pairs(left[None], right[None], actions[None], targets[None])
+
+    @torch.no_grad()
+    def add_positive_pairs(self, left: Tensor, right: Tensor, actions: Tensor, targets: Tensor) -> None:
+        """Append calibration examples without synchronizing once per pair.
+
+        Contextual batches can contain thousands of within-occurrence pairs.
+        Updating the CUDA-resident ring one row at a time made every cursor
+        read a device synchronization.  Keep only the newest bounded suffix
+        and write every retained row in one indexed operation.
+        """
         if not self.contextual or not self.calibration_capacity:
             return
-        cursor = int(self.calibration_cursor.item()) % self.calibration_capacity
-        self.calibration_left[cursor].copy_(left.detach().to(self.calibration_left))
-        self.calibration_right[cursor].copy_(right.detach().to(self.calibration_right))
-        self.calibration_actions[cursor].copy_(actions.detach().to(self.calibration_actions))
-        self.calibration_targets[cursor].copy_(targets.detach().to(self.calibration_targets))
-        self.calibration_cursor.add_(1)
-        self.calibration_count.fill_(min(int(self.calibration_count.item()) + 1, self.calibration_capacity))
+        total = int(left.size(0))
+        if total == 0:
+            return
+        cursor = int(self.calibration_cursor.item())
+        retained = min(total, self.calibration_capacity)
+        offset = total - retained
+        positions = (
+            torch.arange(offset, total, device=self.calibration_left.device, dtype=torch.long) + cursor
+        ).remainder(self.calibration_capacity)
+        self.calibration_left[positions] = left.detach()[-retained:].to(self.calibration_left)
+        self.calibration_right[positions] = right.detach()[-retained:].to(self.calibration_right)
+        self.calibration_actions[positions] = actions.detach()[-retained:].to(self.calibration_actions)
+        self.calibration_targets[positions] = targets.detach()[-retained:].to(self.calibration_targets)
+        self.calibration_cursor.add_(total)
+        self.calibration_count.copy_((self.calibration_count + total).clamp_max(self.calibration_capacity))
 
     @torch.no_grad()
     def add_diagnostic_pair(self, left: Tensor, right: Tensor) -> None:
+        self.add_diagnostic_pairs(left[None], right[None])
+
+    @torch.no_grad()
+    def add_diagnostic_pairs(self, left: Tensor, right: Tensor) -> None:
         """Retain a bounded unknown/background pair for telemetry only."""
         if not self.contextual or not self.calibration_capacity:
             return
-        cursor = int(self.diagnostic_cursor.item()) % self.calibration_capacity
-        self.diagnostic_left[cursor].copy_(left.detach().to(self.diagnostic_left))
-        self.diagnostic_right[cursor].copy_(right.detach().to(self.diagnostic_right))
-        self.diagnostic_cursor.add_(1)
-        self.diagnostic_count.fill_(min(int(self.diagnostic_count.item()) + 1, self.calibration_capacity))
+        total = int(left.size(0))
+        if total == 0:
+            return
+        cursor = int(self.diagnostic_cursor.item())
+        retained = min(total, self.calibration_capacity)
+        offset = total - retained
+        positions = (
+            torch.arange(offset, total, device=self.diagnostic_left.device, dtype=torch.long) + cursor
+        ).remainder(self.calibration_capacity)
+        self.diagnostic_left[positions] = left.detach()[-retained:].to(self.diagnostic_left)
+        self.diagnostic_right[positions] = right.detach()[-retained:].to(self.diagnostic_right)
+        self.diagnostic_cursor.add_(total)
+        self.diagnostic_count.copy_((self.diagnostic_count + total).clamp_max(self.calibration_capacity))
 
     @torch.no_grad()
     def recalibrate(

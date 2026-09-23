@@ -60,9 +60,16 @@ def test_manager_matches_reference(case, device):
         torch.testing.assert_close(value, original_graph[name])
 
 
+@pytest.mark.parametrize("edge_exploration", (False, True))
 @pytest.mark.parametrize("device", DEVICES)
-def test_manager_has_no_host_scalar_reads_or_dynamic_indices(device):
+def test_manager_has_no_host_scalar_reads_or_dynamic_indices(device, edge_exploration):
     values, graph, kwargs = load_case(0, device)
+    kwargs["edge_exploration"] = edge_exploration
+    if edge_exploration:
+        graph.node_visits.fill_(1)
+        graph.passive_confidence.fill_(2)
+        graph.passive_confidence.fill_diagonal_(0)
+        graph.passive_time.fill_(4)
     # Inspect ATen operations, including implicit bool(tensor) and boolean
     # indexing. These synchronize CUDA even when all stored tensors use CUDA.
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as profile:
