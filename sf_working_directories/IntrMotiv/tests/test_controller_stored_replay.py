@@ -13,7 +13,7 @@ from sf_working_directories.IntrMotiv.dmlab.controller_stored_replay import (
     example_from_replay,
     hindsight_examples,
 )
-from sf_working_directories.IntrMotiv.dmlab.controller_transition import TransitionInput, transition_values
+from sf_working_directories.IntrMotiv.dmlab.controller_transition import ReplayRejected, TransitionInput, transition_values
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
 from sf_working_directories.IntrMotiv.tests.test_controller_transition import RewardModel, physical_rows
 
@@ -134,6 +134,31 @@ def test_main_and_her_sampling_preserve_separate_rng_and_exclude_initial_goal():
     selected = hindsight_examples(learner, [example] * 8)
     assert selected and all(e.virtual_goal != 0 for e in selected)
     assert repr(learner.replay.rng.bit_generator.state) == rng_before
+
+
+def test_main_replay_uses_transaction_anchor_snapshot_without_graph_scalar_reads():
+    learner, _, rows = fixture()
+    _enable_contextual_goals(learner)
+    graph = learner.actor_critic.core.policy_graph
+    target = 0
+    condition = np.zeros_like(rows[0].condition)
+    condition[target] = 1
+    commanded = replace(rows[0], condition=condition, anchor_generation=3)
+    learner.replay.rows[commanded.key] = commanded
+    selectable = np.ones(graph.n_nodes, dtype=bool)
+    generations = np.zeros(graph.n_nodes, dtype=np.int64)
+    generations[target] = commanded.anchor_generation
+    with patch.object(graph, "selectable_mask", side_effect=AssertionError("per-row graph read")):
+        example = example_from_replay(
+            learner,
+            commanded.key,
+            anchor_snapshot=(selectable, generations),
+        )
+    assert example.rows[0].key == commanded.key
+
+    selectable[target] = False
+    with pytest.raises(ReplayRejected, match="stale_anchor_generation"):
+        example_from_replay(learner, commanded.key, anchor_snapshot=(selectable, generations))
 
 
 def test_replay_checkpoint_retains_stored_states_and_terminal_provenance():

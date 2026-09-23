@@ -595,11 +595,16 @@ class ControllerLearner(DistanceLearnerReward):
         self.controller_stats["actor_memory_rebuild_seconds"] = float(memory_stats[..., 2].max())
         self.controller_stats["actor_memory_version_failures"] = float(memory_stats[..., 1].max())
 
-    def _example(self, key, allow_stale_anchor=False):
+    def _example(self, key, allow_stale_anchor=False, anchor_snapshot=None):
         if getattr(self.cfg, "controller_replay_state", "reconstruct") == "stored":
             from .controller_stored_replay import example_from_replay
 
-            return example_from_replay(self, key, allow_stale_anchor=allow_stale_anchor)
+            return example_from_replay(
+                self,
+                key,
+                allow_stale_anchor=allow_stale_anchor,
+                anchor_snapshot=anchor_snapshot,
+            )
         prefix, suffix = self.replay.sequence(key, self.actor_critic.core.expanded_length, 2)
         row = suffix[0]
         generation = int(self.actor_critic.core.policy_graph.representation_generation.item())
@@ -767,6 +772,17 @@ class ControllerLearner(DistanceLearnerReward):
         # DG transactions and target refreshes. Q/worker updates cannot make a
         # rejected physical context compatible. JOINT invalidates every step.
         incompatible = set()
+        core = getattr(self.actor_critic, "core", None)
+        graph = getattr(core, "policy_graph", None)
+        anchor_snapshot = None
+        if graph is not None and graph.contextual:
+            # Online authority is constant throughout this controller
+            # transaction.  Snapshot the two small graph vectors once instead
+            # of synchronizing CUDA for every replay candidate.
+            anchor_snapshot = (
+                graph.selectable_mask().detach().cpu().numpy().copy(),
+                graph.anchor_generation.detach().cpu().numpy().copy(),
+            )
         for _ in range(self.clock.due(self.replay.accepted)):
             if self.cfg.ppo_dg_gradient != "stop":
                 incompatible.clear()
@@ -786,7 +802,10 @@ class ControllerLearner(DistanceLearnerReward):
                 group_keys = []
                 for key in keys[start : start + width]:
                     try:
-                        group.append(self._example(key))
+                        if anchor_snapshot is None:
+                            group.append(self._example(key))
+                        else:
+                            group.append(self._example(key, anchor_snapshot=anchor_snapshot))
                         group_keys.append(key)
                     except (ReplayRejected, ValueError) as exc:
                         if type(exc) is ValueError and str(exc) not in ("missing_history", "cross_episode"):

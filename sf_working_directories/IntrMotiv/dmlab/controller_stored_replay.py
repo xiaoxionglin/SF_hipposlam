@@ -52,7 +52,7 @@ def contextual_goal_hit(core, candidate_ca3, goal_ca3) -> bool:
     return bool(contextual_goal_hits(core, candidate_ca3, goal_ca3)[0])
 
 
-def example_from_replay(learner, key, allow_stale_anchor=False):
+def example_from_replay(learner, key, allow_stale_anchor=False, anchor_snapshot=None):
     _, rows = learner.replay.sequence(key, 0, 2)
     row = rows[0]
     if row.worker_state is None:
@@ -77,7 +77,12 @@ def example_from_replay(learner, key, allow_stale_anchor=False):
         target = np.flatnonzero(row.condition[: graph.n_nodes] > 0)
         if len(target) == 1:
             node = int(target[0])
-            if not bool(graph.selectable_mask()[node]) or row.anchor_generation != int(graph.anchor_generation[node]):
+            if anchor_snapshot is None:
+                selectable = graph.selectable_mask().detach().cpu().numpy()
+                anchor_generation = graph.anchor_generation.detach().cpu().numpy()
+            else:
+                selectable, anchor_generation = anchor_snapshot
+            if not bool(selectable[node]) or row.anchor_generation != int(anchor_generation[node]):
                 raise ReplayRejected("stale_anchor_generation")
     if successor.worker_state is None:
         raise ReplayRejected("stored_worker_state_missing")
