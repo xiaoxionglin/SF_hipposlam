@@ -164,33 +164,34 @@ def test_contextual_her_hit_does_not_require_virtual_goal_slot_equality():
     goal_state = rows[1].worker_state[: learner.actor_critic.core.core_output_size].copy()
     example = TransitionInput(tuple(rows[:2]), 0, virtual_goal=2, remaining=3, virtual_goal_state=goal_state)
     with patch(
-        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hit",
-        side_effect=[False, True],
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hits",
+        side_effect=[torch.tensor([False]), torch.tensor([True])],
     ):
         result = evaluate_pairs(learner, [example])[0]
     assert not isinstance(result, str)
     assert learner.replay.rejected["her_contextual_positive_hit"] == 1
 
 
-def test_contextual_hindsight_batches_all_action_probe_comparisons():
+def test_contextual_hindsight_reuses_indexed_start_signatures():
     learner, _, rows = fixture()
     _enable_contextual_goals(learner)
     example = example_from_replay(learner, rows[0].key)
     calls = []
 
-    def no_start_hits(_core, candidates, goals):
-        calls.append((np.asarray(candidates).shape, np.asarray(goals).shape))
-        return torch.zeros(len(candidates), dtype=torch.bool)
+    def no_start_hits(_readout, _predictor, starts, goals, owners):
+        calls.append((starts.shape, goals.shape, owners.tolist()))
+        return torch.full((len(goals),), -1.0, device=goals.device)
 
     with patch(
-        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hits",
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.indexed_contextual_similarity",
         side_effect=no_start_hits,
     ):
         selected = hindsight_examples(learner, [example] * 8)
     assert selected
     assert len(calls) == 1
-    assert calls[0][0] == calls[0][1]
-    assert calls[0][0][0] >= len(selected)
+    assert calls[0][0][0] == 8
+    assert calls[0][1][0] >= len(selected)
+    assert max(calls[0][2]) < calls[0][0][0]
 
 
 def test_contextual_her_records_same_dg_wrong_context_and_never_falls_back_to_id():
@@ -199,8 +200,8 @@ def test_contextual_her_records_same_dg_wrong_context_and_never_falls_back_to_id
     goal_state = rows[1].worker_state[: learner.actor_critic.core.core_output_size].copy()
     example = TransitionInput(tuple(rows[:2]), 0, virtual_goal=1, remaining=3, virtual_goal_state=goal_state)
     with patch(
-        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hit",
-        side_effect=[False, False],
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hits",
+        side_effect=[torch.tensor([False]), torch.tensor([False])],
     ):
         result = evaluate_pairs(learner, [example])[0]
     assert not isinstance(result, str)
@@ -222,7 +223,7 @@ def test_contextual_terminal_her_requires_real_successor_ca3():
         virtual_goal_state=np.ones(learner.actor_critic.core.core_output_size, dtype=np.float32),
     )
     with patch(
-        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hit",
-        return_value=False,
+        "sf_working_directories.IntrMotiv.dmlab.controller_stored_replay.contextual_goal_hits",
+        return_value=torch.tensor([False]),
     ):
         assert evaluate_pairs(learner, [example])[0] == "her_terminal_successor_ca3_missing"

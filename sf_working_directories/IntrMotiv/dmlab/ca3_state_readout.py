@@ -360,3 +360,40 @@ def contextual_similarity(
     right = F.normalize(action_probe_signature(readout, predictor, right_ca3), dim=-1)
     similarity = (left * right).sum(-1)
     return similarity.squeeze(0) if similarity.numel() == 1 else similarity
+
+
+@torch.no_grad()
+def indexed_contextual_similarity(
+    readout: CA3StateReadout,
+    predictor: CausalDGInnovationPredictor,
+    left_ca3: Tensor,
+    right_ca3: Tensor,
+    left_indices: Tensor,
+    chunk_size: int = 4096,
+) -> Tensor:
+    """Compare many right states with indexed, reusable left signatures.
+
+    Contextual HER commonly compares every future event in an option with the
+    same start state.  Expanding the raw start state before signature creation
+    repeats the predictor forward up to the option horizon.  This formulation
+    computes each distinct left signature once and chunks only the independent
+    right signatures; it is exactly equivalent to pairwise cosine similarity.
+    """
+    if left_ca3.ndim == 1:
+        left_ca3 = left_ca3.unsqueeze(0)
+    if right_ca3.ndim == 1:
+        right_ca3 = right_ca3.unsqueeze(0)
+    left_indices = left_indices.to(device=left_ca3.device, dtype=torch.long).reshape(-1)
+    if right_ca3.size(0) != left_indices.numel():
+        raise ValueError("right states and left indices must have equal length")
+    if not left_indices.numel():
+        return left_ca3.new_zeros((0,))
+    if int(left_indices.min()) < 0 or int(left_indices.max()) >= left_ca3.size(0):
+        raise ValueError("left signature index is out of range")
+    left = F.normalize(action_probe_signature(readout, predictor, left_ca3), dim=-1)
+    similarities = []
+    for start in range(0, right_ca3.size(0), int(chunk_size)):
+        stop = min(start + int(chunk_size), right_ca3.size(0))
+        right = F.normalize(action_probe_signature(readout, predictor, right_ca3[start:stop]), dim=-1)
+        similarities.append((left[left_indices[start:stop]] * right).sum(-1))
+    return torch.cat(similarities)

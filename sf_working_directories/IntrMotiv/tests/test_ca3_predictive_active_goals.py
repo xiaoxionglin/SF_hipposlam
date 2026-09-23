@@ -6,6 +6,8 @@ import torch
 from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import (
     CA3StateReadout,
     CausalDGInnovationPredictor,
+    contextual_similarity,
+    indexed_contextual_similarity,
     predictive_readout_loss,
 )
 from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import PolicyControllableGraph
@@ -237,6 +239,18 @@ def test_batched_confirmation_preserves_duplicate_node_counts_and_single_activat
     assert int(graph.confirmation_attempts) == 3
     assert int(graph.confirmation_successes) == 2
     assert graph.selectable_mask().tolist() == [True, True]
+
+
+def test_indexed_contextual_similarity_matches_expanded_pairwise_computation():
+    torch.manual_seed(17)
+    readout = CA3StateReadout(12, 4)
+    predictor = CausalDGInnovationPredictor(4, 3, 4, 5, hidden_size=8)
+    left = torch.randn(3, 12)
+    right = torch.randn(11, 12)
+    owners = torch.tensor([0, 2, 1, 0, 2, 2, 1, 0, 1, 2, 0])
+    expected = contextual_similarity(readout, predictor, left[owners], right)
+    actual = indexed_contextual_similarity(readout, predictor, left, right, owners, chunk_size=3)
+    torch.testing.assert_close(actual, expected)
 
 
 def test_batched_ema_refinement_matches_ordered_scalar_updates():

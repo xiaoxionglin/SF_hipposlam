@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .ca3_state_readout import contextual_similarity
+from .ca3_state_readout import contextual_similarity, indexed_contextual_similarity
 from .controller_q import continuing_double_q_target
 from .controller_snapshot import differentiable_replay, evaluate_replay
 from .controller_transition import ReplayRejected, TransitionInput
@@ -90,7 +90,7 @@ def hindsight_examples(learner, examples):
     result = []
     contextual_mode = getattr(core, "worker_goal_mode", "target_id") == "state_readout" and core.policy_graph.contextual
     contextual_records = []
-    contextual_candidates = []
+    contextual_starts = []
     contextual_goals = []
     for example in examples:
         row = example.rows[0]
@@ -104,6 +104,9 @@ def hindsight_examples(learner, examples):
         if contextual and not bool(core.policy_graph.calibration_ready):
             learner.replay.reject("her_contextual_missing_calibration")
             continue
+        if contextual:
+            contextual_starts.append(raw_ca3(core, row))
+            contextual_owner = len(result)
         goals = []
         for candidate in future[1:]:
             if candidate.generation != row.generation or candidate.worker_state is None:
@@ -114,8 +117,7 @@ def hindsight_examples(learner, examples):
                 if len(active):
                     learner.replay.reject("her_contextual_candidate")
                     goal_state = raw_ca3(core, candidate).copy()
-                    contextual_records.append((len(result), int(active[np.argmax(dg[active])]), goal_state))
-                    contextual_candidates.append(raw_ca3(core, row))
+                    contextual_records.append((contextual_owner, int(active[np.argmax(dg[active])]), goal_state))
                     contextual_goals.append(goal_state)
             elif len(active) == 1 and start[active[0]] <= 0:
                 goals.append(int(active[0]))
@@ -160,11 +162,17 @@ def hindsight_examples(learner, examples):
     if not contextual_mode:
         return result
 
-    hits = (
-        contextual_goal_hits(core, np.stack(contextual_candidates), np.stack(contextual_goals)).tolist()
-        if contextual_candidates
-        else []
-    )
+    if contextual_records:
+        graph = core.policy_graph
+        starts = torch.as_tensor(np.stack(contextual_starts), device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
+        goals = torch.as_tensor(np.stack(contextual_goals), device=graph.anchor_ca3.device, dtype=graph.anchor_ca3.dtype)
+        owners = torch.tensor([record[0] for record in contextual_records], device=graph.anchor_ca3.device)
+        similarities = indexed_contextual_similarity(core.state_readout, core.innovation_predictor, starts, goals, owners)
+        start_dg = starts.reshape(-1, core.Hippo_n_feature, core.expanded_length)[:, :, 0]
+        real_events = (start_dg > 0).any(dim=1)
+        hits = (real_events[owners] & (similarities >= graph.recognition_threshold)).tolist()
+    else:
+        hits = []
     goals_by_example = [[] for _ in result]
     for (owner, slot, goal_state), hit in zip(contextual_records, hits):
         if hit:
@@ -240,6 +248,25 @@ def evaluate_pairs(learner, examples):
     kept = []
     rewards = []
     dones = []
+    contextual_hits = {}
+    contextual_examples = [
+        (i, e)
+        for i, e in enumerate(examples)
+        if e.virtual_goal is not None
+        and getattr(core, "worker_goal_mode", "target_id") == "state_readout"
+        and core.policy_graph.contextual
+        and e.virtual_goal_state is not None
+    ]
+    if contextual_examples and bool(core.policy_graph.calibration_ready):
+        goals = np.stack([e.virtual_goal_state for _, e in contextual_examples])
+        starts = np.stack([raw_ca3(core, e.rows[0]) for _, e in contextual_examples])
+        successors = np.stack([raw_ca3(core, e.rows[1]) for _, e in contextual_examples])
+        start_hits = contextual_goal_hits(core, starts, goals).tolist()
+        successor_hits = contextual_goal_hits(core, successors, goals).tolist()
+        contextual_hits = {
+            i: (start_hit, successor_hit)
+            for (i, _), start_hit, successor_hit in zip(contextual_examples, start_hits, successor_hits)
+        }
     for i, e in enumerate(examples):
         row, successor = e.rows
         physical = row.terminated or row.truncated
@@ -255,7 +282,8 @@ def evaluate_pairs(learner, examples):
                 if not bool(core.policy_graph.calibration_ready):
                     results[i] = "her_contextual_missing_calibration"
                     continue
-                if contextual_goal_hit(core, raw_ca3(core, row), e.virtual_goal_state):
+                start_hit, successor_hit = contextual_hits.get(i, (False, False))
+                if start_hit:
                     results[i] = "her_start_already_achieved_contextual"
                     continue
             elif canonical(core, row)[e.virtual_goal] > 0:
@@ -278,7 +306,7 @@ def evaluate_pairs(learner, examples):
             active = np.flatnonzero(dg > 0)
             node = int(active[0]) if len(active) == 1 else -1
             if contextual:
-                hit = contextual_goal_hit(core, raw_ca3(core, successor), e.virtual_goal_state)
+                hit = successor_hit
                 same_slot = e.virtual_goal in active
                 if hit:
                     learner.replay.reject("her_contextual_positive_hit")
