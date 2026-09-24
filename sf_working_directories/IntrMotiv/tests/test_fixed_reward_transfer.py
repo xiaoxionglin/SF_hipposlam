@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
+from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import TargetFiLMDecoder
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DGProjection_batchnorm_relu
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
 from sf_working_directories.IntrMotiv.dmlab.goal_conditioned_dg import GoalConditionedDGCore
@@ -86,6 +87,27 @@ def test_uninformed_jitter_breaks_symmetry_and_matches_seed():
     cfg.seed = 1234
     other = SimpleSequenceWithBypassCore(cfg, 5).fixed_task_condition()
     assert not torch.allclose(first, other)
+
+
+def test_fresh_flat_goal_effects_are_distinct_and_reward_gradient_reaches_mixture():
+    cfg = _core_config()
+    cfg.seed = 42
+    cfg.fixed_task_goal_mixture = True
+    cfg.fixed_task_goal_init = "uniform_jitter"
+    core = SimpleSequenceWithBypassCore(cfg, 5)
+    decoder = TargetFiLMDecoder(core)
+    again = TargetFiLMDecoder(core)
+    assert torch.equal(decoder.target_modulation, again.target_modulation)
+    assert decoder.target_modulation.norm() > 0
+    assert not torch.equal(decoder.target_modulation[0], decoder.target_modulation[1])
+    output, _ = core(torch.ones(1, 5), torch.zeros(1, core.total_state_size))
+    decoder(output).square().sum().backward()
+    assert core.fixed_task_target.grad is not None
+    assert core.fixed_task_target.grad.abs().sum() > 0
+
+    cfg.fixed_task_goal_mixture = False
+    source_core = SimpleSequenceWithBypassCore(cfg, 5)
+    assert torch.count_nonzero(TargetFiLMDecoder(source_core).target_modulation) == 0
 
 
 def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
