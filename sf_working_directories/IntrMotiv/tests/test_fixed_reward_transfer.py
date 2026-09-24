@@ -112,8 +112,9 @@ def test_fresh_flat_goal_effects_are_distinct_and_reward_gradient_reaches_mixtur
 
 def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
     cfg = _core_config()
+    cfg.seed = 42
     cfg.fixed_task_goal_mixture = True
-    cfg.fixed_task_target_id = 1
+    cfg.fixed_task_goal_init = "uniform_jitter"
     cfg.hrl_graph_memory = "policy_buffer"
     cfg.hrl_target_timing = "immediate"
     cfg.ppo_dg_gradient = "joint"
@@ -122,8 +123,10 @@ def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
     pre = torch.full((1, 3), 2.0, requires_grad=True)
     head = torch.cat((torch.ones(1, 3), torch.zeros(1, 2), pre), -1)
     out, _ = core(head, torch.zeros(1, core.total_state_size))
-    core.worker_view(out).sum().backward()
+    TargetFiLMDecoder(core)(core.worker_view(out)).square().sum().backward()
     assert pre.grad is not None and pre.grad.abs().sum() > 0
+    assert core.fixed_task_target.grad is not None
+    assert core.fixed_task_target.grad.abs().sum() > 0
 
 
 class _Projection(nn.Module):
