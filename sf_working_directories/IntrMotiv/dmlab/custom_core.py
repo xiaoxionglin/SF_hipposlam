@@ -491,8 +491,18 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.fixed_task_conditioning = bool(getattr(cfg, "fixed_task_conditioning", False))
         if self.fixed_task_conditioning and self.hrl_enabled:
             raise ValueError("fixed task conditioning bypasses HRL and requires hrl_controllable_graph=False")
+        self.fixed_task_goal_mixture = bool(getattr(cfg, "fixed_task_goal_mixture", False))
+        if self.fixed_task_goal_mixture and not self.fixed_task_conditioning:
+            raise ValueError("fixed task goal mixture requires fixed task conditioning")
+        initial_target = torch.full((self.Hippo_n_feature,), 1.0 / float(self.Hippo_n_feature))
+        if self.fixed_task_goal_mixture:
+            target_id = int(getattr(cfg, "fixed_task_target_id", 0))
+            if not 0 <= target_id < self.Hippo_n_feature:
+                raise ValueError("fixed_task_target_id is outside the DG capacity")
+            initial_target = torch.zeros(self.Hippo_n_feature)
+            initial_target[target_id] = 9.0  # approximately 99.2% on the nominated ID at F64
         self.fixed_task_target = (
-            nn.Parameter(torch.full((self.Hippo_n_feature,), 1.0 / float(self.Hippo_n_feature)))
+            nn.Parameter(initial_target)
             if self.fixed_task_conditioning
             else None
         )
@@ -517,7 +527,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.hrl_direct_target_selection = getattr(cfg, "hrl_direct_target_selection", "frontier")
         if self.hrl_control_outcome not in ("target_hit", "first_distinct"):
             raise ValueError(f"Unknown hrl_control_outcome={self.hrl_control_outcome}")
-        if self.hrl_direct_target_selection not in ("frontier", "least_tested", "local_successor"):
+        if self.hrl_direct_target_selection not in ("frontier", "least_tested", "local_successor", "reward_value"):
             raise ValueError(f"Unknown hrl_direct_target_selection={self.hrl_direct_target_selection}")
         self.topological_enabled = self.hrl_manager_mode != "visit_direct"
         self.action_path_integration = bool(getattr(cfg, "hrl_action_path_integration", False))
@@ -758,6 +768,12 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 online_goal = torch.where(mask.reshape(-1, 1), goal_ca3.to(online_goal), online_goal)
             goal = online_goal if self.worker_goal_mode == "raw_ca3" else self.state_readout(online_goal).detach()
         return torch.cat((state, bypass.detach(), goal.detach(), suffix.detach()), dim=-1)
+
+    def fixed_task_condition(self) -> Tensor:
+        """Return an episode-constant, differentiable mixture of source goals."""
+        if self.fixed_task_target is None:
+            raise RuntimeError("No fixed task condition is configured")
+        return self.fixed_task_target.softmax(-1) if self.fixed_task_goal_mixture else self.fixed_task_target
 
     @property
     def worker_target_condition_start(self) -> int:
@@ -1069,7 +1085,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             if self.hrl_enabled:
                 out_total = torch.cat([out_total, hrl_seq], dim=2)
             elif self.fixed_task_conditioning:
-                fixed_target = self.fixed_task_target.view(1, 1, -1).expand(T, B, -1)
+                fixed_target = self.fixed_task_condition().view(1, 1, -1).expand(T, B, -1)
                 out_total = torch.cat([out_total, fixed_target], dim=2)
 
             # Repack the output using the original lengths.
@@ -1139,7 +1155,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 hidden_action_features = self.action_feature_size + self.context_action_count
                 out = base_out[:, :-hidden_action_features] if hidden_action_features else base_out
                 if self.fixed_task_conditioning:
-                    out = torch.cat([out, self.fixed_task_target.unsqueeze(0).expand(B, -1)], dim=1)
+                    out = torch.cat([out, self.fixed_task_condition().unsqueeze(0).expand(B, -1)], dim=1)
                 state_parts = [base_out]
                 if self.graph_recruitment:
                     state_parts.append(recruitment_history)

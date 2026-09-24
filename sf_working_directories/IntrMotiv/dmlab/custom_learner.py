@@ -1166,6 +1166,8 @@ class BaseDistanceRecorder(BaseLearner):
         prefixes = dg_prefixes
         if scope == "policy":
             prefixes += ("decoder.", "action_parameterization.")
+            if getattr(getattr(self.actor_critic, "core", None), "dg_goal_modulation", None) is not None:
+                prefixes += ("core.dg_goal_modulation",)
         selected = {k: v for k, v in source.items() if k.startswith(prefixes)}
         expected = {k for k in destination if k.startswith(prefixes)}
         if set(selected) != expected:
@@ -1184,13 +1186,19 @@ class BaseDistanceRecorder(BaseLearner):
         log.info("Initialized %d %s transfer tensors from %s", len(selected), scope, path)
 
     def _apply_transfer_freeze(self) -> None:
-        if not bool(getattr(self.cfg, "transfer_freeze_dg", False)):
-            return
-        projection = self.actor_critic.encoder.DG_projection
-        projection.freeze_running_stats = True
-        for parameter in projection.parameters():
-            parameter.requires_grad = False
-        log.info("Froze DG weights and normalization statistics for transfer")
+        if bool(getattr(self.cfg, "transfer_freeze_dg", False)):
+            projection = self.actor_critic.encoder.DG_projection
+            projection.freeze_running_stats = True
+            for parameter in projection.parameters():
+                parameter.requires_grad = False
+            log.info("Froze DG weights and normalization statistics for transfer")
+        if bool(getattr(self.cfg, "transfer_freeze_worker", False)):
+            for module in (self.actor_critic.decoder, self.actor_critic.action_parameterization):
+                module.requires_grad_(False)
+            modulation = getattr(getattr(self.actor_critic, "core", None), "dg_goal_modulation", None)
+            if modulation is not None:
+                modulation.requires_grad_(False)
+            log.info("Froze goal-conditioned worker and action head for transfer")
 
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
         """
@@ -4316,6 +4324,28 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 )
                 # here returns are not normalized yet, so we should use denormalized values
                 buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
+                if getattr(self.cfg, "hrl_direct_target_selection", "frontier") == "reward_value":
+                    states = buff["rnn_states"][:, :-1]
+                    option_states = self._hrl_state_from_rnn(states)
+                    topological_states = self._topological_state_from_rnn(states)
+                    if getattr(self, "_reward_manager_diagnostic_count", 0) < 3:
+                        from .hrl_controllable_graph import HRLStateLayout
+                        from .topological_frontier import TopologicalStateLayout
+
+                        option_layout = HRLStateLayout(self.cfg.Hippo_n_feature)
+                        topo_layout = TopologicalStateLayout(self.cfg.Hippo_n_feature)
+                        log.info(
+                            "Reward manager batch: age0=%d source=%d goal=%d reset=%d valid=%d",
+                            int((option_states[..., option_layout.age] == 0).sum()),
+                            int((option_states[..., option_layout.source] > 0).sum()),
+                            int((topological_states[..., topo_layout.final_goal] > 0).sum()),
+                            int((option_states[..., option_layout.option_reset] > 0).sum()),
+                            int(buff["valids"][:, :-1].sum()),
+                        )
+                        self._reward_manager_diagnostic_count = getattr(self, "_reward_manager_diagnostic_count", 0) + 1
+                    self._last_reward_manager_updates = self._policy_graph().update_reward_goal_values(
+                        option_states, topological_states, buff["returns"], buff["valids"][:, :-1]
+                    )
 
             # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
             for key in ["normalized_obs", "rnn_states", "values", "valids"]:

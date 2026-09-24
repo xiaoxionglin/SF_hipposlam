@@ -1,0 +1,131 @@
+"""Evaluate physical reward success from matched, held-out map resets.
+
+This uses the saved policy's own manager or flat controller. Position is read
+only for evaluation output; it is never passed as a task cue to the policy.
+"""
+
+import argparse
+import csv
+import json
+from pathlib import Path
+
+import deepmind_lab
+import numpy as np
+import torch
+
+from sample_factory.algo.sampling.batched_sampling import preprocess_actions
+from sample_factory.algo.utils.action_distributions import argmax_actions
+from sample_factory.algo.utils.env_info import extract_env_info
+from sample_factory.algo.utils.make_env import make_env_func_batched
+from sample_factory.algo.utils.rl_utils import make_dones, prepare_and_normalize_obs
+from sample_factory.model.model_utils import get_rnn_size
+from sample_factory.utils.attr_dict import AttrDict
+from sf_working_directories.IntrMotiv.evaluation.place_fields import load_policy_env
+
+
+def start_region(x, y):
+    """Coarse, prespecified map quadrant for stratified success reporting."""
+    return ("west" if x < 1000 else "east") + "_" + ("south" if y < 1000 else "north")
+
+
+def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_x, horizon):
+    env.unwrapped.seed(seed)
+    obs, _ = env.reset()
+    start = np.asarray(obs["pos"][0], dtype=float).copy()
+    assert not (reward_x <= start[0] < reward_x + 100 and 1900 <= start[1] < 2000)
+    engine_seed = int(env.unwrapped.last_reset_seed)
+    state = torch.zeros(1, get_rnn_size(cfg), dtype=torch.float32)
+    dg_hits = 0
+    total_reward = 0.0
+    terminal = False
+    end = start.copy()
+    with torch.no_grad():
+        for decision in range(1, horizon + 1):
+            normalized = prepare_and_normalize_obs(actor, obs)
+            output = actor(normalized, state)
+            activity = getattr(actor.core, "last_dg_activity", None)
+            if activity is not None:
+                dg_hits += int(bool(activity[0, target] > 0))
+            action = output["actions"]
+            if cfg.eval_deterministic:
+                action = argmax_actions(actor.action_distribution())
+            if action.ndim == 1:
+                action = action.unsqueeze(-1)
+            state = output["new_rnn_states"]
+            obs, reward, terminated, truncated, _ = env.step(preprocess_actions(env_info, action))
+            total_reward += float(torch.as_tensor(reward).reshape(-1)[0])
+            end = np.asarray(obs["pos"][0], dtype=float).copy()
+            terminal = bool(make_dones(terminated, truncated)[0])
+            if terminal:
+                break
+    return {
+        "requested_seed": seed, "engine_seed": engine_seed,
+        "start_x": float(start[0]), "start_y": float(start[1]),
+        "start_region": start_region(*start[:2]),
+        "terminal_x": float(end[0]), "terminal_y": float(end[1]),
+        "physical_success": total_reward > 0, "external_reward": total_reward,
+        "decisions_to_termination": decision, "time_to_reward_seconds": decision * 4 / 60 if total_reward > 0 else "",
+        "target_dg_active_decisions": dg_hits, "terminal": terminal,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--runfiles", type=Path, required=True)
+    parser.add_argument("--site", choices=("dg50", "dg51"), required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--trials", type=int, default=20)
+    parser.add_argument("--horizon", type=int, default=1800)
+    parser.add_argument("--seed-base", type=int, default=61000)
+    parser.add_argument("--deterministic", action="store_true")
+    args = parser.parse_args()
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    deepmind_lab.set_runfiles_path(str(args.runfiles.resolve(strict=True)))
+    cfg, bootstrap_env, _, actor, checkpoint, _ = load_policy_env(
+        args.run_dir, args.horizon, args.deterministic, 0, args.checkpoint
+    )
+    bootstrap_env.close()
+    cfg.env = "openfield_map2_fixed_reward_" + args.site
+    cfg.dmlab_runfiles_path = str(args.runfiles.resolve(strict=True))
+    cfg.dmlab_use_level_cache = False
+    cfg.with_pos_obs = True
+    env = make_env_func_batched(
+        cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=None
+    )
+    env_info = extract_env_info(env, cfg)
+    if hasattr(env.unwrapped, "reset_on_init"):
+        env.unwrapped.reset_on_init = False
+    target = 50 if args.site == "dg50" else 51
+    reward_x = 300 if args.site == "dg50" else 200
+    rows = []
+    try:
+        for index in range(args.trials):
+            row = evaluate_episode(
+                actor, cfg, env, env_info, args.seed_base + index,
+                target, reward_x, args.horizon,
+            )
+            row.update(site=args.site, checkpoint=str(checkpoint))
+            rows.append(row)
+            print(args.site, index + 1, row["physical_success"], flush=True)
+    finally:
+        env.close()
+    with args.out.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    summary = {
+        "site": args.site, "checkpoint": str(checkpoint), "trials": len(rows),
+        "successes": sum(row["physical_success"] for row in rows),
+        "by_start_region": {
+            region: {"trials": sum(row["start_region"] == region for row in rows),
+                     "successes": sum(row["start_region"] == region and row["physical_success"] for row in rows)}
+            for region in sorted({row["start_region"] for row in rows})
+        },
+    }
+    args.out.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -449,6 +449,10 @@ class PolicyControllableGraph(nn.Module):
         self.register_buffer("tctrl", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("edge_confidence", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("control_attempts", torch.zeros(self.n_nodes, self.n_nodes))
+        # A downstream reward-trained manager can use these without changing
+        # the source graph or actor observation interface.
+        self.register_buffer("reward_goal_value", torch.zeros(self.n_nodes, self.n_nodes))
+        self.register_buffer("reward_goal_count", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("passive_confidence", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("passive_time", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("passive_path_length", torch.zeros(self.n_nodes, self.n_nodes))
@@ -526,6 +530,8 @@ class PolicyControllableGraph(nn.Module):
     ):
         for name in (
             "control_attempts",
+            "reward_goal_value",
+            "reward_goal_count",
             "passive_confidence",
             "passive_time",
             "passive_path_length",
@@ -592,6 +598,36 @@ class PolicyControllableGraph(nn.Module):
         if not self.contextual:
             return torch.ones(self.n_nodes, dtype=torch.bool, device=self.node_visits.device)
         return self.active_goal_mask & self.anchor_valid & (self.active_generation == self.anchor_generation)
+
+    @torch.no_grad()
+    def update_reward_goal_values(
+        self, option_states: Tensor, topological_states: Tensor, returns: Tensor, valid: Tensor
+    ) -> int:
+        """Update source-to-final-goal values once per selected option.
+
+        External reward-to-go is sampled at option age zero. The final goal is
+        used instead of an intermediate route hop, so next-hop planning does
+        not misattribute reward to a temporary waypoint.
+        """
+        from .topological_frontier import TopologicalStateLayout
+
+        layout = HRLStateLayout(self.n_nodes)
+        topo = TopologicalStateLayout(self.n_nodes)
+        source = option_states[..., layout.source].round().long() - 1
+        target = topological_states[..., topo.final_goal].round().long() - 1
+        first = option_states[..., layout.age].eq(0)
+        mask = valid.bool() & first & (source >= 0) & (source < self.n_nodes)
+        mask &= (target >= 0) & (target < self.n_nodes) & (source != target)
+        if not mask.any():
+            return 0
+        source, target = source[mask], target[mask]
+        value = returns[mask].float().clamp(0.0, 10.0)
+        for s, t, sample in zip(source.tolist(), target.tolist(), value.tolist()):
+            count = self.reward_goal_count[s, t]
+            rate = min(0.05, 1.0 / float(count.item() + 1.0)) if count > 0 else 1.0
+            self.reward_goal_value[s, t].lerp_(self.reward_goal_value.new_tensor(sample), rate)
+            count.add_(1.0)
+        return int(mask.sum().item())
 
     @torch.no_grad()
     def register_anchor(self, node: int, ca3: Tensor, decision: int) -> None:

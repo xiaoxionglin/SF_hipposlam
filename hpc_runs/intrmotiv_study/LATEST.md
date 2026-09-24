@@ -1,11 +1,52 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.10.1` (corridor geometry release; see deployment record below)
+- Implementation: `1.12.0` (landmark geometry and cue-aware spatial telemetry)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 runtime copy: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/hpc_runs/intrmotiv_study/`
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.12.0 landmark geometry and cue-aware telemetry
+
+Map geometry v2 adds an optional, privileged cue-site contract while retaining
+the v1 reader for corridor artifacts. Online and offline NPZ files remain schema
+v1 with optional cue arrays. Spatial collection now reports cue visitation,
+traversable-geodesic peak distance, one-to-one cue/peak assignments, raw and
+capacity-normalized cue coverage, and decal/color subsets. Standard field rows
+remain separate from matched-command intervention rows.
+
+The reference implementation is the easy-landmark screen: a fixed native
+11-by-11 entity map produced by DMLab's original random-maze algorithm at 85%
+wall removal. Its 9-by-9 interior has 74 accessible cells, with 10 decals and
+10 colored wall faces plus a same-sites neutral control. Its three StudySpecs,
+exact fingerprints, local native evidence, and
+remaining NEMO2 gates are recorded in
+`06_experiments/easy_landmark_maze_implementation_20260923.md`. Version 1.12.0
+is synchronized to an isolated NEMO2 worktree. The 53-test canonical suite,
+six-test native DMLab suite, and workspace-resident submission audit pass. A
+dedicated 4.6 TB workspace at `/work/classic/fr_xl1014-easy-landmark-maze`
+contains all future landmark artifacts. Six 2M qualification jobs are active
+under StudySpec `546c8aa71462861681537efb5d9a597ebf6ecd3ecc2e8c8700ab038bc5199bc0`
+and must pass before production release.
+
+## 1.11.0 flat tracking identity
+
+New Sample Factory studies declaring workflow 1.11 or later emit `study_id`,
+`study_condition`, and `study_base` by default as
+ordinary saved/W&B configuration fields. `study_condition` is the canonical
+flat, seed-independent dashboard grouping key. Existing studies remain
+byte-for-byte command compatible because earlier declared workflow versions
+default the option off.
+
+The workflow also emits one `wandb_tags` entry equal to `study_condition`.
+Sample Factory duplicates this into `config.wandb_tags`, giving each condition
+one flat list value shared by all seeds. Keep it to that single generated value;
+additional tags would make the complete config list a different group.
+
+The IntrMotiv runtime registers these fields as metadata-only arguments; they
+do not participate in model or environment behavior. A changed StudySpec must
+still be revalidated and reviewed before submission.
 
 
 ## 1.10.1 scalar-history export

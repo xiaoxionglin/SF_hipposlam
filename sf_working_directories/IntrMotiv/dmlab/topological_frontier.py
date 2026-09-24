@@ -745,7 +745,7 @@ def advance_topological_manager(
     """Advance topological state while preserving the sampled behavior condition."""
     if control_outcome not in ("target_hit", "first_distinct"):
         raise ValueError(f"Unknown control_outcome={control_outcome}")
-    if direct_target_selection not in ("frontier", "least_tested", "local_successor"):
+    if direct_target_selection not in ("frontier", "least_tested", "local_successor", "reward_value"):
         raise ValueError(f"Unknown direct_target_selection={direct_target_selection}")
     n_nodes = dg_activity.size(-1)
     option_layout = HRLStateLayout(n_nodes)
@@ -893,6 +893,28 @@ def advance_topological_manager(
         if source < 0:
             option[row, option_layout.target] = 0.0
             topo[row, topo_layout.mode] = float(MODE_NONE)
+            return
+        if direct_target_selection == "reward_value":
+            eligible = graph.selectable_mask().clone()
+            eligible[source] = False
+            if not eligible.any():
+                start_exploration(row, source, 0.0)
+                return
+            # Optimism gives never-tested goals a chance without a novelty
+            # reward. The learned quantity is external return from this source.
+            value = graph.reward_goal_value[source]
+            count = graph.reward_goal_count[source]
+            score = value + 2.0 * torch.rsqrt(count + 1.0)
+            score = score.masked_fill(~eligible, -torch.inf)
+            probabilities = torch.softmax(score / 2.0, dim=0)
+            destination = int(torch.multinomial(probabilities, 1).item())
+            hop = int(next_hop[source, destination].item()) if waypoint_planning else -1
+            if hop >= 0 and hop != source:
+                topo[row, topo_layout.route_available] = 1.0
+                topo[row, topo_layout.plan_hops] = hop_count[source, destination]
+                start_target(row, source, hop, MODE_NAVIGATE, destination, float(dist[source, hop].item()))
+            else:
+                start_target(row, source, destination, MODE_NAVIGATE, destination, math.inf)
             return
         if direct_target_selection in ("least_tested", "local_successor"):
             if direct_target_selection == "local_successor":

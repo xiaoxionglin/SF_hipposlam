@@ -10,8 +10,8 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 from .spatial_contract import (
-    SNAPSHOT_SCHEMA,
     SPATIAL_DETAIL_ARRAYS,
+    SNAPSHOT_SCHEMA,
     SpatialBounds,
     SpatialContractError,
     calculate_graph_diagnostics,
@@ -21,6 +21,7 @@ from .spatial_contract import (
     spatial_rate_maps,
 )
 from .spec import SpecError, StudySpec
+
 
 SPATIAL_METRICS = (
     "valid_sample_count",
@@ -40,6 +41,16 @@ SPATIAL_METRICS = (
     "median_dominant_peak_nearest_neighbor_distance",
     "graph_reliable_global_efficiency",
     "graph_grounded_controllability",
+    "cue_site_visit_fraction",
+    "cue_active_unit_count",
+    "cue_peak_nearest_distance_mean",
+    "cue_peak_match_count",
+    "cue_peak_coverage_fraction",
+    "cue_peak_capacity_normalized_coverage",
+    "cue_decal_site_visit_fraction",
+    "cue_decal_peak_match_count",
+    "cue_color_site_visit_fraction",
+    "cue_color_peak_match_count",
 )
 DEFAULT_TARGETS = (5_000_000, 25_000_000, 50_000_000, 75_000_000, 100_000_000)
 GRAPH_SCALAR_KEYS = (
@@ -215,33 +226,41 @@ def collect_spatial_records(
             int(_scalar(payload, "grain")),
             float(np.asarray(payload.get("stationary_distance", 1.0)).item()),
         )
-        records.append(
-            {
-                "run_name": run_name,
-                "condition": run.condition,
-                "base": run.base,
-                "seed": run.seed,
-                **run.factors,
-                **run.metadata,
-                "policy_id": policy_id,
-                "target_env_steps": target,
-                "actual_env_steps": int(_scalar(payload, "actual_env_steps")),
-                "window_limit": int(_scalar(payload, "window_limit")),
-                "scalar_window_limit": int(
-                    np.asarray(payload.get("scalar_window_limit", payload["window_limit"])).item()
-                ),
-                "environment": str(_scalar(payload, "environment")),
-                "frameskip": int(_scalar(payload, "frameskip")),
-                "snapshot_path": str(path.resolve()),
-                **metrics,
-                "graph_available": int("control_tctrl" in payload),
-                **{
-                    key: float(np.asarray(graph_diagnostics[key]).item())
-                    for key in GRAPH_SCALAR_KEYS
-                    if key in graph_diagnostics
-                },
-            }
-        )
+        cue_metrics = {}
+        if "geometry_cue_ids" in payload:
+            from .geometry import cue_spatial_metrics, geometry_record_from_payload
+            rate_maps, occupancy, _ = spatial_rate_maps(
+                payload["pose"], payload["dg_activity"], bounds, int(_scalar(payload, "grain"))
+            )
+            cue_metrics, _ = cue_spatial_metrics(
+                rate_maps, occupancy, geometry_record_from_payload(payload)
+            )
+        records.append({
+            "run_name": run_name,
+            "condition": run.condition,
+            "base": run.base,
+            "seed": run.seed,
+            **run.factors,
+            **run.metadata,
+            "policy_id": policy_id,
+            "target_env_steps": target,
+            "actual_env_steps": int(_scalar(payload, "actual_env_steps")),
+            "window_limit": int(_scalar(payload, "window_limit")),
+            "scalar_window_limit": int(
+                np.asarray(payload.get("scalar_window_limit", payload["window_limit"])).item()
+            ),
+            "environment": str(_scalar(payload, "environment")),
+            "frameskip": int(_scalar(payload, "frameskip")),
+            "snapshot_path": str(path.resolve()),
+            **metrics,
+            **cue_metrics,
+            "graph_available": int("control_tctrl" in payload),
+            **{
+                key: float(np.asarray(graph_diagnostics[key]).item())
+                for key in GRAPH_SCALAR_KEYS
+                if key in graph_diagnostics
+            },
+        })
     records.sort(key=lambda row: (row["run_name"], row["policy_id"], row["target_env_steps"]))
 
     targets = expected_spatial_targets(study)
@@ -253,15 +272,12 @@ def collect_spatial_records(
         for target in targets
         if (run.name, policy, target) not in observed
     ]
-    inventory = [
-        {
-            "run_name": row["run_name"],
-            "policy_id": row["policy_id"],
-            "target_env_steps": row["target_env_steps"],
-            "snapshot_path": row["snapshot_path"],
-        }
-        for row in records
-    ]
+    inventory = [{
+        "run_name": row["run_name"],
+        "policy_id": row["policy_id"],
+        "target_env_steps": row["target_env_steps"],
+        "snapshot_path": row["snapshot_path"],
+    } for row in records]
     status = {
         **study.provenance(),
         "snapshot_schema": SNAPSHOT_SCHEMA,
@@ -287,7 +303,9 @@ def collect_spatial_detail_records(
     unit_rows: list[dict[str, Any]] = []
     field_rows: list[dict[str, Any]] = []
     edge_rows: list[dict[str, Any]] = []
-    for path, payload in discover_spatial_snapshots(study, snapshot_root, require_workspace=require_workspace):
+    for path, payload in discover_spatial_snapshots(
+        study, snapshot_root, require_workspace=require_workspace
+    ):
         bounds = SpatialBounds(*np.asarray(payload["bounds"], dtype=float).tolist())
         details = _validated_spatial_details(payload, bounds)
         graph = _validated_graph_diagnostics(payload, details)
@@ -300,37 +318,30 @@ def collect_spatial_detail_records(
         }
         units = details["active_fraction"].size
         for unit in range(units):
-            unit_rows.append(
-                {
-                    **identity,
-                    "unit_id": unit,
-                    **(
-                        {
-                            "geometry_sha256": str(_scalar(payload, "geometry_sha256")),
-                            "geometry_field_components_half_peak": int(
-                                payload["geometry_field_components_half_peak"][unit]
-                            ),
-                        }
-                        if "geometry_field_components_half_peak" in payload
-                        else {}
-                    ),
-                    "active_fraction": float(details["active_fraction"][unit]),
-                    "spatial_information": float(details["spatial_information"][unit]),
-                    "active_observation_count": int(details["field_active_observation_count"][unit]),
-                    "active_bin_count": int(details["field_active_bin_count"][unit]),
-                    "field_eligible": int(details["field_eligible"][unit]),
-                    "mono_field_score": float(details["field_mono_score"][unit]),
-                    "mono_field": int(details["field_mono"][unit]),
-                    "dominant_peak_x": float(details["field_dominant_peak_xy"][unit, 0]),
-                    "dominant_peak_y": float(details["field_dominant_peak_xy"][unit, 1]),
-                    "secondary_peak_x": float(details["field_secondary_peak_xy"][unit, 0]),
-                    "secondary_peak_y": float(details["field_secondary_peak_xy"][unit, 1]),
-                    "primary_secondary_peak_distance": float(details["field_primary_secondary_peak_distance"][unit]),
-                    "dominant_peak_nearest_neighbor_distance": float(
-                        details["field_dominant_peak_nearest_neighbor_distance"][unit]
-                    ),
-                }
-            )
+            unit_rows.append({
+                **identity,
+                "unit_id": unit,
+                **({"geometry_sha256": str(_scalar(payload, "geometry_sha256")),
+                    "geometry_field_components_half_peak": int(payload["geometry_field_components_half_peak"][unit])}
+                   if "geometry_field_components_half_peak" in payload else {}),
+                "active_fraction": float(details["active_fraction"][unit]),
+                "spatial_information": float(details["spatial_information"][unit]),
+                "active_observation_count": int(details["field_active_observation_count"][unit]),
+                "active_bin_count": int(details["field_active_bin_count"][unit]),
+                "field_eligible": int(details["field_eligible"][unit]),
+                "mono_field_score": float(details["field_mono_score"][unit]),
+                "mono_field": int(details["field_mono"][unit]),
+                "dominant_peak_x": float(details["field_dominant_peak_xy"][unit, 0]),
+                "dominant_peak_y": float(details["field_dominant_peak_xy"][unit, 1]),
+                "secondary_peak_x": float(details["field_secondary_peak_xy"][unit, 0]),
+                "secondary_peak_y": float(details["field_secondary_peak_xy"][unit, 1]),
+                "primary_secondary_peak_distance": float(
+                    details["field_primary_secondary_peak_distance"][unit]
+                ),
+                "dominant_peak_nearest_neighbor_distance": float(
+                    details["field_dominant_peak_nearest_neighbor_distance"][unit]
+                ),
+            })
         smoothed = details["smoothed_rate_maps"]
         labels = details["field_component_labels"]
         for threshold_index, fraction in enumerate(details["field_threshold_fractions"]):
@@ -349,20 +360,18 @@ def collect_spatial_detail_records(
                         int(np.argmax(np.where(component_mask, smoothed[:, :, unit], -np.inf))),
                         component_mask.shape,
                     )
-                    field_rows.append(
-                        {
-                            **identity,
-                            "unit_id": unit,
-                            "threshold_fraction": float(fraction),
-                            "component_id": component,
-                            "mass_rank": rank[component],
-                            "bin_count": int(component_mask.sum()),
-                            "superlevel_mass": mass,
-                            "superlevel_mass_fraction": mass / total_mass if total_mass else 0.0,
-                            "peak_x_bin": int(column),
-                            "peak_y_bin": int(row),
-                        }
-                    )
+                    field_rows.append({
+                        **identity,
+                        "unit_id": unit,
+                        "threshold_fraction": float(fraction),
+                        "component_id": component,
+                        "mass_rank": rank[component],
+                        "bin_count": int(component_mask.sum()),
+                        "superlevel_mass": mass,
+                        "superlevel_mass_fraction": mass / total_mass if total_mass else 0.0,
+                        "peak_x_bin": int(column),
+                        "peak_y_bin": int(row),
+                    })
         if "control_tctrl" in payload:
             reliable = graph["graph_reliable_adjacency"]
             distances = graph["graph_reliable_edge_peak_distance"]
@@ -400,6 +409,41 @@ def collect_spatial_detail_records(
     return unit_rows, field_rows, edge_rows
 
 
+def collect_cue_assignment_records(
+    study: StudySpec,
+    snapshot_root: Path,
+    *,
+    require_workspace: bool = True,
+) -> list[dict[str, Any]]:
+    """Export capacity-aware cue-to-unit assignments from cached snapshots."""
+    from .geometry import cue_spatial_metrics, geometry_record_from_payload
+
+    rows: list[dict[str, Any]] = []
+    for path, payload in discover_spatial_snapshots(
+        study, snapshot_root, require_workspace=require_workspace
+    ):
+        if "geometry_cue_ids" not in payload:
+            continue
+        bounds = SpatialBounds(*np.asarray(payload["bounds"], dtype=float).tolist())
+        rate_maps, occupancy, _ = spatial_rate_maps(
+            payload["pose"], payload["dg_activity"], bounds, int(_scalar(payload, "grain"))
+        )
+        _, assignments = cue_spatial_metrics(
+            rate_maps, occupancy, geometry_record_from_payload(payload)
+        )
+        identity = {
+            "run_name": str(_scalar(payload, "run_name")),
+            "policy_id": int(_scalar(payload, "policy_id")),
+            "target_env_steps": int(_scalar(payload, "target_env_steps")),
+            "actual_env_steps": int(_scalar(payload, "actual_env_steps")),
+            "snapshot_path": str(path.resolve()),
+            "cue_mode": str(_scalar(payload, "geometry_cue_mode")),
+            "cue_layout_sha256": str(_scalar(payload, "geometry_cue_layout_sha256")),
+        }
+        rows.extend({**identity, **assignment} for assignment in assignments)
+    return rows
+
+
 def summarize_spatial_records(
     records: Sequence[Mapping[str, Any]], group_by: Sequence[str]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -413,7 +457,11 @@ def summarize_spatial_records(
             members = groups[key]
             row = dict(zip(fields, key))
             for metric in SPATIAL_METRICS:
-                values = [float(member[metric]) for member in members if math.isfinite(float(member[metric]))]
+                values = [
+                    float(member[metric])
+                    for member in members
+                    if metric in member and math.isfinite(float(member[metric]))
+                ]
                 row[f"{metric}__mean"] = fmean(values) if values else math.nan
                 row[f"{metric}__sd"] = stdev(values) if len(values) > 1 else math.nan
                 row[f"{metric}__n"] = len(values)
@@ -428,28 +476,26 @@ def _figure_runtime():
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     from matplotlib import font_manager
+    import matplotlib.pyplot as plt
 
-    font_path = Path(
-        font_manager.findfont(font_manager.FontProperties(family="DejaVu Sans"), fallback_to_default=False)
-    )
+    font_path = Path(font_manager.findfont(
+        font_manager.FontProperties(family="DejaVu Sans"), fallback_to_default=False
+    ))
     if font_path.suffix.lower() not in {".ttf", ".otf"} or not font_path.is_file():
         raise RuntimeError("a verified scalable DejaVu Sans TTF/OTF font is required")
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 18,
-            "axes.titlesize": 20,
-            "axes.labelsize": 18,
-            "xtick.labelsize": 20,
-            "ytick.labelsize": 20,
-            "legend.fontsize": 16,
-            "figure.titlesize": 22,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-        }
-    )
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        "font.size": 18,
+        "axes.titlesize": 20,
+        "axes.labelsize": 18,
+        "xtick.labelsize": 20,
+        "ytick.labelsize": 20,
+        "legend.fontsize": 16,
+        "figure.titlesize": 22,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
     return plt
 
 
@@ -470,23 +516,36 @@ def overlay_geometry_walls(ax, payload, bounds):
     if "geometry_accessible_mask" not in payload:
         return
     from matplotlib.colors import ListedColormap
-
     mask = np.asarray(payload["geometry_accessible_mask"], dtype=bool)
-    ax.imshow(
-        np.ma.array(np.ones(mask.shape), mask=mask),
-        origin="lower",
-        extent=(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max),
-        cmap=ListedColormap(["#202020"]),
-        interpolation="nearest",
-        zorder=2,
-    )
+    ax.imshow(np.ma.array(np.ones(mask.shape), mask=mask), origin="lower",
+              extent=(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max),
+              cmap=ListedColormap(["#202020"]), interpolation="nearest", zorder=2)
+
+
+def overlay_geometry_cues(ax, payload, bounds):
+    """Overlay fixed cue-adjacent cells without obscuring activity maps."""
+    if "geometry_cue_floor_yx" not in payload:
+        return
+    locations = np.asarray(payload["geometry_cue_floor_yx"], dtype=float)
+    types = np.asarray(payload["geometry_cue_types"]).astype(str)
+    ids = np.asarray(payload["geometry_cue_ids"]).astype(str)
+    mask = np.asarray(payload["geometry_accessible_mask"], dtype=bool)
+    cell_width = (bounds.x_max - bounds.x_min) / mask.shape[1]
+    cell_height = (bounds.y_max - bounds.y_min) / mask.shape[0]
+    x = bounds.x_min + (locations[:, 1] + 0.5) * cell_width
+    y = bounds.y_min + (locations[:, 0] + 0.5) * cell_height
+    for cue_type, marker, color in (("decal", "s", "#FFFFFF"), ("color", "D", "#FFD700")):
+        selected = types == cue_type
+        ax.scatter(x[selected], y[selected], marker=marker, s=32, facecolors="none",
+                   edgecolors=color, linewidths=1.2, zorder=4)
+        for cue_x, cue_y, cue_id in zip(x[selected], y[selected], ids[selected]):
+            ax.annotate(cue_id, (cue_x, cue_y), xytext=(2, 2), textcoords="offset points",
+                        fontsize=8, color=color, zorder=5)
+
 
 
 def render_place_field_contact_sheets(
-    payload: Mapping[str, Any],
-    output_stem: Path,
-    *,
-    title: str | None = None,
+    payload: Mapping[str, Any], output_stem: Path, *, title: str | None = None,
 ) -> list[Path]:
     """All units, 16 per page, with explicit per-unit peak normalization.
 
@@ -517,12 +576,12 @@ def render_place_field_contact_sheets(
                 origin="lower",
                 extent=(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max),
                 cmap=cmap,
-                vmin=0,
-                vmax=1,
+                vmin=0, vmax=1,
                 interpolation="nearest",
                 aspect="equal",
             )
             overlay_geometry_walls(ax, payload, bounds)
+            overlay_geometry_cues(ax, payload, bounds)
             ax.set_title(f"DG unit {int(unit)}" + (" · silent" if not active[unit] else ""))
             ax.set_xticks((bounds.x_min, bounds.x_max))
             ax.set_yticks((bounds.y_min, bounds.y_max))
@@ -550,10 +609,7 @@ def trajectory_segment_slices(payload: Mapping[str, Any]) -> list[slice]:
 
 
 def render_occupancy_trajectory(
-    payload: Mapping[str, Any],
-    output_stem: Path,
-    *,
-    title: str | None = None,
+    payload: Mapping[str, Any], output_stem: Path, *, title: str | None = None,
 ) -> list[Path]:
     """Canonical colored-segment overview, matching the Navigation8 atlas.
 
@@ -561,12 +617,13 @@ def render_occupancy_trajectory(
     Batched artists preserve paths/markers without thousands of plotting calls.
     """
     from matplotlib.collections import LineCollection
-
     plt = _figure_runtime()
     pose = np.asarray(payload["pose"], dtype=np.float32)
     bounds_values = np.asarray(payload["bounds"], dtype=float)
     bounds = SpatialBounds(*bounds_values.tolist())
-    _, occupancy, _ = spatial_rate_maps(pose, payload["dg_activity"], bounds, int(_scalar(payload, "grain")))
+    _, occupancy, _ = spatial_rate_maps(
+        pose, payload["dg_activity"], bounds, int(_scalar(payload, "grain"))
+    )
     fig, (occupancy_ax, trajectory_ax) = plt.subplots(1, 2, figsize=(14, 7), constrained_layout=True)
     cmap = plt.get_cmap("cividis").copy()
     cmap.set_bad("#eeeeee")
@@ -581,11 +638,9 @@ def render_occupancy_trajectory(
     fig.colorbar(image, ax=occupancy_ax, shrink=0.78, label="Observations per visited bin")
     overlay_geometry_walls(occupancy_ax, payload, bounds)
     overlay_geometry_walls(trajectory_ax, payload, bounds)
-    occupancy_ax.set_title(
-        "Occupancy (gray: unvisited; black: walls)"
-        if "geometry_accessible_mask" in payload
-        else "Occupancy (unvisited masked)"
-    )
+    overlay_geometry_cues(occupancy_ax, payload, bounds)
+    overlay_geometry_cues(trajectory_ax, payload, bounds)
+    occupancy_ax.set_title("Occupancy (gray: unvisited; black: walls)" if "geometry_accessible_mask" in payload else "Occupancy (unvisited masked)")
     occupancy_ax.set_xlabel("x (DMLab units)")
     occupancy_ax.set_ylabel("y (DMLab units)")
 
@@ -594,29 +649,16 @@ def render_occupancy_trajectory(
     ends = np.array([part.stop for part in slices], dtype=int)
     colors = plt.get_cmap("turbo")(np.linspace(0.05, 0.95, max(1, len(starts))))
     if slices:
-        trajectory_ax.add_collection(
-            LineCollection(
-                [pose[part, :2] for part in slices],
-                colors=colors,
-                linewidths=1.4,
-                alpha=0.8,
-            )
-        )
+        trajectory_ax.add_collection(LineCollection(
+            [pose[part, :2] for part in slices], colors=colors, linewidths=1.4, alpha=0.8,
+        ))
         trajectory_ax.scatter(pose[starts, 0], pose[starts, 1], c=colors, marker="o", s=24)
         trajectory_ax.scatter(pose[ends - 1, 0], pose[ends - 1, 1], c=colors, marker="x", s=30)
     stride = max(1, pose.shape[0] // 100)
     yaw = np.deg2rad(pose[::stride, 2])
     trajectory_ax.quiver(
-        pose[::stride, 0],
-        pose[::stride, 1],
-        np.cos(yaw),
-        np.sin(yaw),
-        color="#202020",
-        angles="xy",
-        scale_units="xy",
-        scale=0.012,
-        width=0.0025,
-        alpha=0.65,
+        pose[::stride, 0], pose[::stride, 1], np.cos(yaw), np.sin(yaw),
+        color="#202020", angles="xy", scale_units="xy", scale=0.012, width=0.0025, alpha=0.65,
     )
     trajectory_ax.set_xlim(bounds.x_min, bounds.x_max)
     trajectory_ax.set_ylim(bounds.y_min, bounds.y_max)
@@ -625,21 +667,15 @@ def render_occupancy_trajectory(
     trajectory_ax.set_xlabel("x (DMLab units)")
     trajectory_ax.set_ylabel("y (DMLab units)")
     fig.suptitle(
-        (
-            title
-            or f"{_scalar(payload, 'run_name')} · target {int(_scalar(payload, 'target_env_steps')):,} · "
-            f"actual {int(_scalar(payload, 'actual_env_steps')):,}"
-        )
+        (title or f"{_scalar(payload, 'run_name')} · target {int(_scalar(payload, 'target_env_steps')):,} · "
+         f"actual {int(_scalar(payload, 'actual_env_steps')):,}")
         + "\nColor: segment identity · circle: start · cross: end · arrow: heading"
     )
     return _save_figure(fig, output_stem, plt)
 
 
 def render_trajectory_segments(
-    payload: Mapping[str, Any],
-    output_stem: Path,
-    *,
-    title: str | None = None,
+    payload: Mapping[str, Any], output_stem: Path, *, title: str | None = None,
 ) -> list[Path]:
     """Four evenly spaced non-singleton fragments, using full arena bounds."""
     plt = _figure_runtime()
@@ -650,30 +686,22 @@ def render_trajectory_segments(
     fig, axes = plt.subplots(2, 2, figsize=(12, 12), constrained_layout=True)
     for ax, index in zip(axes.flat, indices):
         overlay_geometry_walls(ax, payload, bounds)
+        overlay_geometry_cues(ax, payload, bounds)
         line = pose[slices[index], :2]
         ax.plot(line[:, 0], line[:, 1], color="#0072B2")
         ax.scatter(*line[0], color="#009E73", marker="o")
         ax.scatter(*line[-1], color="#D55E00", marker="x")
-        ax.set(
-            xlim=(bounds.x_min, bounds.x_max),
-            ylim=(bounds.y_min, bounds.y_max),
-            aspect="equal",
-            title=f"Segment {index} · {len(line)} samples",
-            xlabel="x (DMLab units)",
-            ylabel="y (DMLab units)",
-        )
-    for ax in axes.flat[len(indices) :]:
+        ax.set(xlim=(bounds.x_min, bounds.x_max), ylim=(bounds.y_min, bounds.y_max),
+               aspect="equal", title=f"Segment {index} · {len(line)} samples",
+               xlabel="x (DMLab units)", ylabel="y (DMLab units)")
+    for ax in axes.flat[len(indices):]:
         ax.set_visible(False)
     fig.suptitle((title or str(_scalar(payload, "run_name"))) + "\nGreen circle: start · orange cross: end")
     return _save_figure(fig, output_stem, plt)
 
 
 def render_graph_outcomes(
-    attempts: np.ndarray,
-    successes: np.ndarray,
-    output_stem: Path,
-    *,
-    title: str,
+    attempts: np.ndarray, successes: np.ndarray, output_stem: Path, *, title: str,
 ) -> list[Path]:
     """All attempted directed edges, not just reliable edges; fixed 0–1 scale."""
     plt = _figure_runtime()
@@ -690,7 +718,7 @@ def render_graph_outcomes(
     fig, ax = plt.subplots(figsize=(10, 10), constrained_layout=True)
     image = ax.imshow(np.ma.masked_invalid(ratio), vmin=0, vmax=1, cmap=cmap, interpolation="nearest")
     ax.set(xlabel="Target DG unit", ylabel="Source DG unit", title=title)
-    fig.colorbar(image, ax=ax, shrink=0.7, label="Prospective hits / attempts")
+    fig.colorbar(image, ax=ax, shrink=.7, label="Prospective hits / attempts")
     return _save_figure(fig, output_stem, plt)
 
 

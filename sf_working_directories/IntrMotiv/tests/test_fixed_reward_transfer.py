@@ -6,6 +6,7 @@ from torch import nn
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DGProjection_batchnorm_relu
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
+from sf_working_directories.IntrMotiv.dmlab.goal_conditioned_dg import GoalConditionedDGCore
 
 
 def _core_config():
@@ -43,6 +44,36 @@ def test_fixed_task_condition_is_trainable_graph_free_and_packed_consistent():
     assert torch.allclose(packed_state, state)
     unpacked[:, :, -3:].sum().backward()
     assert torch.allclose(core.fixed_task_target.grad, torch.full((3,), 8.0))
+
+
+def test_flat_goal_mixture_is_normalized_trainable_and_source_aligned():
+    cfg = _core_config()
+    cfg.fixed_task_goal_mixture = True
+    cfg.fixed_task_target_id = 1
+    core = SimpleSequenceWithBypassCore(cfg, 5)
+    mixture = core.fixed_task_condition()
+    assert torch.isclose(mixture.sum(), torch.tensor(1.0))
+    assert mixture[1] > 0.99
+    out, _ = core(torch.ones(1, 5), torch.zeros(1, core.total_state_size))
+    assert torch.allclose(out[0, -3:], mixture)
+    out[0, -3].backward()
+    assert core.fixed_task_target.grad.abs().sum() > 0
+
+
+def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
+    cfg = _core_config()
+    cfg.fixed_task_goal_mixture = True
+    cfg.fixed_task_target_id = 1
+    cfg.hrl_graph_memory = "policy_buffer"
+    cfg.hrl_target_timing = "immediate"
+    cfg.ppo_dg_gradient = "joint"
+    cfg.DG_BN_intercept = 1.0
+    core = GoalConditionedDGCore(cfg, 8)
+    pre = torch.full((1, 3), 2.0, requires_grad=True)
+    head = torch.cat((torch.ones(1, 3), torch.zeros(1, 2), pre), -1)
+    out, _ = core(head, torch.zeros(1, core.total_state_size))
+    core.worker_view(out).sum().backward()
+    assert pre.grad is not None and pre.grad.abs().sum() > 0
 
 
 class _Projection(nn.Module):

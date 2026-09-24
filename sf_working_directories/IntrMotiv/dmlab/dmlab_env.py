@@ -3,6 +3,7 @@ from collections import deque
 from typing import Dict, Optional
 
 import numpy as np
+import deepmind_lab
 from tensorboardX import SummaryWriter
 
 from sample_factory.algo.runners.runner import Runner
@@ -43,6 +44,8 @@ DMLAB_ENVS = [
     DmLabSpec("openfield_map2_fixed_loc2", "hippodunk/openfield_map2_fixed_loc2"),
     DmLabSpec("openfield_map2_fixed_loc3", "openfield_map2_fixed_loc3"),
     DmLabSpec("openfield_map2_fixed_loc3_noreward", "openfield_map2_fixed_loc3_noreward"),
+    DmLabSpec("openfield_map2_fixed_reward_dg50", "openfield_map2_fixed_reward_dg50"),
+    DmLabSpec("openfield_map2_fixed_reward_dg51", "openfield_map2_fixed_reward_dg51"),
     DmLabSpec(
         "openfield_map2_fixed_loc3_fixedlength_noreward",
         "openfield_map2_fixed_loc3_fixedlength_noreward",
@@ -128,6 +131,9 @@ def make_dmlab_env_impl(
     dmlab_level_caches_per_policy: Dict[PolicyID, DmlabLevelCache] = None,
     **_kwargs,
 ):
+    runfiles_path = getattr(cfg, "dmlab_runfiles_path", None)
+    if runfiles_path:
+        deepmind_lab.set_runfiles_path(os.path.abspath(runfiles_path))
     skip_frames = cfg.env_frameskip
 
     gpu_idx = 0

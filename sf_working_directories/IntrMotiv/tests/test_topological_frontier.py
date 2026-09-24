@@ -87,6 +87,40 @@ def test_least_tested_target_requires_observation_excludes_source_and_breaks_tie
     assert select_least_tested_target(graph, 2, 1.0) == 0
 
 
+def test_reward_manager_updates_final_goal_and_selects_it():
+    graph = PolicyControllableGraph(3)
+    layout = HRLStateLayout(3)
+    topo_layout = TopologicalStateLayout(3)
+    option = torch.zeros(1, 2, hrl_option_state_size(3))
+    topology = torch.zeros(1, 2, topological_state_size(3))
+    option[0, 0, layout.source] = 1
+    option[0, 0, layout.target] = 2  # a temporary next hop
+    topology[0, 0, topo_layout.final_goal] = 3
+    option[0, 1, layout.source] = 1
+    option[0, 1, layout.age] = 1
+    topology[0, 1, topo_layout.final_goal] = 3
+    count = graph.update_reward_goal_values(
+        option, topology, torch.tensor([[10.0, 0.0]]), torch.ones(1, 2, dtype=torch.bool)
+    )
+    assert count == 1
+    assert graph.reward_goal_value[0, 2] == 10
+    assert graph.reward_goal_count[0, 2] == 1
+    assert graph.reward_goal_count[0, 1] == 0
+
+    torch.manual_seed(4)
+    result, next_topology, _ = _manager_step(
+        torch.zeros(1, hrl_option_state_size(3)),
+        torch.zeros(1, topological_state_size(3)),
+        torch.tensor([[1.0, 0.0, 0.0]]),
+        graph,
+        direct_target_selection="reward_value",
+        edge_exploration=True,
+        target_timing="immediate",
+    )
+    assert int(result[0, layout.target].item()) == 3
+    assert int(next_topology[0, topo_layout.final_goal].item()) == 3
+
+
 def test_first_distinct_wrong_outcome_terminates_without_changing_state_shape():
     n_nodes = 3
     graph = PolicyControllableGraph(n_nodes)

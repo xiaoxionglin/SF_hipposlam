@@ -16,8 +16,10 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
     def __init__(self, cfg, input_size):
         n = int(cfg.Hippo_n_feature)
         super().__init__(cfg, input_size - n)
-        if not self.hrl_enabled or self.hrl_graph_memory != "policy_buffer" or self.hrl_target_timing != "immediate":
-            raise ValueError("Goal-conditioned DG requires immediate policy-buffer HRL")
+        if not self.fixed_task_conditioning and (
+            not self.hrl_enabled or self.hrl_graph_memory != "policy_buffer" or self.hrl_target_timing != "immediate"
+        ):
+            raise ValueError("Goal-conditioned DG requires immediate policy-buffer HRL or a fixed task")
         if self.context_feedback is not None or self.graph_recruitment:
             raise ValueError("Goal-conditioned DG currently excludes contextual feedback and recruitment")
         self.canonical_input_size = input_size - n
@@ -25,6 +27,7 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
         self.total_state_size += self.core_output_size
         self.dg_goal_modulation = nn.Parameter(torch.zeros(n, 2 * n))
         self.dg_intercept = float(getattr(cfg, "DG_BN_intercept", 2.43))
+        self.reward_dg_gradient = getattr(cfg, "ppo_dg_gradient", "stop") == "joint"
         self.last_worker_dg_activity = None
         self.last_worker_memory = None
 
@@ -44,7 +47,8 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
 
     def write_activity(self, preactivation, goal):
         scale, bias = (goal @ self.dg_goal_modulation).chunk(2, -1)
-        return torch.relu((1 + scale) * preactivation.detach() + bias - self.dg_intercept)
+        evidence = preactivation if self.reward_dg_gradient else preactivation.detach()
+        return torch.relu((1 + scale) * evidence + bias - self.dg_intercept)
 
     def advance_worker(self, state, activity):
         shifted = state.roll(1, -1)

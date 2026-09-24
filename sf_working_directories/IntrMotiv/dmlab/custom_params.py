@@ -25,6 +25,11 @@ def hipposlam_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    # Study identity is tracking metadata only. The canonical StudySpec workflow
+    # emits these fields so dashboards can group by one seed-independent key.
+    p.add_argument("--study_id", default=None, type=str)
+    p.add_argument("--study_condition", default=None, type=str)
+    p.add_argument("--study_base", default=None, type=str)
     p.add_argument("--controller_learning", choices=["ppo", "shadow", "ddqn"], default="ppo")
     p.add_argument("--controller_replay_state", choices=("reconstruct", "stored"), default="reconstruct")
     p.add_argument("--controller_her", type=str2bool, default=False)
@@ -75,12 +80,16 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="weights initialized from transfer_model_path without restoring optimizer or progress",
     )
     p.add_argument("--transfer_freeze_dg", default=False, type=str2bool)
+    p.add_argument("--transfer_freeze_worker", default=False, type=str2bool)
+    p.add_argument("--dmlab_runfiles_path", default=None, type=str)
     p.add_argument(
         "--fixed_task_conditioning",
         default=False,
         type=str2bool,
         help="bypass waypoint selection and expose one learned constant target vector to the policy",
     )
+    p.add_argument("--fixed_task_goal_mixture", default=False, type=str2bool)
+    p.add_argument("--fixed_task_target_id", default=0, type=int)
 
     p.add_argument("--DG_lr", default=None, type=float, help="Dentate Gyrus Pattern separation learning rate")
     p.add_argument("--DG_temperature", default=None, type=float, help="Dentate Gyrus output temperature")
@@ -341,10 +350,11 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--hrl_direct_target_selection",
         default="frontier",
-        choices=["frontier", "least_tested", "local_successor"],
+        choices=["frontier", "least_tested", "local_successor", "reward_value"],
         help=(
             "Choose direct targets by frontier score, among all observed nodes by lowest pair-attempt "
-            "mass, or among directed passive first successors by lowest pair-attempt mass."
+            "mass, among directed passive first successors by lowest pair-attempt mass, or by "
+            "external-return estimates for fixed-reward transfer."
         ),
     )
     p.add_argument(

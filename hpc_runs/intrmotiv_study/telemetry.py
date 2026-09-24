@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 from .discovery import discover_run_directories
 from .spec import RunSpec, SpecError, StudySpec
 
+
 MANIFEST_COLUMNS = (
     "condition",
     "family",
@@ -51,7 +52,9 @@ def _render_fields(run: RunSpec, templates: Mapping[str, Any]) -> dict[str, str]
         try:
             fields[name] = template.format_map(dict(run.context))
         except KeyError as error:
-            raise SpecError(f"telemetry field {name!r} references unknown field {error.args[0]!r}") from error
+            raise SpecError(
+                f"telemetry field {name!r} references unknown field {error.args[0]!r}"
+            ) from error
     return fields
 
 
@@ -64,10 +67,8 @@ def build_place_field_manifests(
     if telemetry.get("protocol") != "dg-place-fields-v1":
         raise SpecError("telemetry.protocol must be 'dg-place-fields-v1'")
     target_frames = telemetry.get("target_frames")
-    if (
-        not isinstance(target_frames, list)
-        or not target_frames
-        or not all(isinstance(value, int) and value > 0 for value in target_frames)
+    if not isinstance(target_frames, list) or not target_frames or not all(
+        isinstance(value, int) and value > 0 for value in target_frames
     ):
         raise SpecError("telemetry.target_frames must be a nonempty integer array")
     if sorted(set(target_frames)) != target_frames:
@@ -90,7 +91,9 @@ def build_place_field_manifests(
     templates = telemetry.get("manifest_fields", {})
     if not isinstance(templates, Mapping):
         raise SpecError("telemetry.manifest_fields must be an object")
-    label_template = telemetry.get("label_template", "{condition}__s{seed}__f{checkpoint_frames}")
+    label_template = telemetry.get(
+        "label_template", "{condition}__s{seed}__f{checkpoint_frames}"
+    )
     if not isinstance(label_template, str):
         raise SpecError("telemetry.label_template must be a string")
 
@@ -101,11 +104,7 @@ def build_place_field_manifests(
     for run in study.expand_runs():
         if run.seed not in selected_seeds and run.name not in intervention_runs:
             continue
-        selected_targets = (
-            target_frames
-            if run.seed == trajectory_seed
-            else ([target_frames[-1]] if run.seed in selected_seeds else [])
-        )
+        selected_targets = target_frames if run.seed == trajectory_seed else ([target_frames[-1]] if run.seed in selected_seeds else [])
         if run.name in intervention_runs:
             selected_targets = sorted(set(selected_targets) | set(intervention_targets))
         for target in selected_targets:
@@ -127,7 +126,9 @@ def build_place_field_manifests(
             try:
                 label = label_template.format_map(context)
             except KeyError as error:
-                raise SpecError(f"telemetry.label_template references unknown field {error.args[0]!r}") from error
+                raise SpecError(
+                    f"telemetry.label_template references unknown field {error.args[0]!r}"
+                ) from error
             row = {
                 "condition": run.condition,
                 **_render_fields(run, templates),
@@ -145,6 +146,29 @@ def build_place_field_manifests(
     if len(set(labels)) != len(labels):
         raise SpecError("telemetry labels are not unique")
     return rows, trajectory_rows
+
+
+def select_standard_place_field_rows(
+    study: StudySpec, rows: Iterable[Mapping[str, str]]
+) -> list[dict[str, str]]:
+    """Exclude checkpoints present only to support intervention evaluation.
+
+    The checkpoint inventory is the shared source for both evaluators. This
+    selector preserves the standard five-target trajectory seed plus terminal
+    checkpoints for declared terminal seeds, without scheduling an additional
+    field rollout merely because an intervention needs an earlier checkpoint.
+    """
+    telemetry = study.telemetry
+    target_frames = telemetry["target_frames"]
+    trajectory_seed = int(telemetry.get("trajectory_seed", 99))
+    terminal_seeds = set(telemetry.get("terminal_seeds", [8, 123]))
+    selected = []
+    for row in rows:
+        seed = int(row["seed"])
+        target = int(row["target_frames"])
+        if seed == trajectory_seed or (seed in terminal_seeds and target == target_frames[-1]):
+            selected.append(dict(row))
+    return selected
 
 
 def selected_intervention_runs(study: StudySpec) -> list[RunSpec]:
@@ -183,7 +207,10 @@ def build_intervention_manifest(
     if not isinstance(intervention, Mapping):
         raise SpecError("telemetry.intervention must be an object")
     if intervention.get("protocol") != "target-control-intervention-v1":
-        raise SpecError("telemetry.intervention.protocol must be " "'target-control-intervention-v1'")
+        raise SpecError(
+            "telemetry.intervention.protocol must be "
+            "'target-control-intervention-v1'"
+        )
     target_frames = intervention.get("target_frames")
     if (
         not isinstance(target_frames, list)
@@ -191,15 +218,16 @@ def build_intervention_manifest(
         or any(type(value) is not int or value <= 0 for value in target_frames)
         or sorted(set(target_frames)) != target_frames
     ):
-        raise SpecError("telemetry.intervention.target_frames must contain sorted unique positive integers")
+        raise SpecError(
+            "telemetry.intervention.target_frames must contain sorted unique positive integers"
+        )
     expected = {
         (run.condition, str(run.seed), str(target))
         for run in selected_intervention_runs(study)
         for target in target_frames
     }
-    selected = [
-        dict(row) for row in rows if (row.get("condition"), row.get("seed"), row.get("target_frames")) in expected
-    ]
+    selected = [dict(row) for row in rows
+                if (row.get("condition"), row.get("seed"), row.get("target_frames")) in expected]
     observed = [(row.get("condition"), row.get("seed"), row.get("target_frames")) for row in selected]
     if len(observed) != len(set(observed)):
         raise SpecError("intervention manifest contains duplicate condition/seed/target rows")
@@ -207,7 +235,8 @@ def build_intervention_manifest(
         missing = sorted(expected - set(observed))
         unexpected = sorted(set(observed) - expected)
         raise SpecError(
-            "intervention rows differ from the declared study; " f"missing={missing}, unexpected={unexpected}"
+            "intervention rows differ from the declared study; "
+            f"missing={missing}, unexpected={unexpected}"
         )
     return selected
 
@@ -221,26 +250,24 @@ def discover_nemo_checkpoints(study: StudySpec, batch_root: Path) -> list[Checkp
             select_checkpoints,
         )
     except ImportError as error:
-        raise RuntimeError("render-telemetry must run from the NEMO2 SF_hipposlam checkout") from error
+        raise RuntimeError(
+            "render-telemetry must run from the NEMO2 SF_hipposlam checkout"
+        ) from error
 
-    targets = sorted(
-        set(study.telemetry["target_frames"])
-        | set((study.telemetry.get("intervention") or {}).get("target_frames", []))
-    )
+    targets = sorted(set(study.telemetry["target_frames"]) |
+                     set((study.telemetry.get("intervention") or {}).get("target_frames", [])))
     inventory: list[CheckpointRecord] = []
     run_directories = discover_run_directories(study, batch_root)
     for run in study.expand_runs():
         run_dir = run_directories[run.name]
         for target, checkpoint in select_checkpoints(run_dir, target_frames=targets):
-            inventory.append(
-                CheckpointRecord(
-                    run_name=run.name,
-                    target_frames=int(target),
-                    checkpoint_frames=int(checkpoint_frames(checkpoint)),
-                    checkpoint=Path(checkpoint),
-                    run_dir=run_dir,
-                )
-            )
+            inventory.append(CheckpointRecord(
+                run_name=run.name,
+                target_frames=int(target),
+                checkpoint_frames=int(checkpoint_frames(checkpoint)),
+                checkpoint=Path(checkpoint),
+                run_dir=run_dir,
+            ))
     return inventory
 
 

@@ -268,6 +268,20 @@ def maybe_overwrite_rnn_size(cfg):
         raise ValueError("transfer_model_path and a non-none transfer_scope must be supplied together")
     if getattr(cfg, "transfer_freeze_dg", False) and transfer_scope not in ("dg", "policy"):
         raise ValueError("transfer_freeze_dg requires transferred DG weights")
+    if getattr(cfg, "transfer_freeze_worker", False) and transfer_scope != "policy":
+        raise ValueError("transfer_freeze_worker requires transferred policy weights")
+    if getattr(cfg, "fixed_task_goal_mixture", False) and not fixed_task_conditioning:
+        raise ValueError("fixed_task_goal_mixture requires fixed_task_conditioning")
+    if getattr(cfg, "hrl_direct_target_selection", "frontier") == "reward_value":
+        if (
+            not getattr(cfg, "hrl_controllable_graph", False)
+            or getattr(cfg, "hrl_graph_memory", "episode") != "policy_buffer"
+            or manager_mode != "frontier_waypoint"
+            or not getattr(cfg, "hrl_edge_exploration", False)
+            or getattr(cfg, "advantage_reward_source", None) != "external"
+            or getattr(cfg, "with_vtrace", False)
+        ):
+            raise ValueError("Reward goal selection requires external-return waypoint PPO with a policy graph")
     if fixed_task_conditioning and (getattr(cfg, "hrl_controllable_graph", False) or intrinsic_goal):
         raise ValueError("Fixed task conditioning requires graph-free, non-intrinsic training")
     if fixed_task_conditioning and goal_conditioning != "target_id_film":
@@ -344,14 +358,14 @@ def maybe_overwrite_rnn_size(cfg):
         if getattr(cfg, "dg_goal_input", "none") == "write":
             if (
                 cfg.core_name != "BypassSS"
-                or not getattr(cfg, "hrl_controllable_graph", False)
+                or not (getattr(cfg, "hrl_controllable_graph", False) or fixed_task_conditioning)
                 or getattr(cfg, "hrl_target_timing", "delayed") != "immediate"
                 or getattr(cfg, "hrl_graph_memory", "episode") != "policy_buffer"
                 or getattr(cfg, "dg_context_feedback", "none") != "none"
-                or getattr(cfg, "ppo_dg_gradient", "stop") != "stop"
+                or getattr(cfg, "ppo_dg_gradient", "stop") not in ("stop", "joint")
             ):
                 raise ValueError(
-                    "DG goal writes require immediate policy-buffer BypassSS, no context feedback, and PPO STOP"
+                    "DG goal writes require immediate policy-buffer BypassSS, no context feedback, and task conditioning"
                 )
             rnn_size += hippo_n_feature * (R + L - 1)
         cfg.cli_args["rnn_size"] = rnn_size

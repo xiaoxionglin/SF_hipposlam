@@ -9,19 +9,21 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .analysis import linear_contrasts, summarize_records
+from .spec import SpecError, StudySpec, load_study
 from .spatial import (
+    collect_cue_assignment_records,
     collect_spatial_detail_records,
     collect_spatial_records,
     discover_spatial_snapshots,
     render_selected_snapshots,
     summarize_spatial_records,
 )
-from .spec import SpecError, StudySpec, load_study
 from .submission import audit_submission
 from .telemetry import (
     build_intervention_manifest,
     build_place_field_manifests,
     discover_nemo_checkpoints,
+    select_standard_place_field_rows,
     write_manifest,
 )
 from .tensorboard import collect_online_records
@@ -87,16 +89,14 @@ def _normalize_records(study: StudySpec, records: list[dict[str, Any]]) -> list[
     normalized: list[dict[str, Any]] = []
     for record in records:
         run = expected[record["run_name"]]
-        normalized.append(
-            {
-                **record,
-                "condition": run.condition,
-                "base": run.base,
-                "seed": run.seed,
-                **run.factors,
-                **run.metadata,
-            }
-        )
+        normalized.append({
+            **record,
+            "condition": run.condition,
+            "base": run.base,
+            "seed": run.seed,
+            **run.factors,
+            **run.metadata,
+        })
     return normalized
 
 
@@ -106,27 +106,29 @@ def _analyze(study: StudySpec, records: list[dict[str, Any]], output_dir: Path) 
     contrast_group_by = study.analysis.get("contrast_group_by", group_by)
     replicate_by = study.analysis.get("replicate_by", ["seed"])
     contrasts = study.analysis.get("contrasts", [])
-    if not all(isinstance(item, list) for item in (group_by, contrast_group_by, replicate_by, contrasts)):
+    if not all(
+        isinstance(item, list)
+        for item in (group_by, contrast_group_by, replicate_by, contrasts)
+    ):
         raise SpecError("analysis grouping fields and contrasts must be arrays")
     metrics = _metric_names(study)
     summary = summarize_records(records, group_by, metrics)
     _write_csv(output_dir / "condition_summary.csv", summary)
     if contrasts:
-        detailed, contrast_summary = linear_contrasts(records, metrics, contrast_group_by, replicate_by, contrasts)
+        detailed, contrast_summary = linear_contrasts(
+            records, metrics, contrast_group_by, replicate_by, contrasts
+        )
         _write_csv(output_dir / "paired_contrasts.csv", detailed)
         _write_csv(output_dir / "paired_contrast_summary.csv", contrast_summary)
-    _write_json(
-        output_dir / "analysis_manifest.json",
-        {
-            **study.provenance(),
-            "input_rows": len(records),
-            "metrics": metrics,
-            "group_by": group_by,
-            "contrast_group_by": contrast_group_by,
-            "replicate_by": replicate_by,
-            "contrasts": [contrast.get("name") for contrast in contrasts],
-        },
-    )
+    _write_json(output_dir / "analysis_manifest.json", {
+        **study.provenance(),
+        "input_rows": len(records),
+        "metrics": metrics,
+        "group_by": group_by,
+        "contrast_group_by": contrast_group_by,
+        "replicate_by": replicate_by,
+        "contrasts": [contrast.get("name") for contrast in contrasts],
+    })
 
 
 def command_validate(args: argparse.Namespace) -> None:
@@ -136,13 +138,10 @@ def command_validate(args: argparse.Namespace) -> None:
 
 def command_render_runs(args: argparse.Namespace) -> None:
     study = load_study(args.study)
-    _write_json(
-        args.output,
-        {
-            **study.provenance(),
-            "rows": [run.as_dict() for run in study.expand_runs()],
-        },
-    )
+    _write_json(args.output, {
+        **study.provenance(),
+        "rows": [run.as_dict() for run in study.expand_runs()],
+    })
 
 
 def command_audit_submission(args: argparse.Namespace) -> None:
@@ -159,10 +158,7 @@ def command_collect_online(args: argparse.Namespace) -> None:
             raise SpecError("--window-low and --window-high must be supplied together")
         fixed_window = (args.window_low, args.window_high)
     records = collect_online_records(
-        study,
-        args.batch_root,
-        fixed_window=fixed_window,
-        latest_common=args.latest_common,
+        study, args.batch_root, fixed_window=fixed_window, latest_common=args.latest_common,
         progress=lambda done, total, name: print(f"Loaded {done}/{total}: {name}", flush=True),
         history_output_dir=args.output_dir / "histories" if args.export_histories else None,
         loader_backend=args.loader_backend,
@@ -176,9 +172,7 @@ def command_collect_online(args: argparse.Namespace) -> None:
         "mode": "latest_common" if args.latest_common else "fixed" if fixed_window else "per_run_terminal",
         "step_tag": study.analysis.get("step_tag", "train/env_steps"),
         "windows": sorted({(row["window_low"], row["window_high"]) for row in records}),
-        "scalar_size_guidance": (
-            0 if args.latest_common or args.export_histories else study.analysis.get("scalar_size_guidance", 30000)
-        ),
+        "scalar_size_guidance": 0 if args.latest_common or args.export_histories else study.analysis.get("scalar_size_guidance", 30000),
         "loader_backend": args.loader_backend or study.analysis.get("loader_backend", "thread"),
         "exported_histories": str(args.output_dir / "histories") if args.export_histories else None,
     }
@@ -191,7 +185,9 @@ def command_analyze_csv(args: argparse.Namespace) -> None:
     study = load_study(args.study)
     records = _read_csv(args.input)
     if len(records) != study.expected_runs:
-        raise SpecError(f"analysis input has {len(records)} rows; study expects {study.expected_runs}")
+        raise SpecError(
+            f"analysis input has {len(records)} rows; study expects {study.expected_runs}"
+        )
     _analyze(study, records, args.output_dir)
 
 
@@ -224,61 +220,67 @@ def command_collect_spatial(args: argparse.Namespace) -> None:
     _write_csv(args.output_dir / "condition_summary.csv", condition_summary)
     _write_csv(args.output_dir / "seed_summary.csv", seed_summary)
 
-    detail_counts = {"per_unit_rows": 0, "per_field_rows": 0, "graph_edge_rows": 0}
+    detail_counts = {
+        "per_unit_rows": 0,
+        "per_field_rows": 0,
+        "graph_edge_rows": 0,
+        "cue_assignment_rows": 0,
+    }
     if args.include_details:
         unit_rows, field_rows, edge_rows = collect_spatial_detail_records(study, args.snapshot_root)
+        cue_rows = collect_cue_assignment_records(study, args.snapshot_root)
         _write_csv(args.output_dir / "per_unit.csv", unit_rows)
         if field_rows:
             _write_csv(args.output_dir / "per_field.csv", field_rows)
         if edge_rows:
             _write_csv(args.output_dir / "graph_edge.csv", edge_rows)
+        if cue_rows:
+            _write_csv(args.output_dir / "cue_assignment.csv", cue_rows)
         detail_counts = {
             "per_unit_rows": len(unit_rows),
             "per_field_rows": len(field_rows),
             "graph_edge_rows": len(edge_rows),
+            "cue_assignment_rows": len(cue_rows),
         }
 
     figures: list[Path] = []
     if selected_runs:
         snapshots = discover_spatial_snapshots(study, args.snapshot_root)
-        figures = render_selected_snapshots(snapshots, args.output_dir, selected_runs, args.plot_target)
-    _write_json(
-        args.output_dir / "analysis_manifest.json",
-        {
-            **manifest,
-            "group_by": group_by,
-            "per_snapshot_rows": len(records),
-            "condition_summary_rows": len(condition_summary),
-            "seed_summary_rows": len(seed_summary),
-            "selected_plot_runs": selected_runs,
-            "selected_plot_targets": args.plot_target,
-            "figures": [str(path.resolve()) for path in figures],
-            "include_details": bool(args.include_details),
-            **detail_counts,
-        },
-    )
+        figures = render_selected_snapshots(
+            snapshots, args.output_dir, selected_runs, args.plot_target
+        )
+    _write_json(args.output_dir / "analysis_manifest.json", {
+        **manifest,
+        "group_by": group_by,
+        "per_snapshot_rows": len(records),
+        "condition_summary_rows": len(condition_summary),
+        "seed_summary_rows": len(seed_summary),
+        "selected_plot_runs": selected_runs,
+        "selected_plot_targets": args.plot_target,
+        "figures": [str(path.resolve()) for path in figures],
+        "include_details": bool(args.include_details),
+        **detail_counts,
+    })
 
 
 def command_render_telemetry(args: argparse.Namespace) -> None:
     study = load_study(args.study)
     inventory = discover_nemo_checkpoints(study, args.batch_root)
-    rows, trajectory = build_place_field_manifests(study, inventory)
-    intervention = build_intervention_manifest(study, rows)
+    all_rows, trajectory = build_place_field_manifests(study, inventory)
+    rows = select_standard_place_field_rows(study, all_rows)
+    intervention = build_intervention_manifest(study, all_rows)
     write_manifest(args.output_root / "analysis_manifest.tsv", rows)
     write_manifest(args.output_root / "trajectory_manifest.tsv", trajectory)
     if intervention:
         write_manifest(args.output_root / "intervention_manifest.tsv", intervention)
-    _write_json(
-        args.output_root / "study_manifest.json",
-        {
-            **study.provenance(),
-            "telemetry_protocol": study.telemetry.get("protocol"),
-            "intervention": dict(study.telemetry.get("intervention", {})),
-            "analysis_rows": len(rows),
-            "trajectory_rows": len(trajectory),
-            "intervention_rows": len(intervention),
-        },
-    )
+    _write_json(args.output_root / "study_manifest.json", {
+        **study.provenance(),
+        "telemetry_protocol": study.telemetry.get("protocol"),
+        "intervention": dict(study.telemetry.get("intervention", {})),
+        "analysis_rows": len(rows),
+        "trajectory_rows": len(trajectory),
+        "intervention_rows": len(intervention),
+    })
     print(
         f"wrote {len(rows)} telemetry rows, {len(trajectory)} trajectory rows, "
         f"and {len(intervention)} intervention rows "
@@ -299,32 +301,29 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--output", type=Path)
     render.set_defaults(func=command_render_runs)
 
-    audit = subparsers.add_parser("audit-submission", help="compare a launcher jobs.tsv with the declared study")
+    audit = subparsers.add_parser(
+        "audit-submission", help="compare a launcher jobs.tsv with the declared study"
+    )
     audit.add_argument("study", type=Path)
     audit.add_argument("jobs_tsv", type=Path)
     audit.add_argument("--submitted", action="store_true", help="require job IDs and submitted status")
     audit.add_argument("--output", type=Path)
     audit.set_defaults(func=command_audit_submission)
 
-    collect = subparsers.add_parser("collect-online", help="collect TensorBoard rows and run standard analysis")
+    collect = subparsers.add_parser(
+        "collect-online", help="collect TensorBoard rows and run standard analysis"
+    )
     collect.add_argument("study", type=Path)
     collect.add_argument("batch_root", type=Path)
     collect.add_argument("output_dir", type=Path)
     collect.add_argument("--window-low", type=int)
     collect.add_argument("--window-high", type=int)
+    collect.add_argument("--export-histories", action="store_true",
+                         help="save all selected scalar events for plots without another TensorBoard scan")
+    collect.add_argument("--loader-backend", choices=("thread", "process"),
+                         help="override the collection executor; recorded in analysis provenance")
     collect.add_argument(
-        "--export-histories",
-        action="store_true",
-        help="save all selected scalar events for plots without another TensorBoard scan",
-    )
-    collect.add_argument(
-        "--loader-backend",
-        choices=("thread", "process"),
-        help="override the collection executor; recorded in analysis provenance",
-    )
-    collect.add_argument(
-        "--latest-common",
-        action="store_true",
+        "--latest-common", action="store_true",
         help="align all runs to the latest shared metric step using analysis.terminal_width; read histories once",
     )
     collect.set_defaults(func=command_collect_online)
@@ -343,7 +342,9 @@ def build_parser() -> argparse.ArgumentParser:
     spatial.add_argument("snapshot_root", type=Path)
     spatial.add_argument("output_dir", type=Path)
     spatial.add_argument("--plot-run", action="append", default=[], help="exact declared run name to render")
-    spatial.add_argument("--plot-target", action="append", default=[], type=int, help="target frame count to render")
+    spatial.add_argument(
+        "--plot-target", action="append", default=[], type=int, help="target frame count to render"
+    )
     spatial.add_argument(
         "--require-complete", action="store_true", help="fail unless every run/policy/target is present"
     )
