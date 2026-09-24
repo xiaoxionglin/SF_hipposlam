@@ -19,13 +19,14 @@ def test_corrected_matrix_and_uninformed_flat_start():
         arm = run.factors["arm"]
         args = set(run.args)
         assert "--advantage_reward_source=external" in args
-        assert "--fixed_task_goal_init=uniform" in args
+        assert "--fixed_task_goal_init=uniform_jitter" in args
         assert "--train_for_env_steps=100000000" in args
         assert "--with_pos_obs=False" in args
         assert run.metadata["arm_graph_init"] == ("source" if arm == "W_GRAPH" else "empty")
         if arm.startswith("F_"):
             assert "--fixed_task_goal_mixture=true" in args
-            assert run.metadata["arm_goal_mixture_init"] == "uniform"
+            assert run.metadata["arm_goal_mixture_init"] == "uniform_jitter"
+            assert not any(arg.startswith("--fixed_task_target_id=") for arg in args)
         assert ("--transfer_graph=true" in args) == (arm == "W_GRAPH")
 
 

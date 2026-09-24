@@ -88,6 +88,7 @@ def main():
     p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument("--runfiles", type=Path, required=True)
     p.add_argument("--site", choices=["dg50", "dg51"], required=True)
+    p.add_argument("--target-id", type=int, help="Override the nominated DG ID while keeping the physical site")
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--trials", type=int, default=20)
     p.add_argument("--seed-base", type=int, default=51000)
@@ -109,7 +110,9 @@ def main():
     env_info = extract_env_info(env, cfg)
     if hasattr(env.unwrapped, "reset_on_init"):
         env.unwrapped.reset_on_init = False
-    target = 50 if args.site == "dg50" else 51
+    target = args.target_id if args.target_id is not None else (50 if args.site == "dg50" else 51)
+    if not 0 <= target < int(cfg.Hippo_n_feature):
+        raise ValueError("target ID is outside the source DG capacity")
     x = 300 if args.site == "dg50" else 200
     rows = []
     try:
@@ -127,7 +130,8 @@ def main():
             print(args.site, trial + 1, "matched trials", flush=True)
     finally:
         env.close()
-    output = args.out_dir / f"{args.site}_zero_shot.csv"
+    output_name = args.site if args.target_id is None else f"{args.site}_target{target}"
+    output = args.out_dir / f"{output_name}_zero_shot.csv"
     with output.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=rows[0].keys())
         writer.writeheader()
@@ -150,7 +154,7 @@ def main():
             for name in ("nominated", "wrong", "shuffled")
         },
     }
-    (args.out_dir / f"{args.site}_zero_shot_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    (args.out_dir / f"{output_name}_zero_shot_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(summary, flush=True)
 
 

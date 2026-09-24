@@ -1,26 +1,23 @@
 {
   "schema": "intrmotiv/study/v1",
   "workflow_version": "1.12.0",
-  "study_id": "fixed_reward_dg_peak_transfer_corrected_20260925",
-  "description": "Corrected external-reward transfer with address-free near-uniform flat mixtures and a separate source-graph arm.",
-  "expected_runs": 48,
+  "study_id": "fixed_reward_flat_mixture_jitter_qualification_20260925",
+  "description": "Six short qualifications checking address-free flat mixture learning and DG transfer.",
+  "expected_runs": 6,
   "metadata": {
     "project": "SF_IntrMotiv_FixedRewardDGPeakTransfer",
-    "training_steps": 100000000,
+    "training_steps": 262144,
     "reward_cue": "source transparent goal",
     "reward_value": 10,
-    "source_revalidation_required": true,
-    "reward_signal": "external PPO and reward manager",
-    "flat_goal_init": "uniform_jitter",
-    "site_control_probe_required": true
+    "source_revalidation_required": true
   },
   "training": {
     "mode": "sample_factory",
-    "batch_name": "fixed_reward_dg_peak_transfer_corrected_20260925",
+    "batch_name": "fixed_reward_flat_mixture_jitter_qualification_20260925",
     "workspace_root": "/work/classic/fr_xl1014-fixed-reward-transfer",
-    "output_root": "/work/classic/fr_xl1014-fixed-reward-transfer/IntrMotiv/SF_hipposlam/train_dir/fixed_reward_dg_peak_transfer_corrected_20260925",
-    "run_name_template": "FRT2_{base_label}_{arm_label}_S{seed}",
-    "condition_name_template": "FRT2_{base_label}_{arm_label}",
+    "output_root": "/work/classic/fr_xl1014-fixed-reward-transfer/IntrMotiv/SF_hipposlam/train_dir/fixed_reward_flat_mixture_jitter_qualification_20260925",
+    "run_name_template": "QFJ1_{base_label}_{arm_label}_S{seed}",
+    "condition_name_template": "QFJ1_{base_label}_{arm_label}",
     "seed_arg": "--seed={seed}",
     "common_args": [
       "--DG_BN_intercept=2.43",
@@ -34,7 +31,7 @@
       "--batch_size=2048",
       "--benchmark=False",
       "--ca3_predictor_shadow=False",
-      "--checkpoint_frame_targets=5000000,10000000,20000000,50000000,100000000",
+      "--checkpoint_frame_targets=131072,262144",
       "--core_name=BypassSS",
       "--decorrelate_experience_max_seconds=120",
       "--depth_sensor=True",
@@ -121,10 +118,10 @@
       "--num_policies=1",
       "--num_workers=32",
       "--number_instruction_coef=9",
-      "--online_spatial_output_root=/work/classic/fr_xl1014-fixed-reward-transfer/IntrMotiv/SF_hipposlam/train_dir/analysis/fixed_reward_dg_peak_transfer_corrected_20260925/online_spatial",
-      "--online_spatial_snapshot_max_frames=100000000",
-      "--online_spatial_snapshot_targets=5000000,20000000,50000000,100000000",
-      "--online_spatial_telemetry=True",
+      "--online_spatial_output_root=/work/classic/fr_xl1014-fixed-reward-transfer/IntrMotiv/SF_hipposlam/train_dir/analysis/fixed_reward_flat_mixture_jitter_qualification_20260925/online_spatial",
+      "--online_spatial_snapshot_max_frames=262144",
+      "--online_spatial_snapshot_targets=131072,262144",
+      "--online_spatial_telemetry=False",
       "--online_spatial_workspace_root=/work/classic/fr_xl1014-fixed-reward-transfer",
       "--ppo_clip_ratio=0.25",
       "--rec_distances=True",
@@ -141,14 +138,14 @@
       "--save_initial_checkpoint=True",
       "--save_milestones_sec=1800",
       "--set_workers_cpu_affinity=True",
-      "--train_for_env_steps=100000000",
+      "--train_for_env_steps=262144",
       "--use_external=True",
       "--use_internal=False",
       "--use_record_episode_statistics=True",
       "--use_rnn=True",
       "--value_loss_coeff=0.3",
-      "--wandb_dir=/work/classic/fr_xl1014-fixed-reward-transfer/IntrMotiv/SF_hipposlam/train_dir/fixed_reward_dg_peak_transfer_corrected_20260925/wandb",
-      "--wandb_group=fixed_reward_dg_peak_transfer_corrected_20260925",
+      "--wandb_dir=/work/classic/fr_xl1014-fixed-reward-transfer/IntrMotiv/SF_hipposlam/train_dir/fixed_reward_flat_mixture_jitter_qualification_20260925/wandb",
+      "--wandb_group=fixed_reward_flat_mixture_jitter_qualification_20260925",
       "--wandb_project=SF_IntrMotiv_FixedRewardDGPeakTransfer",
       "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
       "--with_number_instruction=True",
@@ -198,7 +195,7 @@
         "--controller_target_updates=100",
         "--controller_td_positions=256",
         "--decorrelate_envs_on_one_worker=False",
-        "--device=gpu",
+        "--device=cpu",
         "--dg_goal_input=none",
         "--env=openfield_map2_fixed_reward_dg51",
         "--heartbeat_interval=40",
@@ -221,121 +218,6 @@
     {
       "name": "arm",
       "levels": [
-        {
-          "value": "W_SCRATCH",
-          "label": "W_SCRATCH",
-          "args": [
-            "--transfer_scope=none",
-            "--transfer_freeze_dg=false",
-            "--transfer_freeze_worker=false",
-            "--fixed_task_conditioning=false",
-            "--fixed_task_goal_mixture=false",
-            "--hrl_controllable_graph=true",
-            "--hrl_direct_target_selection=reward_value",
-            "--ppo_dg_gradient=joint",
-            "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True"
-          ],
-          "metadata": {
-            "architecture": "waypoint",
-            "scope": "none",
-            "dg_trainable": true,
-            "graph_init": "empty"
-          }
-        },
-        {
-          "value": "W_FIXED",
-          "label": "W_FIXED",
-          "args": [
-            "--transfer_scope=policy",
-            "--transfer_freeze_dg=true",
-            "--transfer_freeze_worker=true",
-            "--fixed_task_conditioning=false",
-            "--fixed_task_goal_mixture=false",
-            "--hrl_controllable_graph=true",
-            "--hrl_direct_target_selection=reward_value",
-            "--ppo_dg_gradient=stop",
-            "--transfer_model_path={base_source_checkpoint}",
-            "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True"
-          ],
-          "metadata": {
-            "architecture": "waypoint",
-            "scope": "policy",
-            "dg_trainable": false,
-            "graph_init": "empty"
-          }
-        },
-        {
-          "value": "W_GRAPH",
-          "label": "W_GRAPH",
-          "args": [
-            "--transfer_scope=policy",
-            "--transfer_freeze_dg=true",
-            "--transfer_freeze_worker=true",
-            "--fixed_task_conditioning=false",
-            "--fixed_task_goal_mixture=false",
-            "--hrl_controllable_graph=true",
-            "--hrl_direct_target_selection=reward_value",
-            "--ppo_dg_gradient=stop",
-            "--transfer_model_path={base_source_checkpoint}",
-            "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True",
-            "--transfer_graph=true"
-          ],
-          "metadata": {
-            "architecture": "waypoint",
-            "scope": "policy",
-            "dg_trainable": false,
-            "graph_init": "source"
-          }
-        },
-        {
-          "value": "W_WORKER",
-          "label": "W_WORKER",
-          "args": [
-            "--transfer_scope=policy",
-            "--transfer_freeze_dg=true",
-            "--transfer_freeze_worker=false",
-            "--fixed_task_conditioning=false",
-            "--fixed_task_goal_mixture=false",
-            "--hrl_controllable_graph=true",
-            "--hrl_direct_target_selection=reward_value",
-            "--ppo_dg_gradient=stop",
-            "--transfer_model_path={base_source_checkpoint}",
-            "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True"
-          ],
-          "metadata": {
-            "architecture": "waypoint",
-            "scope": "policy",
-            "dg_trainable": false,
-            "graph_init": "empty"
-          }
-        },
-        {
-          "value": "W_FULL",
-          "label": "W_FULL",
-          "args": [
-            "--transfer_scope=policy",
-            "--transfer_freeze_dg=false",
-            "--transfer_freeze_worker=false",
-            "--fixed_task_conditioning=false",
-            "--fixed_task_goal_mixture=false",
-            "--hrl_controllable_graph=true",
-            "--hrl_direct_target_selection=reward_value",
-            "--ppo_dg_gradient=joint",
-            "--transfer_model_path={base_source_checkpoint}",
-            "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True"
-          ],
-          "metadata": {
-            "architecture": "waypoint",
-            "scope": "policy",
-            "dg_trainable": true,
-            "graph_init": "empty"
-          }
-        },
         {
           "value": "F_SCRATCH",
           "label": "F_SCRATCH",
@@ -411,9 +293,7 @@
     }
   ],
   "seeds": [
-    42,
-    1234,
-    9999
+    42
   ],
   "analysis": {
     "step_tag": "train/env_steps",
@@ -435,126 +315,6 @@
       "ppo_dg_gradient_norm": "intrmotiv/dg/gradient/ppo_norm"
     },
     "cumulative_metrics": {},
-    "contrasts": [
-      {
-        "name": "W_FIXED_minus_W_SCRATCH",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "W_FIXED"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "W_SCRATCH"
-            }
-          }
-        ]
-      },
-      {
-        "name": "W_WORKER_minus_W_SCRATCH",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "W_WORKER"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "W_SCRATCH"
-            }
-          }
-        ]
-      },
-      {
-        "name": "W_FULL_minus_W_SCRATCH",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "W_FULL"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "W_SCRATCH"
-            }
-          }
-        ]
-      },
-      {
-        "name": "F_DG_minus_F_SCRATCH",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "F_DG"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "F_SCRATCH"
-            }
-          }
-        ]
-      },
-      {
-        "name": "F_FULL_minus_F_SCRATCH",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "F_FULL"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "F_SCRATCH"
-            }
-          }
-        ]
-      },
-      {
-        "name": "W_GRAPH_minus_W_FIXED",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "W_GRAPH"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "W_FIXED"
-            }
-          }
-        ]
-      },
-      {
-        "name": "W_GRAPH_minus_W_SCRATCH",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "W_GRAPH"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "W_SCRATCH"
-            }
-          }
-        ]
-      }
-    ]
+    "contrasts": []
   }
 }

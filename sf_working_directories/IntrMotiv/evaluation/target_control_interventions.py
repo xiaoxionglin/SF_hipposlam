@@ -306,6 +306,12 @@ def run_landmark_matched_interventions(
     targets_per_source=4,
     repeats=5,
     prefix_cap=512,
+    focus_sources=None,
+    focus_target=None,
+    reward_center=None,
+    reward_cell=None,
+    physical_horizon=None,
+    discovery_multiplier=2,
 ):
     """Execute different commands from identical engine/prefix states.
 
@@ -316,6 +322,10 @@ def run_landmark_matched_interventions(
     from sample_factory.algo.utils.make_env import make_env_func_batched
 
     n = int(cfg.Hippo_n_feature)
+    if focus_target is not None and not 0 <= focus_target < n:
+        raise ValueError("focus_target is outside the DG capacity")
+    if focus_sources is not None and any(not 0 <= source < n for source in focus_sources):
+        raise ValueError("focus_sources contains an invalid DG ID")
     graph = actor.core.policy_graph
     before = {k: v.detach().clone() for k, v in actor.state_dict().items()}
     pairs = (graph.passive_confidence > 0).cpu().numpy()
@@ -377,7 +387,7 @@ def run_landmark_matched_interventions(
     try:
         with torch.no_grad():
             # Bounded discovery; record multiple starts per source where possible.
-            for attempt in range(max_sources * repeats * 2):
+            for attempt in range(max_sources * repeats * discovery_multiplier):
                 if decisions + prefix_cap >= decision_cap // 4:
                     break
                 seed = 31000 + attempt
@@ -388,8 +398,19 @@ def run_landmark_matched_interventions(
                     h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
                     active = torch.nonzero(h[0, :n] > 0).flatten()
                     source = int(active.item()) if active.numel() == 1 else -1
-                    if source >= 0 and (source in panel or len(panel) < max_sources):
-                        targets = np.flatnonzero(pairs[source]).tolist()[:targets_per_source]
+                    if source >= 0 and (focus_sources is None or source in focus_sources) and (
+                        source in panel or len(panel) < max_sources
+                    ):
+                        targets = np.flatnonzero(pairs[source]).tolist()
+                        if focus_target is not None:
+                            if focus_target in targets:
+                                targets.remove(focus_target)
+                                targets.sort(key=lambda target: -float(graph.passive_confidence[source, target]))
+                                targets = [focus_target] + targets[:max(1, targets_per_source - 1)]
+                            else:
+                                targets = []
+                        else:
+                            targets = targets[:targets_per_source]
                         if len(targets) >= 2 and len(panel.get(source, [])) < repeats:
                             panel.setdefault(source, []).append((seed, list(prefix), targets, signature(obs, state)))
                             break
@@ -403,6 +424,8 @@ def run_landmark_matched_interventions(
             for source, starts in sorted(panel.items()):
                 for rep, (seed, prefix, targets, reference) in enumerate(starts):
                     horizon = max(pair_deadline(graph, source, t) for t in targets)
+                    if physical_horizon is not None:
+                        horizon = max(horizon, physical_horizon)
                     cost = len(targets) * (len(prefix) + horizon)
                     if decisions + cost > decision_cap:
                         missing.append(dict(source=source, repeat=rep, reason="decision_budget"))
@@ -422,6 +445,12 @@ def run_landmark_matched_interventions(
                         start_pos = as_numpy(obs["pos"][0]).copy()
                         last = start_pos.copy()
                         path = 0.0
+                        start_distance = (
+                            float(np.linalg.norm(start_pos[:2] - reward_center))
+                            if reward_center is not None else math.nan
+                        )
+                        minimum_distance = start_distance
+                        physical_contact = False
                         for elapsed in range(1, horizon + 1):
                             _, out, state = encode(obs, state, command)
                             result = actor.forward_tail(out, values_only=False, sample_actions=False)
@@ -430,11 +459,18 @@ def run_landmark_matched_interventions(
                                 initial_prob = prob[0].cpu().tolist()
                             action = prob.argmax(-1) if deterministic else torch.multinomial(prob, 1, generator=rng)
                             obs, done = advance(int(action.item()))
-                            if done:
-                                break
                             pos = as_numpy(obs["pos"][0]).copy()
+                            if reward_center is not None:
+                                minimum_distance = min(
+                                    minimum_distance, float(np.linalg.norm(pos[:2] - reward_center))
+                                )
+                            if reward_cell is not None:
+                                x0, x1, y0, y1 = reward_cell
+                                physical_contact |= bool(x0 <= pos[0] < x1 and y0 <= pos[1] < y1)
                             path += float(np.linalg.norm(pos[:2] - last[:2]))
                             last = pos
+                            if done:
+                                break
                             h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
                             active = torch.nonzero(h[0, :n] > 0).flatten()
                             hit = int(active.item()) if active.numel() == 1 else -1
@@ -467,6 +503,11 @@ def run_landmark_matched_interventions(
                                     start_position=json.dumps(start_pos.tolist()),
                                     endpoint=json.dumps(last.tolist()),
                                     exact_start_verified=True,
+                                    physical_start_distance=start_distance,
+                                    physical_minimum_distance=minimum_distance,
+                                    physical_entry_r200=start_distance > 200 and minimum_distance <= 200,
+                                    physical_entry_r300=start_distance > 300 and minimum_distance <= 300,
+                                    physical_cell_contact=physical_contact,
                                 )
                             )
     finally:
@@ -482,7 +523,11 @@ def run_landmark_matched_interventions(
                 alternate = [float(r["hit"]) for r in group if not r["commanded"] and not r["censored"]]
                 if actual and alternate:
                     differences.append(actual[0] - float(np.mean(alternate)))
-    supported_sources = int((pairs.sum(axis=1) >= 2).sum())
+    eligible_sources = range(n) if focus_sources is None else focus_sources
+    supported_sources = sum(
+        int(pairs[source].sum() >= 2 and (focus_target is None or pairs[source, focus_target]))
+        for source in eligible_sources
+    )
     if len(panel) < min(max_sources, supported_sources):
         missing.append(
             dict(reason="source_discovery_limit", requested=min(max_sources, supported_sources), found=len(panel))
@@ -527,6 +572,10 @@ def run_landmark_matched_interventions(
         paired_arrival_lift=float(np.mean(differences)) if differences else None,
         paired_comparisons=len(differences),
         rows=len(rows),
+        focus_sources=focus_sources,
+        focus_target=focus_target,
+        physical_horizon=physical_horizon,
+        discovery_multiplier=discovery_multiplier,
     )
     return pd.DataFrame(rows), summary
 

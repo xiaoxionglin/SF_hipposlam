@@ -71,6 +71,23 @@ def test_uniform_flat_goal_mixture_has_no_nominated_address():
     assert core.fixed_task_target.requires_grad
 
 
+def test_uninformed_jitter_breaks_symmetry_and_matches_seed():
+    cfg = _core_config()
+    cfg.seed = 42
+    cfg.fixed_task_goal_mixture = True
+    cfg.fixed_task_goal_init = "uniform_jitter"
+    cfg.fixed_task_target_id = 1
+    first = SimpleSequenceWithBypassCore(cfg, 5).fixed_task_condition()
+    second = SimpleSequenceWithBypassCore(cfg, 5).fixed_task_condition()
+    assert torch.allclose(first, second)
+    assert torch.isclose(first.sum(), torch.tensor(1.0))
+    assert torch.allclose(first, torch.full((3,), 1 / 3), atol=0.01)
+    assert not torch.allclose(first, torch.full((3,), 1 / 3), atol=1e-5)
+    cfg.seed = 1234
+    other = SimpleSequenceWithBypassCore(cfg, 5).fixed_task_condition()
+    assert not torch.allclose(first, other)
+
+
 def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
     cfg = _core_config()
     cfg.fixed_task_goal_mixture = True
@@ -179,6 +196,8 @@ def test_single_value_ppo_uses_external_reward_when_explicitly_requested():
     external = torch.tensor([[0.0, 10.0, 0.0]])
     for source, expected in (("external", external), ("internal", worker), ("legacy", worker)):
         learner.cfg = SimpleNamespace(advantage_reward_source=source)
-        batch = {"rewards": worker.clone(), "rewards_external": external.clone()}
+        batch = {"rewards": worker.clone(), "rewards_worker": worker.clone(),
+                 "rewards_external": external.clone()}
         learner._select_ppo_reward(batch)
         assert torch.equal(batch["rewards"], expected)
+        assert torch.equal(batch["rewards_worker"], worker)

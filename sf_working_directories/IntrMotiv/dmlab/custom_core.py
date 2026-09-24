@@ -503,6 +503,11 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 if not 0 <= target_id < self.Hippo_n_feature:
                     raise ValueError("fixed_task_target_id is outside the DG capacity")
                 initial_target[target_id] = 9.0  # approximately 99.2% on the nominated ID at F64
+            elif goal_init == "uniform_jitter":
+                # The fresh FiLM table starts at zero. Exactly equal mixture
+                # weights preserve row symmetry and cannot identify a goal.
+                generator = torch.Generator().manual_seed(int(getattr(cfg, "seed", 0)) + 1907)
+                initial_target = 0.01 * torch.randn(self.Hippo_n_feature, generator=generator)
             elif goal_init != "uniform":
                 raise ValueError(f"Unknown fixed_task_goal_init={goal_init}")
         self.fixed_task_target = (
