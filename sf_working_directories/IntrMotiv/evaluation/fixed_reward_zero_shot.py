@@ -39,6 +39,9 @@ def episode(actor, cfg, env, env_info, *, seed, command, target, cell_x, cell_y,
     obs, _ = env.reset()
     start = np.asarray(obs["pos"][0], dtype=float)
     assert not (cell_x <= start[0] < cell_x + 100 and cell_y <= start[1] < cell_y + 100)
+    center = np.asarray((cell_x + 50, cell_y + 50), dtype=float)
+    start_distance = float(np.linalg.norm(start[:2] - center))
+    minimum_distance = start_distance
     actual_seed = int(base.last_reset_seed)
     state = torch.zeros(1, get_rnn_size(cfg), dtype=torch.float32)
     rng = torch.Generator().manual_seed(seed + 17011)
@@ -62,6 +65,7 @@ def episode(actor, cfg, env, env_info, *, seed, command, target, cell_x, cell_y,
             obs, step_reward, terminated, truncated, _ = env.step(preprocess_actions(env_info, action))
             reward += float(torch.as_tensor(step_reward).reshape(-1)[0])
             final = np.asarray(obs["pos"][0], dtype=float).copy()
+            minimum_distance = min(minimum_distance, float(np.linalg.norm(final[:2] - center)))
             if bool(make_dones(terminated, truncated)[0]):
                 terminal = True
                 break
@@ -71,6 +75,10 @@ def episode(actor, cfg, env, env_info, *, seed, command, target, cell_x, cell_y,
         target_dg_active_decisions=dg_hits, elapsed_decisions=elapsed,
         terminal=terminal, start_x=float(start[0]), start_y=float(start[1]),
         terminal_x=float(final[0]), terminal_y=float(final[1]),
+        start_distance=start_distance, minimum_distance=minimum_distance,
+        terminal_distance=float(np.linalg.norm(final[:2] - center)),
+        entered_r200=start_distance > 200 and minimum_distance <= 200,
+        entered_r300=start_distance > 300 and minimum_distance <= 300,
     )
 
 
@@ -82,6 +90,7 @@ def main():
     p.add_argument("--site", choices=["dg50", "dg51"], required=True)
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--trials", type=int, default=20)
+    p.add_argument("--seed-base", type=int, default=51000)
     p.add_argument("--horizon", type=int, default=64, help="Source option timeout in decisions")
     args = p.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +114,7 @@ def main():
     rows = []
     try:
         for trial in range(args.trials):
-            seed = 51000 + trial
+            seed = args.seed_base + trial
             for condition in ("nominated", "wrong", "shuffled"):
                 command = command_for_condition(condition, target, seed, int(cfg.Hippo_n_feature))
                 row = episode(
@@ -125,9 +134,21 @@ def main():
         writer.writerows(rows)
     summary = {
         "checkpoint": str(checkpoint), "site": args.site, "trials_per_condition": args.trials,
+        "seed_base": args.seed_base,
         "option_horizon_decisions": args.horizon,
         "successes": {name: sum(row["reward_contact"] for row in rows if row["condition"] == name)
                       for name in ("nominated", "wrong", "shuffled")},
+        "approach": {
+            name: {
+                "eligible_r200": sum(row["start_distance"] > 200 for row in rows if row["condition"] == name),
+                "entered_r200": sum(row["entered_r200"] for row in rows if row["condition"] == name),
+                "eligible_r300": sum(row["start_distance"] > 300 for row in rows if row["condition"] == name),
+                "entered_r300": sum(row["entered_r300"] for row in rows if row["condition"] == name),
+                "mean_minimum_distance": float(np.mean([row["minimum_distance"] for row in rows
+                                                       if row["condition"] == name])),
+            }
+            for name in ("nominated", "wrong", "shuffled")
+        },
     }
     (args.out_dir / f"{args.site}_zero_shot_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(summary, flush=True)

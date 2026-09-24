@@ -35,6 +35,8 @@ def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_x, horizon)
     assert not (reward_x <= start[0] < reward_x + 100 and 1900 <= start[1] < 2000)
     engine_seed = int(env.unwrapped.last_reset_seed)
     state = torch.zeros(1, get_rnn_size(cfg), dtype=torch.float32)
+    policy_seed = seed + 17011
+    torch.manual_seed(policy_seed)
     dg_hits = 0
     total_reward = 0.0
     terminal = False
@@ -60,6 +62,7 @@ def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_x, horizon)
                 break
     return {
         "requested_seed": seed, "engine_seed": engine_seed,
+        "policy_seed": policy_seed,
         "start_x": float(start[0]), "start_y": float(start[1]),
         "start_region": start_region(*start[:2]),
         "terminal_x": float(end[0]), "terminal_y": float(end[1]),
@@ -79,12 +82,12 @@ def main():
     parser.add_argument("--trials", type=int, default=20)
     parser.add_argument("--horizon", type=int, default=1800)
     parser.add_argument("--seed-base", type=int, default=61000)
-    parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--stochastic", action="store_true", help="Sample reproducibly; default is deterministic")
     args = parser.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     deepmind_lab.set_runfiles_path(str(args.runfiles.resolve(strict=True)))
     cfg, bootstrap_env, _, actor, checkpoint, _ = load_policy_env(
-        args.run_dir, args.horizon, args.deterministic, 0, args.checkpoint
+        args.run_dir, args.horizon, not args.stochastic, 0, args.checkpoint
     )
     bootstrap_env.close()
     cfg.env = "openfield_map2_fixed_reward_" + args.site

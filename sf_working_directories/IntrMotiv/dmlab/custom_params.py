@@ -81,6 +81,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--transfer_freeze_dg", default=False, type=str2bool)
     p.add_argument("--transfer_freeze_worker", default=False, type=str2bool)
+    p.add_argument("--transfer_graph", default=False, type=str2bool)
     p.add_argument("--dmlab_runfiles_path", default=None, type=str)
     p.add_argument(
         "--fixed_task_conditioning",
@@ -90,6 +91,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--fixed_task_goal_mixture", default=False, type=str2bool)
     p.add_argument("--fixed_task_target_id", default=0, type=int)
+    p.add_argument("--fixed_task_goal_init", default="nominated", choices=["nominated", "uniform"])
 
     p.add_argument("--DG_lr", default=None, type=float, help="Dentate Gyrus Pattern separation learning rate")
     p.add_argument("--DG_temperature", default=None, type=float, help="Dentate Gyrus output temperature")

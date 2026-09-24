@@ -1181,6 +1181,23 @@ class BaseDistanceRecorder(BaseLearner):
         }
         if mismatched:
             raise RuntimeError(f"Transfer tensor shape mismatch: {mismatched}")
+        if bool(getattr(self.cfg, "transfer_graph", False)):
+            graph_prefix = "core.policy_graph."
+            graph_keys = {
+                key for key in source
+                if key.startswith(graph_prefix)
+                and key not in (graph_prefix + "reward_goal_value", graph_prefix + "reward_goal_count")
+            }
+            if not graph_keys or not graph_keys.issubset(destination):
+                raise RuntimeError("Source and destination policy graphs are incompatible")
+            graph_mismatches = {
+                key: (tuple(source[key].shape), tuple(destination[key].shape))
+                for key in graph_keys if source[key].shape != destination[key].shape
+            }
+            if graph_mismatches:
+                raise RuntimeError(f"Graph transfer tensor shape mismatch: {graph_mismatches}")
+            selected.update({key: source[key] for key in graph_keys})
+            log.info("Initialized %d graph evidence buffers from %s", len(graph_keys), path)
         destination.update(selected)
         self.actor_critic.load_state_dict(destination, strict=True)
         log.info("Initialized %d %s transfer tensors from %s", len(selected), scope, path)
@@ -3491,7 +3508,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             else:
                 additional_stats["encoder_arrival_credit_loss"] = encoder_credit_loss.detach()
                 additional_stats["encoder_source_credit_loss"] = zero_credit
-            additional_stats["intrinsic_rewards"] = mb["rewards"]
+            additional_stats["intrinsic_rewards"] = mb.get("rewards_worker", mb["rewards"])
             additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
             additional_stats["encoder_reward_loss"] = encoder_reward_loss
             additional_stats["batch_reward_loss"] = encoder_batch_loss
@@ -4156,6 +4173,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             buff["hrl_control_outcome_id"] = outcome_labels["outcome"]
             if command_set_size is not None:
                 buff["hrl_control_command_set_size"] = command_set_size
+        buff["rewards_worker"] = decoder_reward.clone()
         buff["rewards"] = decoder_reward
         return (
             baseline,
@@ -4195,6 +4213,16 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         buff["encoder_credit_activation_mask"] = credit_mask
         buff["encoder_dominant_activation_mask"] = dominant_rollout
         buff["encoder_non_dominant_activation_mask"] = non_dominant_activations[:, 1:-1]
+
+    def _select_ppo_reward(self, buff):
+        """Honor an explicit reward-source choice in the single-value learner.
+
+        Intrinsic worker reward remains available for diagnostics and encoder
+        credit. PPO and the reward manager must consume the same task reward.
+        Legacy studies without an explicit choice keep their historical path.
+        """
+        if self._advantage_reward_source() == "external":
+            buff["rewards"] = buff["rewards_external"].clone()
 
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
@@ -4288,6 +4316,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             buff["values"][:, -1] = next_values
 
             self._calculate_internal_reward(buff, additional_step)
+            self._select_ppo_reward(buff)
 
             if self.cfg.normalize_returns and getattr(self.cfg, "controller_learning", "ppo") != "ddqn":
                 # Since our value targets are normalized, the values will also have normalized statistics.

@@ -496,11 +496,15 @@ class SimpleSequenceWithBypassCore(ModelCore):
             raise ValueError("fixed task goal mixture requires fixed task conditioning")
         initial_target = torch.full((self.Hippo_n_feature,), 1.0 / float(self.Hippo_n_feature))
         if self.fixed_task_goal_mixture:
-            target_id = int(getattr(cfg, "fixed_task_target_id", 0))
-            if not 0 <= target_id < self.Hippo_n_feature:
-                raise ValueError("fixed_task_target_id is outside the DG capacity")
             initial_target = torch.zeros(self.Hippo_n_feature)
-            initial_target[target_id] = 9.0  # approximately 99.2% on the nominated ID at F64
+            goal_init = getattr(cfg, "fixed_task_goal_init", "nominated")
+            if goal_init == "nominated":
+                target_id = int(getattr(cfg, "fixed_task_target_id", 0))
+                if not 0 <= target_id < self.Hippo_n_feature:
+                    raise ValueError("fixed_task_target_id is outside the DG capacity")
+                initial_target[target_id] = 9.0  # approximately 99.2% on the nominated ID at F64
+            elif goal_init != "uniform":
+                raise ValueError(f"Unknown fixed_task_goal_init={goal_init}")
         self.fixed_task_target = (
             nn.Parameter(initial_target)
             if self.fixed_task_conditioning

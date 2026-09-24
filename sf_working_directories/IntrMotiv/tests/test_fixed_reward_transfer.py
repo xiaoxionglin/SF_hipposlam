@@ -60,6 +60,17 @@ def test_flat_goal_mixture_is_normalized_trainable_and_source_aligned():
     assert core.fixed_task_target.grad.abs().sum() > 0
 
 
+def test_uniform_flat_goal_mixture_has_no_nominated_address():
+    cfg = _core_config()
+    cfg.fixed_task_goal_mixture = True
+    cfg.fixed_task_target_id = 1
+    cfg.fixed_task_goal_init = "uniform"
+    core = SimpleSequenceWithBypassCore(cfg, 5)
+    mixture = core.fixed_task_condition()
+    assert torch.allclose(mixture, torch.full((3,), 1 / 3))
+    assert core.fixed_task_target.requires_grad
+
+
 def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
     cfg = _core_config()
     cfg.fixed_task_goal_mixture = True
@@ -94,6 +105,12 @@ class _Actor(nn.Module):
         self.decoder = nn.Linear(3, 3)
         self.action_parameterization = nn.Linear(3, 2)
         self.critic_linear = nn.Linear(3, 1)
+        self.core = nn.Module()
+        self.core.policy_graph = nn.Module()
+        self.core.policy_graph.register_buffer("node_visits", torch.zeros(3))
+        self.core.policy_graph.register_buffer("edge_confidence", torch.zeros(3, 3))
+        self.core.policy_graph.register_buffer("reward_goal_value", torch.zeros(3, 3))
+        self.core.policy_graph.register_buffer("reward_goal_count", torch.zeros(3, 3))
 
 
 def _learner(scope):
@@ -132,6 +149,17 @@ def test_policy_transfer_keeps_critic_fresh_and_freeze_disables_dg_gradients():
     assert not any(p.requires_grad for p in learner.actor_critic.encoder.DG_projection.parameters())
 
 
+def test_graph_transfer_preserves_navigation_evidence_but_resets_reward_values():
+    learner = _learner("policy")
+    learner.cfg.transfer_graph = True
+    learner._initialize_transfer_weights()
+    graph = learner.actor_critic.core.policy_graph
+    assert torch.all(graph.node_visits == 7)
+    assert torch.all(graph.edge_confidence == 7)
+    assert torch.count_nonzero(graph.reward_goal_value) == 0
+    assert torch.count_nonzero(graph.reward_goal_count) == 0
+
+
 def test_frozen_legacy_batchnorm_uses_checkpoint_statistics_without_drift():
     projection = DGProjection_batchnorm_relu(4, 3, intercept=0.0, batchnorm_semantics="legacy_batch")
     projection.train()
@@ -143,3 +171,14 @@ def test_frozen_legacy_batchnorm_uses_checkpoint_statistics_without_drift():
     assert torch.equal(projection.batchnorm1d.running_mean, before_mean)
     assert torch.equal(projection.batchnorm1d.running_var, before_var)
     assert not projection.last_running_stats_updated
+
+
+def test_single_value_ppo_uses_external_reward_when_explicitly_requested():
+    learner = object.__new__(DistanceLearnerReward)
+    worker = torch.tensor([[0.4, 0.2, 0.0]])
+    external = torch.tensor([[0.0, 10.0, 0.0]])
+    for source, expected in (("external", external), ("internal", worker), ("legacy", worker)):
+        learner.cfg = SimpleNamespace(advantage_reward_source=source)
+        batch = {"rewards": worker.clone(), "rewards_external": external.clone()}
+        learner._select_ppo_reward(batch)
+        assert torch.equal(batch["rewards"], expected)

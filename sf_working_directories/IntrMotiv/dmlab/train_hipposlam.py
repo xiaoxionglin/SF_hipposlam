@@ -270,6 +270,12 @@ def maybe_overwrite_rnn_size(cfg):
         raise ValueError("transfer_freeze_dg requires transferred DG weights")
     if getattr(cfg, "transfer_freeze_worker", False) and transfer_scope != "policy":
         raise ValueError("transfer_freeze_worker requires transferred policy weights")
+    if getattr(cfg, "transfer_graph", False) and (
+        transfer_scope != "policy"
+        or not getattr(cfg, "hrl_controllable_graph", False)
+        or not getattr(cfg, "transfer_freeze_dg", False)
+    ):
+        raise ValueError("transfer_graph requires policy transfer, an HRL graph, and frozen DG")
     if getattr(cfg, "fixed_task_goal_mixture", False) and not fixed_task_conditioning:
         raise ValueError("fixed_task_goal_mixture requires fixed_task_conditioning")
     if getattr(cfg, "hrl_direct_target_selection", "frontier") == "reward_value":
