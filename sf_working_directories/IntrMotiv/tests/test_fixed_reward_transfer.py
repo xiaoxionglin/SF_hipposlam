@@ -129,6 +129,34 @@ def test_goal_write_flat_worker_allows_reward_gradient_into_dg():
     assert core.fixed_task_target.grad.abs().sum() > 0
 
 
+def test_goal_write_replay_uses_current_flat_mixture_instead_of_stored_goal():
+    cfg = _core_config()
+    cfg.seed = 42
+    cfg.fixed_task_goal_mixture = True
+    cfg.fixed_task_goal_init = "uniform_jitter"
+    cfg.hrl_graph_memory = "policy_buffer"
+    cfg.hrl_target_timing = "immediate"
+    cfg.ppo_dg_gradient = "joint"
+    cfg.DG_BN_intercept = 1.0
+    core = GoalConditionedDGCore(cfg, 8)
+    decoder = TargetFiLMDecoder(core)
+    pre = torch.full((4, 2, 3), 2.0, requires_grad=True)
+    stored_goal = torch.zeros(4, 2, 3)
+    stored_goal[..., 1] = 1.0
+    head = torch.cat((torch.ones(4, 2, 3), torch.zeros(4, 2, 2), pre, stored_goal), -1)
+    packed = torch.nn.utils.rnn.pack_padded_sequence(head, [4, 4], enforce_sorted=False)
+    output, _ = core(packed, torch.zeros(2, core.total_state_size))
+    current = core.fixed_task_condition()
+    assert torch.allclose(
+        output.data[:, core.target_condition_start : core.target_condition_start + 3],
+        current.expand(8, -1),
+    )
+    decoder(core.worker_view(output.data)).square().sum().backward()
+    assert core.fixed_task_target.grad is not None
+    assert core.fixed_task_target.grad.abs().sum() > 0
+    assert pre.grad is not None and pre.grad.abs().sum() > 0
+
+
 class _Projection(nn.Module):
     def __init__(self):
         super().__init__()

@@ -93,7 +93,12 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
                 if worker.count_nonzero():
                     raise ValueError("Finite worker replay requires zero initial traces")
                 pre = padded_head[:, :, self.canonical_input_size : self.canonical_input_size + n]
-                goals = padded_head[:, :, -n:] if replay else replay_conditions[:, :, :n]
+                if self.fixed_task_conditioning:
+                    goals = self.fixed_task_condition().to(pre).view(1, 1, n).expand_as(pre)
+                    padded_out = padded_out.clone()
+                    padded_out[:, :, self.target_condition_start : self.target_condition_start + n] = goals
+                else:
+                    goals = padded_head[:, :, -n:] if replay else replay_conditions[:, :, :n]
                 activity = self.write_activity(pre.reshape(-1, n), goals.reshape(-1, n)).reshape(*pre.shape)
                 memories = finite_shift_history(activity, self.R, self.expanded_length).flatten(2)
                 batch = torch.arange(len(lengths), device=memories.device)
@@ -107,11 +112,14 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
             for t in range(padded_head.size(0)):
                 valid = (lengths > t).to(worker.device)
                 pre = padded_head[t, :, self.canonical_input_size : self.canonical_input_size + n]
-                goal = (
-                    padded_head[t, :, -n:]
-                    if replay
-                    else padded_out[t, :, self.target_condition_start : self.target_condition_start + n]
-                )
+                if self.fixed_task_conditioning:
+                    goal = self.fixed_task_condition().to(pre).unsqueeze(0).expand(pre.size(0), -1)
+                else:
+                    goal = (
+                        padded_head[t, :, -n:]
+                        if replay
+                        else padded_out[t, :, self.target_condition_start : self.target_condition_start + n]
+                    )
                 activity = self.write_activity(pre, goal)
                 advanced = self.advance_worker(worker, activity)
                 worker = torch.where(valid[:, None, None], advanced, worker)
@@ -123,11 +131,14 @@ class GoalConditionedDGCore(SimpleSequenceWithBypassCore):
             output = pack_padded_sequence(torch.stack(result), lengths, enforce_sorted=False)
         else:
             pre = data[:, self.canonical_input_size : self.canonical_input_size + n]
-            goal = (
-                data[:, -n:]
-                if replay
-                else canonical_out[:, self.target_condition_start : self.target_condition_start + n]
-            )
+            if self.fixed_task_conditioning:
+                goal = self.fixed_task_condition().to(pre).unsqueeze(0).expand(pre.size(0), -1)
+            else:
+                goal = (
+                    data[:, -n:]
+                    if replay
+                    else canonical_out[:, self.target_condition_start : self.target_condition_start + n]
+                )
             activity = self.write_activity(pre, goal)
             worker = self.advance_worker(worker, activity)
             self.last_worker_dg_activity = activity.detach()
