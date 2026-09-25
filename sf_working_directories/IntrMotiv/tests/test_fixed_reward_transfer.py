@@ -230,6 +230,20 @@ def test_graph_transfer_preserves_navigation_evidence_but_resets_reward_values()
     assert torch.count_nonzero(graph.reward_goal_count) == 0
 
 
+def test_graph_transfer_with_trainable_dg_keeps_source_evidence_and_fresh_reward_values():
+    learner = _learner("policy")
+    learner.cfg.transfer_graph = True
+    learner.cfg.transfer_freeze_dg = False
+    learner._initialize_transfer_weights()
+    learner._apply_transfer_freeze()
+    graph = learner.actor_critic.core.policy_graph
+    assert torch.all(graph.node_visits == 7)
+    assert torch.all(graph.edge_confidence == 7)
+    assert torch.count_nonzero(graph.reward_goal_value) == 0
+    assert torch.count_nonzero(graph.reward_goal_count) == 0
+    assert any(p.requires_grad for p in learner.actor_critic.encoder.DG_projection.parameters())
+
+
 def test_frozen_legacy_batchnorm_uses_checkpoint_statistics_without_drift():
     projection = DGProjection_batchnorm_relu(4, 3, intercept=0.0, batchnorm_semantics="legacy_batch")
     projection.train()

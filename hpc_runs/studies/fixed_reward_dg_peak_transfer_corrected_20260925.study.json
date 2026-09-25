@@ -2,7 +2,7 @@
   "schema": "intrmotiv/study/v1",
   "workflow_version": "1.12.0",
   "study_id": "fixed_reward_dg_peak_transfer_corrected_20260925",
-  "description": "Corrected external-reward transfer with address-free near-uniform flat mixtures and a separate source-graph arm.",
+  "description": "Corrected external-reward transfer with graph-carrying waypoint arms, an empty-graph ablation, and address-free near-uniform flat mixtures.",
   "expected_runs": 48,
   "metadata": {
     "project": "SF_IntrMotiv_FixedRewardDGPeakTransfer",
@@ -304,13 +304,14 @@
             "--ppo_dg_gradient=stop",
             "--transfer_model_path={base_source_checkpoint}",
             "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True"
+            "--hrl_edge_exploration=True",
+            "--transfer_graph=true"
           ],
           "metadata": {
             "architecture": "waypoint",
             "scope": "policy",
             "dg_trainable": false,
-            "graph_init": "empty"
+            "graph_init": "source"
           }
         },
         {
@@ -327,13 +328,14 @@
             "--ppo_dg_gradient=joint",
             "--transfer_model_path={base_source_checkpoint}",
             "--hrl_manager_mode=frontier_waypoint",
-            "--hrl_edge_exploration=True"
+            "--hrl_edge_exploration=True",
+            "--transfer_graph=true"
           ],
           "metadata": {
             "architecture": "waypoint",
             "scope": "policy",
             "dg_trainable": true,
-            "graph_init": "empty"
+            "graph_init": "source"
           }
         },
         {
