@@ -556,6 +556,57 @@
             }
           }
         ]
+      },
+      {
+        "name": "W_WORKER_minus_W_GRAPH",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "arm": "W_WORKER"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "arm": "W_GRAPH"
+            }
+          }
+        ]
+      },
+      {
+        "name": "W_FULL_minus_W_WORKER",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "arm": "W_FULL"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "arm": "W_WORKER"
+            }
+          }
+        ]
+      },
+      {
+        "name": "F_FULL_minus_F_DG",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "arm": "F_FULL"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "arm": "F_DG"
+            }
+          }
+        ]
       }
     ]
   }
