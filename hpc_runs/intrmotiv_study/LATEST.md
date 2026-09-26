@@ -3,7 +3,8 @@
 - Implementation: `1.13.0` (new-run inverse depth with legacy StudySpec compatibility)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
-- NEMO2 runtime copy: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/hpc_runs/intrmotiv_study/`
+- NEMO2 verified 1.13.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/default_audit_verified/hpc_runs/intrmotiv_study/`
+- NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
 
