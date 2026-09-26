@@ -34,10 +34,11 @@ The launcher and template currently default to the active
 `/work/classic/fr_xl1014-corridor-geometry` allocation. Set
 `INTRMOTIV_WORKSPACE_ROOT` to move training outputs, Slurm records, runtime
 caches, and temporary files together; `INTRMOTIV_TRAIN_ROOT` and
-`INTRMOTIV_RUNTIME_ROOT` remain available as narrower overrides. DMLab does not
-derive its level-cache path from these environment variables, so run
-descriptions that enable the level cache must explicitly provide a workspace
-`--dmlab_level_cache_path`.
+`INTRMOTIV_RUNTIME_ROOT` remain available as narrower overrides. Fresh
+IntrMotiv runs derive the DMLab level cache from the resolved `train_dir` as
+`train_dir/runtime/dmlab_cache`. An explicit `--dmlab_level_cache_path` still
+wins, and saved runs retain their recorded path. Confirm every bulk path in a
+print-only submission review before launching on NEMO2.
 
 ## Source control on NEMO2
 

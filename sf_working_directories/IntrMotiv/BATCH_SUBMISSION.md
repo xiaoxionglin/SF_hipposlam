@@ -44,13 +44,14 @@ The wrapper currently requests:
 These are submission defaults, not model hyperparameters.
 
 The shared IntrMotiv Slurm template routes runtime-generated data to
-`/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime`: per-job
+`/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/runtime`: per-job
 `TMPDIR`, XDG/Torch cache, Matplotlib config, and W&B cache/staging. Set
 `INTRMOTIV_RUNTIME_ROOT` before launching only when a different allocated
 workspace is required. DMLab's level cache is a model CLI setting rather than a
-template setting; every experiment using `--dmlab_use_level_cache=True` must
-also set `--dmlab_level_cache_path` to a workspace path. Confirm the resolved
-value in a preflight `config.json`.
+template setting; fresh IntrMotiv runs derive its default from the resolved
+`train_dir` as `train_dir/runtime/dmlab_cache`. Explicit paths remain available
+for studies using another allocated workspace. Confirm the resolved value in a
+preflight `config.json`.
 
 ## 2. Prerequisites
 
@@ -130,7 +131,7 @@ Before submission, verify that `train_dir`, checkpoints, W&B local data, Slurm
 logs, caches, and temporary environment data all resolve into an allocated
 workspace. Do not run training against paths under the home filesystem.
 The IntrMotiv launcher defaults to
-`/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir`; override it
+`/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir`; override it
 only when necessary with `INTRMOTIV_TRAIN_ROOT`.
 
 Use the following naming levels consistently:
