@@ -2500,6 +2500,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#september-26-default-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        September 26 default audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#september-15-consolidation-historical" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2585,8 +2596,28 @@ z-relation follow-up (<code>2da7c742</code>), predictive active goals (<code>a28
 task-general transfer (<code>b279cc94</code>), cued reward transfer and calibrated frozen
 DG controls (<code>20fbcbe0</code>), and uncommitted corridor, landmark, and replay-retention
 fixes. The canonical vault study package is synchronized at version 1.12.0.
-Existing experimental modes remain opt-in and checkpoint/configuration defaults
-are preserved. The evaluator now defaults to the active corridor workspace.</p>
+Existing experimental modes remain opt-in. The evaluator defaults to the active
+corridor workspace.</p>
+<h2 id="september-26-default-audit">September 26 default audit<a class="headerlink" href="#september-26-default-audit" title="Permanent link">&para;</a></h2>
+<p>For fresh IntrMotiv runs with depth enabled, capped inverse depth is now the
+default. An explicit <code>--depth_sensor_inverse=False</code> selects pass-through.
+Saved configurations from before this switch retain pass-through, including
+when the field was absent; explicit command-line overrides still win. The
+<code>--depth_sensor</code> switch itself remains off by default.
+Workflow 1.13 renders an explicit pass-through flag for older studies that
+enabled depth without choosing a transform. Their study files and SHA-256
+fingerprints remain unchanged; a new 1.13 study inherits inverse depth.</p>
+<p>Controller milestone and best checkpoints omit replay; the rolling restart
+checkpoint retains it. Pinned frame targets now count toward the milestone
+retention cap, with one recent unpinned artifact retained when pins fill the
+cap. The base Sample Factory time-milestone default is disabled, although
+historical StudySpecs that explicitly set 1,800 seconds keep that schedule.
+Their saved SHA-256 fingerprints remain unchanged; new studies should omit the
+periodic setting when fixed frame targets are sufficient.</p>
+<p>The default online-spatial workspace is the active corridor allocation, and
+its output root derives from <code>train_dir</code>. Historical saved paths and explicit
+study overrides remain available. The global-default inventory is maintained
+in the vault's <code>04_implementation/global_defaults_audit_20260926.md</code>.</p>
 <p>Overlapping changes are reconciled in the shared batched manager, rather than
 restoring the obsolete scalar planner. Both manager paths use the same
 cue-specific reward-goal selector. Terminal coverage advances without falsely
@@ -2718,7 +2749,7 @@ local pre-publication commit is also preserved in the archive bundle.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="September 15, 2026 15:13:40 UTC">September 15, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="September 26, 2026 14:43:02 UTC">September 26, 2026</span>
   </span>
 
     
