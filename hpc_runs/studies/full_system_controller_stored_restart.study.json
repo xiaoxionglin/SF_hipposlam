@@ -1,0 +1,362 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.8.1",
+  "study_id": "full_system_controller_stored_restart_20260912",
+  "description": "Bounded real restart from immutable passing R2 stored-state checkpoints; preserves replay, optimizer and RNG state.",
+  "expected_runs": 4,
+  "metadata": {
+    "project": "SF_IntrMotiv_FullSystemController",
+    "training_steps": 442368,
+    "preflight_steps": 442368,
+    "design_cells": 4,
+    "physical_training_signal": false,
+    "action_set": "navigation8",
+    "action_repeat": 4,
+    "action_vectors": "[[0,0,0,1,0,0,0],[0,0,0,-1,0,0,0],[0,0,-1,0,0,0,0],[0,0,1,0,0,0,0],[-20,0,0,0,0,0,0],[20,0,0,0,0,0,0],[-20,0,0,1,0,0,0],[20,0,0,1,0,0,0]]",
+    "reference_checkpoint_frames": 25001984,
+    "goal_detector": "unconditioned",
+    "discrete_replacement": false,
+    "initialization": "Resume immutable R2 checkpoint at 311296 frames; new physical episodes, preserved replay and optimizer.",
+    "main_update_budget": "256 TD positions per 64 accepted physical replay decisions after 16384 warm-up",
+    "her_budget": "additional up to 256 positions; coefficient 1.0; separate sampling RNG",
+    "production_gate": "Bounded online validation; no automatic 18-run production launch.",
+    "startup_boundary": "All arms disable SF unrecorded pre-policy action walks; initial policy history begins at physical reset. Worker startup delays retained.",
+    "native_terminal_binding": "intrmotiv/terminal-binding/v1; explicit terminal rendering; unchanged underlying engine",
+    "native_terminal_binding_sha256": "6e2b1842bf78d8f77841854194efe2ada2114813d2b0fa1cddb4524e3aecb804",
+    "execution_device": "GPU; matching Torch 2.9.1+cu128 and torchvision 0.24.1+cu128; NumPy 1.26.4",
+    "main_sampler": "uniform complete compatible replay search; no arbitrary candidate cap; fixed main TD budget",
+    "replay_batching": "Stored action-time worker states; batched existing decoder and Q heads; no recurrent replay reconstruction.",
+    "qualification_revision": "Online extension of passing R2, unchanged learner; full replay capacity and annealing exercised.",
+    "reconstruction_head": "Used only for one-pass certified terminal DG labels at ingestion; no recurrent replay reconstruction.",
+    "optimizer_ownership": "STOP only: replay trains decoder/Q; fresh DG optimizer retains sole DG ownership.",
+    "goal_memory": "goal-independent",
+    "goal_conditioning_location": "existing TargetFiLMDecoder only",
+    "architectural_delta": "dg_goal_input write -> none for every waypoint learning mode; F64 capacity and frontier_waypoint manager retained",
+    "supersedes_waypoint_study_sha256": "b68edd0bcb84fd25d2779013e17511c2a97dfb0624741f0a56e48343a6d0d4d9",
+    "her_reconstruction": "None: share stored physical memory; relabel decoder goal, auxiliary reward and ending.",
+    "throughput_scope": "Measure full SF collection, fresh DG and replay throughput after warm-up.",
+    "representation_freshness": "Behavior-time stored states; representation lag accepted; same inputs for online and target decoders.",
+    "actor_memory": "Ordinary SF continuation across publications; no custom actor history rebuilding.",
+    "supersedes_short_trial_sha256": "8272c2097863e16fecd0417fca886d842a16745a81057b4e6f95d2227bb1cc4c"
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "intrmotiv_full_system_controller_stored_restart_20260912",
+    "workspace_root": "/work/classic/fr_xl1014-train",
+    "output_root": "/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_full_system_controller_stored_restart_20260912",
+    "run_name_template": "FSCS_{base_label}_{controller}_S{seed}",
+    "condition_name_template": "FSCS_{base_label}_{controller}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+      "--train_for_env_steps=442368",
+      "--algo=APPO",
+      "--gamma=0.99",
+      "--learning_rate=0.0002",
+      "--exploration_loss_coeff=0.005",
+      "--value_loss_coeff=0.3",
+      "--ppo_clip_ratio=0.25",
+      "--num_workers=32",
+      "--num_envs_per_worker=2",
+      "--worker_num_splits=2",
+      "--num_epochs=1",
+      "--rollout=64",
+      "--recurrence=64",
+      "--batch_size=2048",
+      "--num_batches_per_epoch=2",
+      "--decorrelate_experience_max_seconds=120",
+      "--max_grad_norm=0.0",
+      "--dmlab_renderer=software",
+      "--dmlab_extended_action_set=False",
+      "--dmlab_reduced_action_set=False",
+      "--dmlab_one_task_per_worker=True",
+      "--dmlab_use_level_cache=True",
+      "--dmlab_level_cache_path=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime/dmlab_cache",
+      "--set_workers_cpu_affinity=True",
+      "--force_envs_single_thread=True",
+      "--num_policies=1",
+      "--with_pbt=False",
+      "--max_policy_lag=35",
+      "--use_record_episode_statistics=True",
+      "--keep_checkpoints=8",
+      "--save_every_sec=300",
+      "--save_milestones_sec=1800",
+      "--save_best_every_sec=300",
+      "--save_best_after=1200",
+      "--save_best_metric=z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "--env_frameskip=4",
+      "--core_name=BypassSS",
+      "--DG_name=batchnorm_relu",
+      "--Hippo_R=8",
+      "--Hippo_L=64",
+      "--depth_sensor=True",
+      "--normalize_input=False",
+      "--encoder_conv_architecture=layer2_resnet18",
+      "--use_rnn=True",
+      "--rnn_type=gru",
+      "--rnn_size=0",
+      "--nonlinearity=relu",
+      "--actor_critic_share_weights=True",
+      "--with_wandb=True",
+      "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
+      "--wandb_project=SF_IntrMotiv_FullSystemController",
+      "--wandb_group=intrmotiv_full_system_controller_stored_restart_20260912",
+      "--wandb_dir=/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/train_dir/wandb",
+      "--benchmark=False",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--with_pos_obs=False",
+      "--device=gpu",
+      "--rec_distances=True",
+      "--distance_learning=True",
+      "--masked_distance_matrix=False",
+      "--normalize_advantage=True",
+      "--advantage_reward_source=internal",
+      "--extra_encoder_losses=True",
+      "--metric=sum",
+      "--reward_scale=0.1",
+      "--double_value=False",
+      "--reset_critic=False",
+      "--reset_decoder=False",
+      "--encoder_grad_coeff=1",
+      "--encoder_batch_loss=True",
+      "--encoder_batch_loss_temperature=0.5",
+      "--encoder_multi_activation_loss=True",
+      "--encoder_unused_sequence_loss=False",
+      "--extra_decoder_loss=False",
+      "--encoder_population_usage_loss=False",
+      "--encoder_density_loss_coeff=0.0",
+      "--encoder_collision_loss_coeff=0.0",
+      "--encoder_reward_method=encourage",
+      "--dg_global_punishment_coeff=0.0",
+      "--dg_global_punishment_temperature=0.5",
+      "--dg_row_repulsion_coeff=0.0",
+      "--dg_ca3_temporal_exclusion_coeff=0.0",
+      "--dg_path_scatter_coeff=0.0",
+      "--iterative_update=False",
+      "--ca3_predictor_shadow=False",
+      "--exploration_coverage_telemetry=True",
+      "--exploration_coverage_grid_size=100",
+      "--DG_BN_intercept=2.43",
+      "--hrl_target_timing=immediate",
+      "--encoder_reward_recipient=arrival",
+      "--encoder_reward_require_local_predecessor=True",
+      "--dmlab_navigation_action_set=True",
+      "--online_spatial_telemetry=True",
+      "--online_spatial_snapshot_targets=442368",
+      "--online_spatial_snapshot_max_frames=442368",
+      "--exploration_window_steps=10000",
+      "--hrl_controllable_graph=True",
+      "--hrl_graph_memory=policy_buffer",
+      "--hrl_persistent_fast_weights=False",
+      "--hrl_fast_weight_half_life_options=5000",
+      "--hrl_worker_reward_mode=hit_distance",
+      "--hrl_target_hit_reward=1.0",
+      "--hrl_distance_bonus_coeff=0.1",
+      "--hrl_min_target_visits=1",
+      "--hrl_edge_confidence_threshold=0.5",
+      "--hrl_edge_reliability_threshold=0.5",
+      "--hrl_exploration_mode=False",
+      "--hrl_manager_exploration_probability=0.0",
+      "--hrl_exploration_horizon=64",
+      "--hrl_empirical_her=False",
+      "--hrl_empirical_her_horizon=64",
+      "--hrl_empirical_her_coeff=0.0",
+      "--hrl_timeout_margin_ratio=0.20",
+      "--hrl_timeout_margin_steps=2",
+      "--hrl_bootstrap_horizon=64",
+      "--hrl_passive_edge_confidence_threshold=2",
+      "--hrl_passive_min_displacement=2",
+      "--hrl_passive_max_path_length=64",
+      "--hrl_frontier_uncertainty_weight=1.0",
+      "--hrl_action_path_integration=False",
+      "--hrl_motion_policy_input=False",
+      "--hrl_landmark_geometry=none",
+      "--hrl_behavior_mode_condition=False",
+      "--hrl_exploration_policy=shared",
+      "--hrl_goal_conditioning=target_id_film",
+      "--dg_orthogonal_recruitment=False",
+      "--dg_orthogonal_recruitment_max_per_rollout=0",
+      "--ppo_dg_gradient=stop",
+      "--save_initial_checkpoint=True",
+      "--checkpoint_frame_targets=442368",
+      "--online_spatial_snapshot_interval=442368",
+      "--controller_preflight=True",
+      "--controller_cache_visual=True",
+      "--controller_replay_capacity=200000",
+      "--controller_learning_starts=16384",
+      "--controller_decisions_per_update=64",
+      "--controller_td_positions=256",
+      "--controller_her_positions=256",
+      "--controller_her_loss_coeff=1.0",
+      "--controller_target_updates=100",
+      "--controller_epsilon=0.1",
+      "--controller_epsilon_decay_decisions=250000",
+      "--heartbeat_interval=40",
+      "--heartbeat_reporting_interval=600",
+      "--decorrelate_envs_on_one_worker=False",
+      "--controller_replay_state=stored",
+      "--online_spatial_window_observations=32768",
+      "--online_spatial_scalar_interval_frames=131072"
+    ]
+  },
+  "bases": [
+    {
+      "name": "DIRECT_F16",
+      "label": "DIRECT_F16",
+      "args": [
+        "--dg_goal_input=none",
+        "--hrl_manager_mode=frontier_direct",
+        "--hrl_edge_exploration=False",
+        "--Hippo_n_feature=16"
+      ],
+      "metadata": {
+        "family": "c15",
+        "mechanism": "none",
+        "control": "frontier_direct",
+        "capacity": 16
+      }
+    },
+    {
+      "name": "WAYPOINT_DECODER_F64",
+      "label": "WAYPOINT_DECODER_F64",
+      "args": [
+        "--dg_goal_input=none",
+        "--hrl_manager_mode=frontier_waypoint",
+        "--hrl_edge_exploration=True",
+        "--Hippo_n_feature=64"
+      ],
+      "metadata": {
+        "family": "c15",
+        "mechanism": "none",
+        "control": "frontier_waypoint",
+        "capacity": 64,
+        "worker_memory": "goal_independent"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "name": "controller",
+      "levels": [
+        {
+          "value": "DDQN",
+          "label": "DDQN",
+          "args": [
+            "--controller_learning=ddqn",
+            "--controller_her=False"
+          ]
+        },
+        {
+          "value": "DDQN_HER",
+          "label": "DDQN_HER",
+          "args": [
+            "--controller_learning=ddqn",
+            "--controller_her=True"
+          ]
+        }
+      ]
+    }
+  ],
+  "seeds": [
+    99
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 131072,
+    "synchronized_steps": [
+      442368
+    ],
+    "max_workers": 4,
+    "group_by": [
+      "base",
+      "controller"
+    ],
+    "contrast_group_by": [],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "coverage_auc": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "dg_density": "intrmotiv/dg/density",
+      "dg_silent_fraction": "intrmotiv/dg/silent_unit_fraction",
+      "dg_usage_entropy": "intrmotiv/dg/usage_entropy",
+      "option_success": "intrmotiv/hrl/option_success_fraction",
+      "target_action_sensitivity": "intrmotiv/hrl/goal_condition/action_sensitivity",
+      "target_hit_numerator": "intrmotiv/hrl/target_hit_numerator",
+      "target_hit_event_count": "intrmotiv/hrl/target_hit_event_count",
+      "shuffled_hit_numerator": "intrmotiv/hrl/shuffled_hit_numerator",
+      "shuffled_hit_event_count": "intrmotiv/hrl/shuffled_hit_event_count",
+      "grounded_controllability": "intrmotiv/hrl/summary/grounded_controllability",
+      "reliable_global_efficiency": "intrmotiv/hrl/summary/reliable_global_efficiency",
+      "goal_hit_fraction": "intrmotiv/memory/goal_hit_fraction",
+      "goal_active_fraction": "intrmotiv/memory/goal_active_fraction",
+      "goal_ambiguous_fraction": "intrmotiv/memory/goal_ambiguous_fraction",
+      "replay_mismatch": "intrmotiv/hrl/behavior_replay_mismatch",
+      "ppo_dg_gradient_norm": "intrmotiv/dg/gradient/ppo_norm",
+      "encoder_gradient_norm": "intrmotiv/dg/gradient/encoder_norm"
+    },
+    "cumulative_metrics": {},
+    "contrasts": [
+      {
+        "name": "DIRECT_F16_HER_minus_DDQN",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "base": "DIRECT_F16",
+              "controller": "DDQN_HER"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "base": "DIRECT_F16",
+              "controller": "DDQN"
+            }
+          }
+        ]
+      },
+      {
+        "name": "WAYPOINT_DECODER_F64_HER_minus_DDQN",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "base": "WAYPOINT_DECODER_F64",
+              "controller": "DDQN_HER"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "base": "WAYPOINT_DECODER_F64",
+              "controller": "DDQN"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "telemetry": {
+    "protocol": "dg-place-fields-v1",
+    "common_observation_panel": {
+      "reference_run": "FSCS_DIRECT_F16_DDQN_S99",
+      "reference_target_frames": 442368,
+      "decisions": 10000,
+      "preserve_episode_boundaries": true,
+      "report_raw_and_inhibited_maps": true
+    },
+    "target_frames": [
+      442368
+    ],
+    "trajectory_seed": 99,
+    "terminal_seeds": [],
+    "label_template": "{condition}__s{seed}__f{checkpoint_frames}",
+    "manifest_fields": {
+      "family": "{base_family}",
+      "feedback": "{base_mechanism}",
+      "schedule": "{base_control}"
+    }
+  }
+}

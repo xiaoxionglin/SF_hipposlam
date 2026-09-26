@@ -30,12 +30,13 @@ The template remains at `dmlab/experiments/nemo2_sfgit_intrmotiv.sh` so previous
 
 Resource defaults can be overridden with normal Sample Factory launcher arguments. `SLURM_WORKDIR` overrides the generated work directory and `SFGIT_PYTHON` overrides the launcher interpreter.
 
-The template sends per-job temporary files, XDG/Torch and Matplotlib caches,
-and W&B cache/staging to
-`/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/runtime`. Override this
-root with `INTRMOTIV_RUNTIME_ROOT` when necessary. DMLab does not derive its
-level-cache path from these environment variables, so run descriptions that
-enable the level cache must explicitly provide a workspace
+The launcher and template currently default to the active
+`/work/classic/fr_xl1014-corridor-geometry` allocation. Set
+`INTRMOTIV_WORKSPACE_ROOT` to move training outputs, Slurm records, runtime
+caches, and temporary files together; `INTRMOTIV_TRAIN_ROOT` and
+`INTRMOTIV_RUNTIME_ROOT` remain available as narrower overrides. DMLab does not
+derive its level-cache path from these environment variables, so run
+descriptions that enable the level cache must explicitly provide a workspace
 `--dmlab_level_cache_path`.
 
 ## Source control on NEMO2

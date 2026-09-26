@@ -195,6 +195,19 @@ INTRMOTIV_SUMMARY_TAGS = {
     "ca3_predictor_hit_accuracy": "intrmotiv/predictor/hit_accuracy",
     "ca3_predictor_time_mae": "intrmotiv/predictor/hit_time_mae",
     "ca3_predictor_positive_fraction": "intrmotiv/predictor/positive_fraction",
+    "ca3_readout_enabled": "intrmotiv/ca3_readout/enabled",
+    "ca3_readout_total_loss": "intrmotiv/ca3_readout/total_loss",
+    "ca3_readout_prediction_loss": "intrmotiv/ca3_readout/prediction_loss",
+    "ca3_readout_active_loss": "intrmotiv/ca3_readout/active_loss",
+    "ca3_readout_zero_loss": "intrmotiv/ca3_readout/zero_loss",
+    "ca3_readout_var_loss": "intrmotiv/ca3_readout/var_loss",
+    "ca3_readout_cov_loss": "intrmotiv/ca3_readout/cov_loss",
+    "ca3_readout_latent_std_mean": "intrmotiv/ca3_readout/latent_std_mean",
+    "ca3_readout_latent_std_min": "intrmotiv/ca3_readout/latent_std_min",
+    "ca3_readout_valid_targets": "intrmotiv/ca3_readout/valid_targets",
+    "ca3_readout_active_fraction": "intrmotiv/ca3_readout/active_fraction",
+    "ca3_readout_state_shuffle_delta": "intrmotiv/ca3_readout/state_shuffle_delta",
+    "ca3_readout_action_shuffle_delta": "intrmotiv/ca3_readout/action_shuffle_delta",
     "hrl_active_target_frac": "intrmotiv/hrl/active_target_fraction",
     "hrl_active_option_frac": "intrmotiv/hrl/active_option_fraction",
     "hrl_exploration_mode_fraction": "intrmotiv/hrl/exploration/mode_fraction",
@@ -395,6 +408,10 @@ def write_intrmotiv_summaries(runner, msg, policy_id):
     for source_key, summary_tag in INTRMOTIV_SUMMARY_TAGS.items():
         if source_key in train_stats:
             writer.add_scalar(summary_tag, train_stats[source_key], env_steps)
+
+    for source_key in tuple(train_stats):
+        if source_key.startswith("controller/"):
+            writer.add_scalar("intrmotiv/" + source_key, train_stats.pop(source_key), env_steps)
 
     for source_key in INTRMOTIV_SUMMARY_TAGS:
         train_stats.pop(source_key, None)

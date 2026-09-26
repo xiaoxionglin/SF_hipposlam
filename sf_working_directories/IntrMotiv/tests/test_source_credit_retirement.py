@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
@@ -9,6 +10,59 @@ from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
     retirement_endpoint_allowed,
 )
 from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import PersistentPredictiveRecruitmentEvidence
+
+
+def _scalar_credit_reference(progression, candidates, dominant, valids, baseline, reward_scale, recipient):
+    rewards = torch.zeros_like(progression, dtype=torch.float)
+    mask = torch.zeros_like(dominant)
+    predecessor_age = progression.masked_fill(progression.eq(0), baseline + 100)
+    nearest_lag = predecessor_age.min(-1).values
+    counts = {
+        name: 0.0
+        for name in (
+            "total",
+            "matchable",
+            "credited",
+            "boundary_dropped",
+            "alignment_failure",
+            "invalid_interval",
+            "collisions",
+            "reward_mass",
+            "source_lag_sum",
+            "source_lag_max",
+        )
+    }
+    events = dominant.any(-1) & valids
+    for stream, arrival_t in torch.nonzero(events, as_tuple=False).tolist():
+        counts["total"] += 1
+        lag = int(nearest_lag[stream, arrival_t])
+        if lag >= baseline:
+            counts["alignment_failure"] += 1
+            continue
+        source_t = arrival_t - lag
+        if source_t < 0:
+            counts["boundary_dropped"] += 1
+            continue
+        counts["matchable"] += 1
+        if not bool(valids[stream, source_t : arrival_t + 1].all()):
+            counts["invalid_interval"] += 1
+            continue
+        verified = predecessor_age[stream, arrival_t].eq(lag) & dominant[stream, source_t]
+        if not bool(verified.any()):
+            counts["alignment_failure"] += 1
+            continue
+        source_row = int(torch.where(verified)[0][0])
+        arrival_row = int(torch.where(dominant[stream, arrival_t])[0][0])
+        credit_t, credit_row = (arrival_t, arrival_row) if recipient == "arrival" else (source_t, source_row)
+        counts["collisions"] += float(mask[stream, credit_t, credit_row])
+        reward = reward_scale * lag
+        rewards[stream, credit_t, credit_row] += reward
+        mask[stream, credit_t, credit_row] = True
+        counts["credited"] += 1
+        counts["reward_mass"] += reward
+        counts["source_lag_sum"] += lag
+        counts["source_lag_max"] = max(counts["source_lag_max"], lag)
+    return rewards, mask, counts
 
 
 def _credit_inputs():
@@ -105,6 +159,26 @@ def test_predecessor_excludes_ongoing_zero_age_rows_not_just_new_candidates():
     assert not mask[0, 4, 0]
     assert torch.isclose(reward[0, 1, 1], torch.tensor(0.3))
     assert stats["credited"].item() == 1
+
+
+def test_vectorized_credit_matches_scalar_reference_on_random_inputs():
+    generator = torch.Generator().manual_seed(123)
+    for recipient in ("arrival", "source"):
+        for _ in range(20):
+            baseline = 7
+            progression = torch.randint(0, baseline + 3, (3, 9, 5), generator=generator)
+            candidates = progression.eq(0) & (torch.rand(3, 9, 5, generator=generator) > 0.4)
+            dominant = torch.zeros_like(candidates)
+            event = torch.rand(3, 9, generator=generator) > 0.45
+            winner = torch.randint(0, 5, (3, 9), generator=generator)
+            dominant.scatter_(2, winner.unsqueeze(-1), event.unsqueeze(-1))
+            valids = torch.rand(3, 9, generator=generator) > 0.15
+            actual = build_matched_encoder_credit(progression, candidates, dominant, valids, baseline, 0.1, recipient)
+            expected = _scalar_credit_reference(progression, candidates, dominant, valids, baseline, 0.1, recipient)
+            torch.testing.assert_close(actual[0], expected[0])
+            assert torch.equal(actual[1], expected[1])
+            for name, value in expected[2].items():
+                assert actual[2][name].item() == pytest.approx(value)
 
 
 def test_encoder_loss_gradient_is_confined_to_behavior_labeled_credit_row():

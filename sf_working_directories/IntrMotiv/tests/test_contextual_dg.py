@@ -103,6 +103,7 @@ def test_prediction_batch_recovers_source_and_drops_boundaries():
 
 
 def test_predictor_loss_reaches_source_dg_but_control_is_detached():
+    torch.manual_seed(0)
     dg, batch = _prediction_batch()
     # Ensure this single synthetic event participates in training.
     batch.validation.zero_()

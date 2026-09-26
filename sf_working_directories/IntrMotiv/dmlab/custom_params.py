@@ -25,6 +25,25 @@ def hipposlam_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    # Study identity is tracking metadata only. The canonical StudySpec workflow
+    # emits these fields so dashboards can group by one seed-independent key.
+    p.add_argument("--study_id", default=None, type=str)
+    p.add_argument("--study_condition", default=None, type=str)
+    p.add_argument("--study_base", default=None, type=str)
+    p.add_argument("--controller_learning", choices=["ppo", "shadow", "ddqn"], default="ppo")
+    p.add_argument("--controller_replay_state", choices=("reconstruct", "stored"), default="reconstruct")
+    p.add_argument("--controller_her", type=str2bool, default=False)
+    p.add_argument("--controller_epsilon", type=float, default=0.1)
+    p.add_argument("--controller_target_updates", type=int, default=100)
+    p.add_argument("--controller_replay_capacity", type=int, default=200000)
+    p.add_argument("--controller_td_positions", type=int, default=256)
+    p.add_argument("--controller_decisions_per_update", type=int, default=64)
+    p.add_argument("--controller_learning_starts", type=int, default=16384)
+    p.add_argument("--controller_her_positions", type=int, default=256)
+    p.add_argument("--controller_her_loss_coeff", type=float, default=1.0)
+    p.add_argument("--controller_epsilon_decay_decisions", type=int, default=250000)
+    p.add_argument("--controller_preflight", type=str2bool, default=False)
+    p.add_argument("--controller_cache_visual", type=str2bool, default=True)
     p.add_argument("--decoder_reward_gate", choices=["none", "ca3_absent"], default="none")
     p.add_argument("--dg_ca3_reentry_inhibition", choices=["none", "trace_subtractive", "hard"], default="none")
     p.add_argument("--intrinsic_goal_mode", choices=["none", "ca3_absent_target"], default="none")
@@ -51,6 +70,29 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--encoder_name", default=None, type=str, help="actually using dmlab encoders")
     p.add_argument("--encoder_load_path", default=None, type=str, help="if loading encoder, the path")
+    p.add_argument(
+        "--transfer_model_path", default=None, type=str, help="checkpoint used only to initialize transfer weights"
+    )
+    p.add_argument(
+        "--transfer_scope",
+        default="none",
+        choices=["none", "dg", "policy", "task_general"],
+        help="weights initialized from transfer_model_path without restoring optimizer or progress",
+    )
+    p.add_argument("--transfer_freeze_dg", default=False, type=str2bool)
+    p.add_argument("--transfer_calibrate_frozen_dg", default=False, type=str2bool)
+    p.add_argument("--transfer_freeze_worker", default=False, type=str2bool)
+    p.add_argument("--transfer_graph", default=False, type=str2bool)
+    p.add_argument("--dmlab_runfiles_path", default=None, type=str)
+    p.add_argument(
+        "--fixed_task_conditioning",
+        default=False,
+        type=str2bool,
+        help="bypass waypoint selection and expose one learned constant target vector to the policy",
+    )
+    p.add_argument("--fixed_task_goal_mixture", default=False, type=str2bool)
+    p.add_argument("--fixed_task_target_id", default=0, type=int)
+    p.add_argument("--fixed_task_goal_init", default="nominated", choices=["nominated", "uniform", "uniform_jitter"])
 
     p.add_argument("--DG_lr", default=None, type=float, help="Dentate Gyrus Pattern separation learning rate")
     p.add_argument("--DG_temperature", default=None, type=float, help="Dentate Gyrus output temperature")
@@ -77,12 +119,30 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")
     p.add_argument(
-        "--dmlab_reduced_action_set", default=False, type=bool, help="reduced action set to facilitate learning"
+        "--depth_sensor_inverse",
+        default=None,
+        type=str2bool,
+        help="Use capped inverse depth 10/max(raw depth code,1); defaults to legacy pass-through",
+    )
+    p.add_argument(
+        "--dmlab_reduced_action_set", default=False, type=str2bool, help="reduced action set to facilitate learning"
+    )
+    p.add_argument(
+        "--dmlab_navigation_action_set",
+        default=False,
+        type=str2bool,
+        help="eight-action navigation set with backward and pure yaw actions, excluding fire",
     )
     p.add_argument(
         "--with_number_instruction", default=True, type=str2bool, help="instruction input is number, e.g. 1-3"
     )
     p.add_argument("--number_instruction_coef", default=1, type=float, help="instruction strength")
+    p.add_argument(
+        "--reward_instruction_count",
+        default=0,
+        type=int,
+        help="Number of reward-site cues routed to the task manager; 0 preserves source behavior",
+    )
     p.add_argument("--DG_BN_intercept", default=2, type=float, help="instruction strength")
     p.add_argument("--with_pos_obs", default=False, type=str2bool, help="get the true position of agent")
     p.add_argument(
@@ -299,10 +359,11 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--hrl_direct_target_selection",
         default="frontier",
-        choices=["frontier", "least_tested", "local_successor"],
+        choices=["frontier", "least_tested", "local_successor", "reward_value"],
         help=(
             "Choose direct targets by frontier score, among all observed nodes by lowest pair-attempt "
-            "mass, or among directed passive first successors by lowest pair-attempt mass."
+            "mass, among directed passive first successors by lowest pair-attempt mass, or by "
+            "external-return estimates for fixed-reward transfer."
         ),
     )
     p.add_argument(
@@ -314,6 +375,47 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--hrl_empirical_her_horizon", default=64, type=int)
     p.add_argument("--hrl_empirical_her_coeff", default=0.5, type=float)
     p.add_argument("--ca3_predictor_shadow", default=False, type=str2bool)
+    # Predictive CA3 readout. ``shadow`` trains and logs the auxiliary model
+    # without changing policy inputs; ``worker`` replaces only the worker-facing
+    # CA3 view while the canonical recurrent output remains untouched.
+    p.add_argument("--ca3_state_readout_mode", default="off", choices=("off", "shadow", "worker"))
+    p.add_argument("--ca3_state_readout_dim", default=16, type=int)
+    p.add_argument("--ca3_state_readout_horizon", default=16, type=int)
+    p.add_argument("--ca3_state_readout_hidden_size", default=128, type=int)
+    p.add_argument("--ca3_state_readout_action_conditioning", default=True, type=str2bool)
+    p.add_argument("--ca3_state_readout_loss_coeff", default=1.0, type=float)
+    p.add_argument("--ca3_state_readout_active_coeff", default=1.0, type=float)
+    p.add_argument("--ca3_state_readout_zero_coeff", default=0.1, type=float)
+    p.add_argument("--ca3_state_readout_var_coeff", default=0.1, type=float)
+    p.add_argument("--ca3_state_readout_cov_coeff", default=0.01, type=float)
+    p.add_argument("--ca3_state_readout_lr_scale", default=0.2, type=float)
+    p.add_argument("--ca3_worker_goal_mode", default="target_id", choices=("target_id", "raw_ca3", "state_readout"))
+    p.add_argument(
+        "--ca3_worker_decoder",
+        default="film",
+        choices=("film", "relation"),
+        help="Worker goal interface: legacy FiLM or same-space [z_t,z_g,z_g-z_t] relation decoder.",
+    )
+    p.add_argument("--ca3_graph_anchor_mode", default="off", choices=("off", "fixed", "champion", "ema"))
+    p.add_argument("--ca3_graph_anchor_ema_alpha", default=0.05, type=float)
+    p.add_argument("--ca3_graph_anchor_ema_min_confirmations", default=8, type=int)
+    p.add_argument("--ca3_graph_anchor_ema_margin", default=0.01, type=float)
+    p.add_argument(
+        "--ca3_context_candidate_mode",
+        default="exclusive",
+        choices=("exclusive", "dominant", "unique_contextual"),
+    )
+    p.add_argument("--ca3_graph_contextual_hits", default=False, type=str2bool)
+    p.add_argument(
+        "--ca3_context_similarity_space",
+        default="probe",
+        choices=("probe", "z"),
+        help="Contextual online/HER recognition space. 'probe' preserves legacy predictor signatures; 'z' uses normalized W S directly.",
+    )
+    p.add_argument("--ca3_context_calibration_capacity", default=512, type=int)
+    p.add_argument("--ca3_context_calibration_min_pairs", default=256, type=int)
+    p.add_argument("--ca3_context_calibration_interval", default=32768, type=int)
+    p.add_argument("--ca3_context_calibration_quantile", default=0.10, type=float)
     p.add_argument("--ca3_predictor_hidden_size", default=128, type=int)
     p.add_argument("--ca3_predictor_horizon", default=32, type=int)
     p.add_argument("--ca3_predictor_loss_coeff", default=0.1, type=float)
@@ -518,6 +620,24 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         default=False,
         type=str2bool,
         help="Alternate encoder and decoder updates using the baseline single optimizer/checkpoint format.",
+    )
+    p.add_argument(
+        "--checkpoint_frame_targets",
+        type=str,
+        default="",
+        help="Comma-separated frame targets retained as permanent milestones",
+    )
+    p.add_argument(
+        "--save_initial_checkpoint",
+        type=str2bool,
+        default=False,
+        help="Preserve initialized model and optimizer before training",
+    )
+    p.add_argument(
+        "--dg_goal_input",
+        choices=["none", "write"],
+        default="none",
+        help="Condition worker DG writes while keeping landmark evidence unconditioned",
     )
     p.add_argument(
         "--ppo_dg_gradient",

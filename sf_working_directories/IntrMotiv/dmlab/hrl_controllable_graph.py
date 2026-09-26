@@ -7,6 +7,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import (
+    action_probe_signature,
+    contextual_similarity,
+    predictive_window_consistency,
+)
+
 
 @dataclass(frozen=True)
 class HRLStateLayout:
@@ -426,13 +432,44 @@ def update_hrl_state(
 class PolicyControllableGraph(nn.Module):
     """Policy-scoped Hebbian controllability memory stored as model buffers."""
 
-    def __init__(self, n_nodes: int):
+    def __init__(
+        self,
+        n_nodes: int,
+        ca3_size: int = 0,
+        contextual: bool = False,
+        calibration_capacity: int = 512,
+        prediction_horizon: int = 0,
+        signature_dim: int = 0,
+        candidate_mode: str = "exclusive",
+        similarity_space: str = "probe",
+        reward_instruction_count: int = 0,
+    ):
         super().__init__()
         self.n_nodes = int(n_nodes)
+        self.ca3_size = int(ca3_size)
+        self.contextual = bool(contextual)
+        self.calibration_capacity = int(calibration_capacity)
+        self.prediction_horizon = int(prediction_horizon)
+        self.signature_dim = int(signature_dim)
+        self.candidate_mode = str(candidate_mode)
+        self.similarity_space = str(similarity_space)
+        if self.similarity_space not in ("probe", "z"):
+            raise ValueError(f"Unknown contextual similarity space: {self.similarity_space}")
+        self.reward_instruction_count = int(reward_instruction_count)
+        if self.reward_instruction_count < 0:
+            raise ValueError("reward_instruction_count must be nonnegative")
         self.register_buffer("node_visits", torch.zeros(self.n_nodes))
         self.register_buffer("tctrl", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("edge_confidence", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("control_attempts", torch.zeros(self.n_nodes, self.n_nodes))
+        # A downstream reward-trained manager can use these without changing
+        # the source graph or actor observation interface.
+        reward_shape = ((self.reward_instruction_count,) if self.reward_instruction_count else ()) + (
+            self.n_nodes,
+            self.n_nodes,
+        )
+        self.register_buffer("reward_goal_value", torch.zeros(reward_shape))
+        self.register_buffer("reward_goal_count", torch.zeros(reward_shape))
         self.register_buffer("passive_confidence", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("passive_time", torch.zeros(self.n_nodes, self.n_nodes))
         self.register_buffer("passive_path_length", torch.zeros(self.n_nodes, self.n_nodes))
@@ -446,6 +483,70 @@ class PolicyControllableGraph(nn.Module):
         self.register_buffer("pose_valid", torch.zeros(self.n_nodes, dtype=torch.bool))
         self.register_buffer("pose_stress", torch.zeros(()))
         self.register_buffer("representation_generation", torch.zeros((), dtype=torch.int64))
+        # Per-address contextual identity. F64 is capacity; only the predicate
+        # returned by selectable_mask grants online command authority.
+        self.register_buffer("anchor_ca3", torch.zeros(self.n_nodes, self.ca3_size))
+        self.register_buffer("anchor_valid", torch.zeros(self.n_nodes, dtype=torch.bool))
+        self.register_buffer("anchor_generation", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("anchor_last_update", torch.full((self.n_nodes,), -1, dtype=torch.int64))
+        self.register_buffer("anchor_last_score", torch.full((self.n_nodes,), float("inf")))
+        self.register_buffer("active_goal_mask", torch.zeros(self.n_nodes, dtype=torch.bool))
+        self.register_buffer("active_generation", torch.full((self.n_nodes,), -1, dtype=torch.int64))
+        self.register_buffer("confirmation_count", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("anchor_signature", torch.zeros(self.n_nodes, self.signature_dim))
+        self.register_buffer("anchor_signature_valid", torch.zeros(self.n_nodes, dtype=torch.bool))
+        self.register_buffer("command_count", torch.zeros(self.n_nodes, dtype=torch.int64))
+        self.register_buffer("empty_set_exploration_count", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("recognition_threshold", torch.zeros(()))
+        self.register_buffer("prediction_absolute_threshold", torch.full((), float("inf")))
+        self.register_buffer("prediction_excess_threshold", torch.full((), float("inf")))
+        self.register_buffer("calibration_ready", torch.zeros((), dtype=torch.bool))
+        self.register_buffer("calibration_left", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer("calibration_right", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer(
+            "calibration_actions", torch.zeros(self.calibration_capacity, self.prediction_horizon, dtype=torch.int64)
+        )
+        self.register_buffer(
+            "calibration_targets", torch.zeros(self.calibration_capacity, self.prediction_horizon, self.n_nodes)
+        )
+        self.register_buffer("calibration_count", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("calibration_cursor", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("calibration_last_decision", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("diagnostic_left", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer("diagnostic_right", torch.zeros(self.calibration_capacity, self.ca3_size))
+        self.register_buffer("diagnostic_count", torch.zeros((), dtype=torch.int64))
+        self.register_buffer("diagnostic_cursor", torch.zeros((), dtype=torch.int64))
+        for name in (
+            "positive_similarity_q10",
+            "positive_similarity_q50",
+            "positive_similarity_q90",
+            "background_similarity_q50",
+            "background_similarity_q90",
+            "background_similarity_q99",
+            "background_above_threshold_fraction",
+            "active_anchor_collision_fraction",
+            "anchor_centrality_gain_sum",
+            "anchor_age_sum",
+        ):
+            self.register_buffer(name, torch.zeros(()))
+        for name in (
+            "anchor_registrations",
+            "confirmation_attempts",
+            "confirmation_successes",
+            "anchor_replacements",
+            "anchor_deactivations",
+            "anchor_refinement_attempts",
+            "anchor_refinements",
+            "anchor_age_count",
+            "context_raw_multi_activation",
+            "context_accepted_events",
+            "context_unique_rescues",
+            "context_zero_match",
+            "context_multi_match",
+        ):
+            self.register_buffer(name, torch.zeros((), dtype=torch.int64))
+        self.register_buffer("activation_latency_sum", torch.zeros((), dtype=torch.float64))
+        self.register_buffer("activation_latency_count", torch.zeros((), dtype=torch.int64))
         # Cumulative outcomes evaluated against the graph as it existed before
         # each learner batch. These are diagnostic-only and never condition the
         # policy or graph updates.
@@ -473,6 +574,8 @@ class PolicyControllableGraph(nn.Module):
     ):
         for name in (
             "control_attempts",
+            "reward_goal_value",
+            "reward_goal_count",
             "passive_confidence",
             "passive_time",
             "passive_path_length",
@@ -486,6 +589,58 @@ class PolicyControllableGraph(nn.Module):
             "pose_valid",
             "pose_stress",
             "representation_generation",
+            "anchor_ca3",
+            "anchor_valid",
+            "anchor_generation",
+            "anchor_last_update",
+            "anchor_last_score",
+            "active_goal_mask",
+            "active_generation",
+            "confirmation_count",
+            "anchor_signature",
+            "anchor_signature_valid",
+            "command_count",
+            "empty_set_exploration_count",
+            "recognition_threshold",
+            "prediction_absolute_threshold",
+            "prediction_excess_threshold",
+            "calibration_ready",
+            "calibration_left",
+            "calibration_right",
+            "calibration_actions",
+            "calibration_targets",
+            "calibration_count",
+            "calibration_cursor",
+            "calibration_last_decision",
+            "diagnostic_left",
+            "diagnostic_right",
+            "diagnostic_count",
+            "diagnostic_cursor",
+            "positive_similarity_q10",
+            "positive_similarity_q50",
+            "positive_similarity_q90",
+            "background_similarity_q50",
+            "background_similarity_q90",
+            "background_similarity_q99",
+            "background_above_threshold_fraction",
+            "active_anchor_collision_fraction",
+            "anchor_centrality_gain_sum",
+            "anchor_age_sum",
+            "anchor_registrations",
+            "confirmation_attempts",
+            "confirmation_successes",
+            "anchor_replacements",
+            "anchor_deactivations",
+            "anchor_refinement_attempts",
+            "anchor_refinements",
+            "anchor_age_count",
+            "context_raw_multi_activation",
+            "context_accepted_events",
+            "context_unique_rescues",
+            "context_zero_match",
+            "context_multi_match",
+            "activation_latency_sum",
+            "activation_latency_count",
             "prospective_attempts",
             "prospective_successes",
             "prospective_probability_sum",
@@ -506,18 +661,499 @@ class PolicyControllableGraph(nn.Module):
             error_msgs,
         )
 
+    def selectable_mask(self) -> Tensor:
+        """Canonical online-goal authority predicate (legacy is unchanged)."""
+        if not self.contextual:
+            return torch.ones(self.n_nodes, dtype=torch.bool, device=self.node_visits.device)
+        return self.active_goal_mask & self.anchor_valid & (self.active_generation == self.anchor_generation)
+
     @torch.no_grad()
-    def invalidate_node(self, node: int) -> None:
-        """Forget graph evidence tied to a reassigned DG representation."""
+    def update_reward_goal_values(
+        self,
+        option_states: Tensor,
+        topological_states: Tensor,
+        returns: Tensor,
+        valid: Tensor,
+        reward_instruction: Tensor | None = None,
+    ) -> int:
+        """Update source-to-final-goal values once per selected option.
+
+        External reward-to-go is sampled at option age zero. The final goal is
+        used instead of an intermediate route hop, so next-hop planning does
+        not misattribute reward to a temporary waypoint.
+        """
+        from .topological_frontier import TopologicalStateLayout
+
+        layout = HRLStateLayout(self.n_nodes)
+        topo = TopologicalStateLayout(self.n_nodes)
+        source = option_states[..., layout.source].round().long() - 1
+        target = topological_states[..., topo.final_goal].round().long() - 1
+        first = option_states[..., layout.age].eq(0)
+        mask = valid.bool() & first & (source >= 0) & (source < self.n_nodes)
+        mask &= (target >= 0) & (target < self.n_nodes) & (source != target)
+        if self.reward_instruction_count:
+            if reward_instruction is None:
+                raise ValueError("Reward instruction is required for a cued task")
+            instruction = reward_instruction.to(device=source.device).long() - 1
+            mask &= (instruction >= 0) & (instruction < self.reward_instruction_count)
+        if not mask.any():
+            return 0
+        source, target = source[mask], target[mask]
+        if self.reward_instruction_count:
+            instruction = instruction[mask]
+        value = returns[mask].float().clamp(0.0, 10.0)
+        indices = (
+            zip(instruction.tolist(), source.tolist(), target.tolist())
+            if self.reward_instruction_count
+            else ((s, t) for s, t in zip(source.tolist(), target.tolist()))
+        )
+        for index, sample in zip(indices, value.tolist()):
+            count = self.reward_goal_count[index]
+            rate = min(0.05, 1.0 / float(count.item() + 1.0)) if count > 0 else 1.0
+            self.reward_goal_value[index].lerp_(self.reward_goal_value.new_tensor(sample), rate)
+            count.add_(1.0)
+        return int(mask.sum().item())
+
+    @torch.no_grad()
+    def register_anchor(self, node: int, ca3: Tensor, decision: int) -> None:
         node = int(node)
-        if node < 0 or node >= self.n_nodes:
-            raise IndexError(f"DG node {node} is outside [0, {self.n_nodes})")
+        if self.anchor_valid[node]:
+            raise ValueError("register_anchor cannot overwrite an incumbent")
+        self.anchor_ca3[node].copy_(ca3.detach().to(self.anchor_ca3))
+        self.anchor_valid[node] = True
+        self.anchor_last_update[node] = int(decision)
+        self.anchor_last_score[node] = float("inf")
+        self.active_goal_mask[node] = False
+        self.active_generation[node] = -1
+        self.confirmation_count[node] = 0
+        self.anchor_signature_valid[node] = False
+        self.anchor_registrations.add_(1)
+
+    @torch.no_grad()
+    def add_positive_pair(self, left: Tensor, right: Tensor, actions: Tensor, targets: Tensor) -> None:
+        self.add_positive_pairs(left[None], right[None], actions[None], targets[None])
+
+    @torch.no_grad()
+    def add_positive_pairs(self, left: Tensor, right: Tensor, actions: Tensor, targets: Tensor) -> None:
+        """Append calibration examples without synchronizing once per pair.
+
+        Contextual batches can contain thousands of within-occurrence pairs.
+        Updating the CUDA-resident ring one row at a time made every cursor
+        read a device synchronization.  Keep only the newest bounded suffix
+        and write every retained row in one indexed operation.
+        """
+        if not self.contextual or not self.calibration_capacity:
+            return
+        total = int(left.size(0))
+        if total == 0:
+            return
+        cursor = int(self.calibration_cursor.item())
+        retained = min(total, self.calibration_capacity)
+        offset = total - retained
+        positions = (
+            torch.arange(offset, total, device=self.calibration_left.device, dtype=torch.long) + cursor
+        ).remainder(self.calibration_capacity)
+        self.calibration_left[positions] = left.detach()[-retained:].to(self.calibration_left)
+        self.calibration_right[positions] = right.detach()[-retained:].to(self.calibration_right)
+        self.calibration_actions[positions] = actions.detach()[-retained:].to(self.calibration_actions)
+        self.calibration_targets[positions] = targets.detach()[-retained:].to(self.calibration_targets)
+        self.calibration_cursor.add_(total)
+        self.calibration_count.copy_((self.calibration_count + total).clamp_max(self.calibration_capacity))
+
+    @torch.no_grad()
+    def add_diagnostic_pair(self, left: Tensor, right: Tensor) -> None:
+        self.add_diagnostic_pairs(left[None], right[None])
+
+    @torch.no_grad()
+    def add_diagnostic_pairs(self, left: Tensor, right: Tensor) -> None:
+        """Retain a bounded unknown/background pair for telemetry only."""
+        if not self.contextual or not self.calibration_capacity:
+            return
+        total = int(left.size(0))
+        if total == 0:
+            return
+        cursor = int(self.diagnostic_cursor.item())
+        retained = min(total, self.calibration_capacity)
+        offset = total - retained
+        positions = (
+            torch.arange(offset, total, device=self.diagnostic_left.device, dtype=torch.long) + cursor
+        ).remainder(self.calibration_capacity)
+        self.diagnostic_left[positions] = left.detach()[-retained:].to(self.diagnostic_left)
+        self.diagnostic_right[positions] = right.detach()[-retained:].to(self.diagnostic_right)
+        self.diagnostic_cursor.add_(total)
+        self.diagnostic_count.copy_((self.diagnostic_count + total).clamp_max(self.calibration_capacity))
+
+    @torch.no_grad()
+    def recalibrate(
+        self,
+        readout: nn.Module,
+        predictor: nn.Module,
+        decision: int,
+        interval: int,
+        min_pairs: int,
+        quantile: float,
+        active_coeff: float,
+        zero_coeff: float,
+    ) -> bool:
+        count = int(self.calibration_count.item())
+        if count < int(min_pairs) or int(decision) - int(self.calibration_last_decision.item()) < int(interval):
+            return False
+        left = self.calibration_left[:count]
+        right = self.calibration_right[:count]
+        similarities = contextual_similarity(
+            readout,
+            predictor,
+            left,
+            right,
+            space=self.similarity_space,
+        )
+        absolute, excess = predictive_window_consistency(
+            readout,
+            predictor,
+            left,
+            right,
+            self.calibration_actions[:count],
+            self.calibration_targets[:count],
+            active_coeff,
+            zero_coeff,
+        )
+        upper_quantile = 1.0 - float(quantile)
+        self.recognition_threshold.copy_(torch.quantile(similarities, float(quantile)))
+        self.positive_similarity_q10.copy_(torch.quantile(similarities, 0.10))
+        self.positive_similarity_q50.copy_(torch.quantile(similarities, 0.50))
+        self.positive_similarity_q90.copy_(torch.quantile(similarities, 0.90))
+        self.prediction_absolute_threshold.copy_(torch.quantile(absolute, upper_quantile))
+        self.prediction_excess_threshold.copy_(torch.quantile(excess, upper_quantile))
+        self.calibration_ready.fill_(True)
+        self.calibration_last_decision.fill_(int(decision))
+        diagnostic_count = int(self.diagnostic_count.item())
+        if diagnostic_count:
+            diagnostic_similarity = contextual_similarity(
+                readout,
+                predictor,
+                self.diagnostic_left[:diagnostic_count],
+                self.diagnostic_right[:diagnostic_count],
+                space=self.similarity_space,
+            )
+            self.background_similarity_q50.copy_(torch.quantile(diagnostic_similarity, 0.50))
+            self.background_similarity_q90.copy_(torch.quantile(diagnostic_similarity, 0.90))
+            self.background_similarity_q99.copy_(torch.quantile(diagnostic_similarity, 0.99))
+            self.background_above_threshold_fraction.copy_(
+                (diagnostic_similarity >= self.recognition_threshold).float().mean()
+            )
+        selectable = self.selectable_mask()
+        active = torch.where(selectable)[0]
+        if active.numel() > 1:
+            anchor_states = self.anchor_ca3[active]
+            if self.similarity_space == "z":
+                embeddings = F.normalize(readout(anchor_states), dim=-1)
+            else:
+                embeddings = F.normalize(action_probe_signature(readout, predictor, anchor_states), dim=-1)
+            similarity = embeddings @ embeddings.T
+            upper = torch.triu(torch.ones_like(similarity, dtype=torch.bool), diagonal=1)
+            self.active_anchor_collision_fraction.copy_(
+                (similarity[upper] >= self.recognition_threshold).float().mean()
+            )
+        else:
+            self.active_anchor_collision_fraction.zero_()
+        if self.signature_dim:
+            valid = torch.where(self.anchor_valid)[0]
+            if valid.numel():
+                signatures = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[valid]), dim=-1)
+                if signatures.size(-1) != self.signature_dim:
+                    raise RuntimeError("Configured contextual signature dimension is inconsistent")
+                self.anchor_signature[valid].copy_(signatures)
+                self.anchor_signature_valid[valid] = True
+        return True
+
+    @torch.no_grad()
+    def recognition_similarity(self, node: int, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
+        return contextual_similarity(
+            readout,
+            predictor,
+            ca3.detach(),
+            self.anchor_ca3[int(node)],
+            space=self.similarity_space,
+        )
+
+    @torch.no_grad()
+    def confirm_anchor(
+        self,
+        node: int,
+        ca3: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        actions: Tensor,
+        targets: Tensor,
+        active_coeff: float,
+        zero_coeff: float,
+        decision: int | None = None,
+    ) -> bool:
+        confirmed, _ = self.confirm_anchors(
+            torch.as_tensor([node], device=self.anchor_ca3.device),
+            ca3.unsqueeze(0) if ca3.ndim == 1 else ca3,
+            readout,
+            predictor,
+            actions.unsqueeze(0) if actions.ndim == 1 else actions,
+            targets.unsqueeze(0) if targets.ndim == 2 else targets,
+            active_coeff,
+            zero_coeff,
+            decision,
+        )
+        return bool(confirmed[0])
+
+    @torch.no_grad()
+    def confirm_anchors(
+        self,
+        nodes: Tensor,
+        ca3: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        actions: Tensor,
+        targets: Tensor,
+        active_coeff: float,
+        zero_coeff: float,
+        decision: int | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """Confirm a rollout's contextual occurrences in one predictor call.
+
+        The second result is the per-occurrence confirmation count immediately
+        after that occurrence.  EMA refinement uses it to preserve the scalar
+        minimum-confirmation semantics even when a node appears repeatedly in
+        one learner batch.
+        """
+        nodes = nodes.to(device=self.anchor_ca3.device, dtype=torch.long)
+        if not nodes.numel():
+            empty = torch.zeros(0, dtype=torch.bool, device=self.anchor_ca3.device)
+            return empty, nodes
+        ready = self.calibration_ready.bool()
+        eligible = self.anchor_valid[nodes] & ready
+        absolute, excess = predictive_window_consistency(
+            readout,
+            predictor,
+            self.anchor_ca3[nodes],
+            ca3,
+            actions,
+            targets,
+            active_coeff,
+            zero_coeff,
+        )
+        confirmed = (
+            eligible & (absolute <= self.prediction_absolute_threshold) & (excess <= self.prediction_excess_threshold)
+        )
+        self.confirmation_attempts.add_(eligible.sum())
+        increments = torch.zeros_like(self.confirmation_count)
+        increments.scatter_add_(0, nodes, confirmed.to(increments.dtype))
+        counts_before = self.confirmation_count[nodes].clone()
+        self.confirmation_count.add_(increments)
+
+        order = torch.arange(nodes.numel(), device=nodes.device)
+        prior = (nodes[:, None] == nodes[None, :]) & (order[None, :] < order[:, None]) & confirmed[None, :]
+        count_after_occurrence = counts_before + prior.sum(-1) + confirmed.to(counts_before.dtype)
+
+        previously_selectable = self.selectable_mask()
+        activation_nodes = torch.unique(nodes[confirmed & ~previously_selectable[nodes]])
+        self.active_goal_mask[activation_nodes] = True
+        self.active_generation[activation_nodes] = self.anchor_generation[activation_nodes]
+        self.confirmation_successes.add_(activation_nodes.numel())
+        if decision is not None and activation_nodes.numel():
+            latency = (int(decision) - self.anchor_last_update[activation_nodes]).clamp_min(0)
+            self.activation_latency_sum.add_(latency.sum())
+            self.activation_latency_count.add_(activation_nodes.numel())
+        return confirmed, count_after_occurrence
+
+    @torch.no_grad()
+    def refine_anchors_ema(
+        self,
+        nodes: Tensor,
+        ca3: Tensor,
+        confirmation_counts: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        decision: int,
+        alpha: float,
+        min_confirmations: int,
+        margin: float,
+    ) -> Tensor:
+        """Apply ordered EMA refinements with one GPU signature batch.
+
+        Refinement decisions are a tiny discrete state machine.  Signatures are
+        computed together on CUDA and the ordered comparisons run on CPU, then
+        final prototypes and selected raw anchors are copied back once.
+        """
+        if not nodes.numel():
+            return torch.zeros(0, dtype=torch.bool, device=self.anchor_ca3.device)
+        nodes = nodes.to(device=self.anchor_ca3.device, dtype=torch.long)
+        candidate_signatures = F.normalize(action_probe_signature(readout, predictor, ca3.detach()), dim=-1)
+        unique_nodes = torch.unique(nodes, sorted=True)
+        incumbent_signatures = F.normalize(
+            action_probe_signature(readout, predictor, self.anchor_ca3[unique_nodes]), dim=-1
+        )
+        node_cpu = nodes.cpu()
+        count_cpu = confirmation_counts.cpu()
+        candidate_cpu = candidate_signatures.cpu()
+        unique_cpu = unique_nodes.cpu()
+        prototype_cpu = self.anchor_signature[unique_nodes].cpu()
+        prototype_valid_cpu = self.anchor_signature_valid[unique_nodes].cpu()
+        incumbent_cpu = incumbent_signatures.cpu()
+        last_update_cpu = self.anchor_last_update[unique_nodes].cpu()
+        node_to_local = {int(node): index for index, node in enumerate(unique_cpu.tolist())}
+        selected = torch.full((unique_nodes.numel(),), -1, dtype=torch.long)
+        scores = torch.zeros(unique_nodes.numel(), dtype=self.anchor_last_score.dtype)
+        refined = torch.zeros(nodes.numel(), dtype=torch.bool)
+        attempts = refinements = 0
+        gain_sum = 0.0
+        age_sum = 0.0
+        age_count = 0
+        for occurrence, node in enumerate(node_cpu.tolist()):
+            local = node_to_local[node]
+            candidate = candidate_cpu[occurrence]
+            if not bool(prototype_valid_cpu[local]):
+                prototype_cpu[local] = incumbent_cpu[local]
+                prototype_valid_cpu[local] = True
+            prototype = prototype_cpu[local]
+            age_sum += float(max(0, int(decision) - int(last_update_cpu[local])))
+            age_count += 1
+            if int(count_cpu[occurrence]) >= int(min_confirmations):
+                attempts += 1
+                gain = torch.dot(candidate, prototype) - torch.dot(incumbent_cpu[local], prototype)
+                if float(gain) >= float(margin):
+                    selected[local] = occurrence
+                    scores[local] = gain
+                    incumbent_cpu[local] = candidate
+                    last_update_cpu[local] = int(decision)
+                    refinements += 1
+                    gain_sum += float(gain)
+                    refined[occurrence] = True
+            prototype_cpu[local] = F.normalize((1.0 - float(alpha)) * prototype + float(alpha) * candidate, dim=0)
+        self.anchor_signature[unique_nodes] = prototype_cpu.to(self.anchor_signature)
+        self.anchor_signature_valid[unique_nodes] = prototype_valid_cpu.to(self.anchor_signature_valid)
+        selected_nodes = selected >= 0
+        if selected_nodes.any():
+            destination_nodes = unique_nodes[selected_nodes]
+            source_rows = selected[selected_nodes].to(ca3.device)
+            self.anchor_ca3[destination_nodes] = ca3[source_rows].detach().to(self.anchor_ca3)
+            self.anchor_last_update[destination_nodes] = int(decision)
+            self.anchor_last_score[destination_nodes] = scores[selected_nodes].to(self.anchor_last_score)
+        self.anchor_refinement_attempts.add_(attempts)
+        self.anchor_refinements.add_(refinements)
+        self.anchor_centrality_gain_sum.add_(gain_sum)
+        self.anchor_age_sum.add_(age_sum)
+        self.anchor_age_count.add_(age_count)
+        return refined.to(self.anchor_ca3.device)
+
+    @torch.no_grad()
+    def refine_anchor_ema(
+        self,
+        node: int,
+        ca3: Tensor,
+        readout: nn.Module,
+        predictor: nn.Module,
+        decision: int,
+        alpha: float,
+        min_confirmations: int,
+        margin: float,
+    ) -> bool:
+        """Refine a raw anchor without changing its semantic generation."""
+        node = int(node)
+        candidate = F.normalize(action_probe_signature(readout, predictor, ca3.detach()), dim=-1).squeeze(0)
+        if not self.anchor_signature_valid[node]:
+            self.anchor_signature[node].copy_(
+                F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[node]), dim=-1).squeeze(0)
+            )
+            self.anchor_signature_valid[node] = True
+        prototype = self.anchor_signature[node]
+        anchor_age = max(0, int(decision) - int(self.anchor_last_update[node]))
+        refined = False
+        if int(self.confirmation_count[node]) >= int(min_confirmations):
+            self.anchor_refinement_attempts.add_(1)
+            incumbent = F.normalize(action_probe_signature(readout, predictor, self.anchor_ca3[node]), dim=-1).squeeze(
+                0
+            )
+            gain = torch.dot(candidate, prototype) - torch.dot(incumbent, prototype)
+            if gain >= float(margin):
+                self.anchor_ca3[node].copy_(ca3.detach().to(self.anchor_ca3))
+                self.anchor_last_update[node] = int(decision)
+                self.anchor_last_score[node] = float(gain)
+                self.anchor_refinements.add_(1)
+                self.anchor_centrality_gain_sum.add_(gain)
+                refined = True
+        updated = F.normalize((1.0 - float(alpha)) * prototype + float(alpha) * candidate, dim=0)
+        self.anchor_signature[node].copy_(updated)
+        self.anchor_age_sum.add_(float(anchor_age))
+        self.anchor_age_count.add_(1)
+        return refined
+
+    @torch.no_grad()
+    def contextual_activity(self, dg_activity: Tensor, ca3: Tensor, readout: nn.Module, predictor: nn.Module) -> Tensor:
+        """Recognize events using the configured selectable-anchor candidate rule."""
+        counts = (dg_activity > 0).sum(-1)
+        has_event = counts > 0
+        self.context_raw_multi_activation.add_((counts > 1).sum())
+        result = torch.zeros_like(dg_activity)
+        selectable = self.selectable_mask()
+        event_rows = torch.where(has_event)[0]
+        if not event_rows.numel():
+            return result
+
+        if self.candidate_mode == "unique_contextual":
+            nodes = torch.where(selectable)[0]
+            if not nodes.numel():
+                self.context_zero_match.add_(event_rows.numel())
+                return result
+            if self.similarity_space == "z":
+                event_embeddings = F.normalize(readout(ca3[event_rows]), dim=-1)
+                anchor_embeddings = F.normalize(readout(self.anchor_ca3[nodes]), dim=-1)
+            else:
+                event_embeddings = F.normalize(action_probe_signature(readout, predictor, ca3[event_rows]), dim=-1)
+                anchor_embeddings = F.normalize(
+                    action_probe_signature(readout, predictor, self.anchor_ca3[nodes]), dim=-1
+                )
+            passing = event_embeddings @ anchor_embeddings.T >= self.recognition_threshold
+            match_count = passing.sum(-1)
+            self.context_zero_match.add_((match_count == 0).sum())
+            self.context_multi_match.add_((match_count > 1).sum())
+            accepted = match_count == 1
+            if accepted.any():
+                accepted_rows = event_rows[accepted]
+                accepted_nodes = nodes[passing[accepted].to(torch.int64).argmax(-1)]
+                result[accepted_rows, accepted_nodes] = dg_activity[accepted_rows].amax(-1)
+                self.context_accepted_events.add_(accepted.sum())
+                self.context_unique_rescues.add_((counts[accepted_rows] > 1).sum())
+            return result
+
+        if self.candidate_mode not in ("exclusive", "dominant"):
+            raise ValueError(f"Unknown contextual candidate mode: {self.candidate_mode}")
+        raw_nodes = dg_activity[event_rows].argmax(-1)
+        eligible = selectable[raw_nodes]
+        if self.candidate_mode == "exclusive":
+            eligible &= counts[event_rows] == 1
+        if eligible.any():
+            candidate_rows = event_rows[eligible]
+            candidate_nodes = raw_nodes[eligible]
+            similarities = contextual_similarity(
+                readout,
+                predictor,
+                ca3[candidate_rows],
+                self.anchor_ca3[candidate_nodes],
+                space=self.similarity_space,
+            )
+            accepted = similarities >= self.recognition_threshold
+            self.context_zero_match.add_((~accepted).sum())
+            if accepted.any():
+                accepted_rows = candidate_rows[accepted]
+                accepted_nodes = candidate_nodes[accepted]
+                result[accepted_rows, accepted_nodes] = dg_activity[accepted_rows].amax(-1)
+                self.context_accepted_events.add_(accepted.sum())
+        return result
+
+    @torch.no_grad()
+    def _clear_node_evidence(self, node: int) -> None:
+        node = int(node)
         self.node_visits[node] = 0
-        self.tctrl[node, :] = 0
-        self.tctrl[:, node] = 0
-        self.edge_confidence[node, :] = 0
-        self.edge_confidence[:, node] = 0
         for matrix in (
+            self.tctrl,
+            self.edge_confidence,
             self.control_attempts,
             self.passive_confidence,
             self.passive_time,
@@ -541,15 +1177,54 @@ class PolicyControllableGraph(nn.Module):
         self.frontier_discoveries[node] = 0
         self.landmark_pose[node] = 0
         self.pose_valid[node] = False
+
+    @torch.no_grad()
+    def replace_anchor(self, node: int, ca3: Tensor, decision: int, score: float) -> None:
+        node = int(node)
+        if self.active_goal_mask[node]:
+            self.anchor_deactivations.add_(1)
+        self._clear_node_evidence(node)
+        self.anchor_generation[node].add_(1)
+        self.anchor_ca3[node].copy_(ca3.detach().to(self.anchor_ca3))
+        self.anchor_valid[node] = True
+        self.anchor_last_update[node] = int(decision)
+        self.anchor_last_score[node] = float(score)
+        self.active_goal_mask[node] = False
+        self.active_generation[node] = -1
+        self.confirmation_count[node] = 0
+        self.anchor_signature_valid[node] = False
+        self.anchor_replacements.add_(1)
+
+    @torch.no_grad()
+    def invalidate_node(self, node: int) -> None:
+        """Forget graph evidence tied to a reassigned DG representation."""
+        node = int(node)
+        if node < 0 or node >= self.n_nodes:
+            raise IndexError(f"DG node {node} is outside [0, {self.n_nodes})")
+        self._clear_node_evidence(node)
+        if self.contextual:
+            if self.active_goal_mask[node]:
+                self.anchor_deactivations.add_(1)
+            self.anchor_valid[node] = False
+            self.active_goal_mask[node] = False
+            self.active_generation[node] = -1
+            self.confirmation_count[node] = 0
+            self.anchor_signature_valid[node] = False
+            self.anchor_generation[node].add_(1)
         self.representation_generation.add_(1)
 
     def expanded_state(self, batch_size: int, dtype: torch.dtype, device: torch.device) -> Tensor:
         """Materialize a read-only snapshot in the legacy packed graph layout."""
         layout = HRLStateLayout(self.n_nodes)
         state = torch.zeros(batch_size, layout.size, dtype=dtype, device=device)
-        state[:, layout.visits_start : layout.visits_end] = self.node_visits.to(device=device, dtype=dtype)
-        state[:, layout.tctrl_start : layout.tctrl_end] = self.tctrl.to(device=device, dtype=dtype).flatten()
-        state[:, layout.edge_strength_start : layout.edge_strength_end] = self.edge_confidence.to(
+        selectable = self.selectable_mask()
+        endpoints = selectable[:, None] & selectable[None, :]
+        visits = self.node_visits * selectable.to(self.node_visits.dtype)
+        tctrl = self.tctrl * endpoints.to(self.tctrl.dtype)
+        confidence = self.edge_confidence * endpoints.to(self.edge_confidence.dtype)
+        state[:, layout.visits_start : layout.visits_end] = visits.to(device=device, dtype=dtype)
+        state[:, layout.tctrl_start : layout.tctrl_end] = tctrl.to(device=device, dtype=dtype).flatten()
+        state[:, layout.edge_strength_start : layout.edge_strength_end] = confidence.to(
             device=device, dtype=dtype
         ).flatten()
         return state
@@ -590,6 +1265,7 @@ class PolicyControllableGraph(nn.Module):
         unsuccessful = (nxt[:, layout.option_expired] > 0) & valid
         source = prev[:, layout.source].long() - 1
         target = prev[:, layout.target].long() - 1
+        next_target = nxt[:, layout.target].long() - 1
         normal_target = (target >= 0) & (target < self.n_nodes)
         exploration_target = target == self.n_nodes
         negative_elapsed = nxt[:, layout.completion_elapsed] < 0
@@ -598,6 +1274,16 @@ class PolicyControllableGraph(nn.Module):
         target_timeout = unsuccessful & normal_target & (~negative_elapsed)
         timeout = target_timeout | exploration_timeout
         completed = hit | wrong_outcome | timeout
+        if self.contextual:
+            issued = valid & (next_target >= 0) & (next_target < self.n_nodes) & (next_target != target)
+            issued &= self.selectable_mask()[next_target.clamp(0, self.n_nodes - 1)]
+            if issued.any():
+                self.command_count.scatter_add_(
+                    0, next_target[issued], torch.ones_like(next_target[issued], dtype=self.command_count.dtype)
+                )
+            if not self.selectable_mask().any():
+                exploration_issued = valid & (next_target == self.n_nodes) & (next_target != target)
+                self.empty_set_exploration_count.add_(exploration_issued.sum())
         future_events = torch.flip(torch.cumsum(torch.flip(completed.to(torch.int64), (0,)), 0), (0,))
         future_events = future_events - completed.to(torch.int64)
         gamma_future = torch.pow(
@@ -617,11 +1303,17 @@ class PolicyControllableGraph(nn.Module):
         self.frontier_discoveries.mul_(gamma_total)
         active = nxt[:, layout.active_dg].long() - 1
         active_mask = valid & (active >= 0) & (active < self.n_nodes)
+        if self.contextual:
+            active_mask &= self.selectable_mask()[active.clamp(0, self.n_nodes - 1)]
         if active_mask.any():
             self.node_visits.scatter_add_(0, active[active_mask], gamma_future[active_mask])
 
         attempted = (hit | wrong_outcome | target_timeout) & (source >= 0) & (source < self.n_nodes)
         attempted = attempted & (target >= 0) & (target < self.n_nodes) & (source != target)
+        if self.contextual:
+            selectable = self.selectable_mask()
+            attempted &= selectable[source.clamp(0, self.n_nodes - 1)]
+            attempted &= selectable[target.clamp(0, self.n_nodes - 1)]
         prospective = attempted.clone()
         if prospective.any():
             prospective = (
@@ -658,6 +1350,10 @@ class PolicyControllableGraph(nn.Module):
             self.control_attempts.flatten().scatter_add_(0, attempt_index, attempt_weights)
         success = hit & (source >= 0) & (source < self.n_nodes) & (target >= 0) & (target < self.n_nodes)
         success = success & (source != target)
+        if self.contextual:
+            selectable = self.selectable_mask()
+            success &= selectable[source.clamp(0, self.n_nodes - 1)]
+            success &= selectable[target.clamp(0, self.n_nodes - 1)]
         if success.any():
             edge_index = source[success] * self.n_nodes + target[success]
             weights = gamma_future[success]
@@ -726,6 +1422,13 @@ def update_option_state_from_policy_graph(
     generation = graph.representation_generation.to(device=prev_option_state.device, dtype=prev_option_state.dtype)
     has_option = (option_state[:, layout.target] > 0) | (option_state[:, layout.source] > 0)
     stale_option = has_option & (prev_option_state[:, layout.persistent_start] != generation)
+    if graph.contextual:
+        selectable = graph.selectable_mask()
+        target = option_state[:, layout.target].long() - 1
+        source = option_state[:, layout.source].long() - 1
+        bad_target = (target >= 0) & (target < graph.n_nodes) & ~selectable[target.clamp(0, graph.n_nodes - 1)]
+        bad_source = (source >= 0) & (source < graph.n_nodes) & ~selectable[source.clamp(0, graph.n_nodes - 1)]
+        stale_option |= bad_target | bad_source
     if stale_option.any():
         option_state[stale_option, layout.target] = 0
         option_state[stale_option, layout.source] = 0

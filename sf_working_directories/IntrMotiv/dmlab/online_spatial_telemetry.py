@@ -72,6 +72,9 @@ class TrainingSpatialTelemetry:
         actor_critic: Any | None = None,
     ):
         self.cfg = cfg
+        from hpc_runs.intrmotiv_study.geometry import geometry_from_config
+
+        self.geometry_record = geometry_from_config(cfg)
         self.policy_id = int(policy_id)
         self.frameskip = int(env_info.frameskip)
         self.window_limit = int(cfg.online_spatial_window_observations)
@@ -331,7 +334,19 @@ class TrainingSpatialTelemetry:
         arrays["actions"] = arrays["actions"].astype(np.int16, copy=False)
         arrays["segment_id"] = arrays["segment_id"].astype(np.int32, copy=False)
         arrays["policy_version"] = arrays["policy_version"].astype(np.int64, copy=False)
+        from hpc_runs.intrmotiv_study.geometry import geometry_payload, traversable_field_components
+
+        geometry = geometry_payload(self.geometry_record)
+        if geometry:
+            geometry.update(
+                traversable_field_components(
+                    np.moveaxis(spatial_details["rate_maps"], -1, 0),
+                    spatial_details["occupancy"],
+                    geometry["geometry_accessible_mask"],
+                )
+            )
         return {
+            **geometry,
             "schema": np.asarray(SNAPSHOT_SCHEMA),
             "schema_version": np.asarray(1, dtype=np.int16),
             **arrays,

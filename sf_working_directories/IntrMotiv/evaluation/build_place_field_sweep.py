@@ -97,14 +97,14 @@ def checkpoint_frames(path: Path) -> int:
     return int(match.group(1))
 
 
-def select_checkpoints(run_dir: Path) -> list[tuple[int, Path]]:
+def select_checkpoints(run_dir: Path, target_frames=TARGET_FRAMES) -> list[tuple[int, Path]]:
     files = list((run_dir / "checkpoint_p0").glob("checkpoint_*.pth"))
     files += list((run_dir / "checkpoint_p0" / "milestones").glob("checkpoint_*.pth"))
     indexed = {checkpoint_frames(path): path for path in files}
     if not indexed:
         raise FileNotFoundError(f"No checkpoints under {run_dir}")
     candidates = sorted(indexed.items())
-    return [(target, min(candidates, key=lambda pair: abs(pair[0] - target))[1]) for target in TARGET_FRAMES]
+    return [(target, min(candidates, key=lambda pair: abs(pair[0] - target))[1]) for target in target_frames]
 
 
 def parse_args() -> argparse.Namespace:

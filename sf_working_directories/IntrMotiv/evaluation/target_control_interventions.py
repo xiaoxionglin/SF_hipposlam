@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import pathlib
 from dataclasses import dataclass, field
 
@@ -26,9 +27,13 @@ from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
     MODE_NAVIGATE,
     N_MANAGER_MODES,
 )
-from sf_working_directories.IntrMotiv.evaluation.place_fields import load_policy_env
+from sf_working_directories.IntrMotiv.evaluation.place_fields import evaluation_pose, load_policy_env
 
-WORKSPACE_ROOT = pathlib.Path("/work/classic/fr_xl1014-train")
+WORKSPACE_ROOT = (
+    pathlib.Path(os.environ.get("INTRMOTIV_WORKSPACE_ROOT", "/work/classic/fr_xl1014-corridor-geometry"))
+    .expanduser()
+    .resolve()
+)
 MANIFEST_COLUMNS = (
     "condition",
     "family",
@@ -293,6 +298,306 @@ def summarize_trials(
     }
 
 
+def run_landmark_matched_interventions(
+    cfg,
+    env,
+    env_info,
+    actor,
+    checkpoint,
+    device,
+    decision_cap,
+    deterministic=False,
+    max_sources=16,
+    targets_per_source=4,
+    repeats=5,
+    prefix_cap=512,
+    focus_sources=None,
+    focus_target=None,
+    reward_center=None,
+    reward_cell=None,
+    physical_horizon=None,
+    discovery_multiplier=2,
+):
+    """Execute different commands from identical engine/prefix states.
+
+    Prefixes are selected by exclusive source observations, never trial success.
+    Only observed outgoing passive pairs form the evaluation panel. Both a
+    target's own command and all selected alternative commands score that target.
+    """
+    from sample_factory.algo.utils.make_env import make_env_func_batched
+
+    n = int(cfg.Hippo_n_feature)
+    if focus_target is not None and not 0 <= focus_target < n:
+        raise ValueError("focus_target is outside the DG capacity")
+    if focus_sources is not None and any(not 0 <= source < n for source in focus_sources):
+        raise ValueError("focus_sources contains an invalid DG ID")
+    graph = actor.core.policy_graph
+    before = {k: v.detach().clone() for k, v in actor.state_dict().items()}
+    pairs = (graph.passive_confidence > 0).cpu().numpy()
+    np.fill_diagonal(pairs, False)
+    rows, panel, missing = [], {}, []
+    decisions = 0
+    ambiguous_discovery_observations = 0
+    ambiguous_trial_observations = 0
+
+    def fresh(seed):
+        nonlocal env
+        env.close()
+        ecfg = AttrDict(dict(cfg))
+        ecfg.dmlab_use_level_cache = False
+        env = make_env_func_batched(
+            ecfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=None
+        )
+        base = env.unwrapped
+        if hasattr(base, "reset_on_init"):
+            base.reset_on_init = False
+        base.seed(seed)
+        torch.manual_seed(seed)
+        obs, _ = env.reset()
+        return obs, torch.zeros(1, get_rnn_size(cfg), device=device)
+
+    def advance(action):
+        nonlocal decisions
+        if decisions >= decision_cap:
+            raise RuntimeError("Matched intervention decision cap exhausted")
+        actions = torch.as_tensor([[action]], device=device)
+        obs, _, term, trunc, _ = env.step(preprocess_actions(env_info, actions))
+        decisions += 1
+        return obs, bool(make_dones(term, trunc)[0])
+
+    def encode(obs, state, command=None):
+        h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
+        if command is not None and getattr(cfg, "dg_goal_input", "none") == "write":
+            goal = h.new_zeros((1, n))
+            goal[:, command] = 1
+            h = torch.cat((h, goal), -1)
+        out, nxt = actor.forward_core(h, state)
+        if command is not None:
+            out = condition_for_target(actor, out, -1, command)
+        return h[:, :n], out, nxt
+
+    def signature(obs, state):
+        return {
+            **{k: v.detach().clone() for k, v in obs.items() if torch.is_tensor(v)},
+            "__state": state.detach().clone(),
+            "__position": evaluation_pose(env, obs)[0],
+            "__rotation": evaluation_pose(env, obs)[1],
+        }
+
+    def replay(seed, prefix):
+        obs, state = fresh(seed)
+        for action in prefix:
+            _, _, state = encode(obs, state)
+            obs, done = advance(action)
+            if done:
+                raise RuntimeError("Episode boundary in retained prefix")
+        return obs, state
+
+    try:
+        with torch.no_grad():
+            # Bounded discovery; record multiple starts per source where possible.
+            for attempt in range(max_sources * repeats * discovery_multiplier):
+                if decisions + prefix_cap >= decision_cap // 4:
+                    break
+                seed = 31000 + attempt
+                obs, state = fresh(seed)
+                prefix = []
+                actions = np.random.default_rng(seed).integers(0, actor.action_space.n, prefix_cap)
+                for action in actions:
+                    h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
+                    active = torch.nonzero(h[0, :n] > 0).flatten()
+                    ambiguous_discovery_observations += int(active.numel() > 1)
+                    source = int(active.item()) if active.numel() == 1 else -1
+                    if (
+                        source >= 0
+                        and (focus_sources is None or source in focus_sources)
+                        and (source in panel or len(panel) < max_sources)
+                    ):
+                        targets = np.flatnonzero(pairs[source]).tolist()
+                        if focus_target is not None:
+                            if focus_target in targets:
+                                targets.remove(focus_target)
+                                targets.sort(key=lambda target: -float(graph.passive_confidence[source, target]))
+                                targets = [focus_target] + targets[: max(1, targets_per_source - 1)]
+                            else:
+                                targets = []
+                        else:
+                            targets = targets[:targets_per_source]
+                        if len(targets) >= 2 and len(panel.get(source, [])) < repeats:
+                            panel.setdefault(source, []).append((seed, list(prefix), targets, signature(obs, state)))
+                            break
+                    _, state = actor.forward_core(h, state)
+                    obs, done = advance(int(action))
+                    prefix.append(int(action))
+                    if done:
+                        break
+                if len(panel) == max_sources and all(len(v) == repeats for v in panel.values()):
+                    break
+            for source, starts in sorted(panel.items()):
+                for rep, (seed, prefix, targets, reference) in enumerate(starts):
+                    horizon = max(pair_deadline(graph, source, t) for t in targets)
+                    if physical_horizon is not None:
+                        horizon = max(horizon, physical_horizon)
+                    cost = len(targets) * (len(prefix) + horizon)
+                    if decisions + cost > decision_cap:
+                        missing.append(dict(source=source, repeat=rep, reason="decision_budget"))
+                        continue
+                    for command in targets:
+                        obs, state = replay(seed, prefix)
+                        actual = signature(obs, state)
+                        if actual.keys() != reference.keys() or any(
+                            not torch.equal(reference[k], actual[k]) for k in reference
+                        ):
+                            raise RuntimeError(f"Nonreproducible landmark start: source={source}, repeat={rep}")
+                        first_times = {t: None for t in targets}
+                        elapsed = 0
+                        first_other = None
+                        done = False
+                        rng = torch.Generator(device=device).manual_seed(41000 + seed)
+                        start_pos = as_numpy(evaluation_pose(env, obs)[0][0]).copy()
+                        last = start_pos.copy()
+                        path = 0.0
+                        start_distance = (
+                            float(np.linalg.norm(start_pos[:2] - reward_center))
+                            if reward_center is not None
+                            else math.nan
+                        )
+                        minimum_distance = start_distance
+                        physical_contact = False
+                        for elapsed in range(1, horizon + 1):
+                            _, out, state = encode(obs, state, command)
+                            result = actor.forward_tail(out, values_only=False, sample_actions=False)
+                            prob = result["action_logits"].softmax(-1)
+                            if elapsed == 1:
+                                initial_prob = prob[0].cpu().tolist()
+                            action = prob.argmax(-1) if deterministic else torch.multinomial(prob, 1, generator=rng)
+                            obs, done = advance(int(action.item()))
+                            if done and "pos" not in obs:
+                                break
+                            pos = as_numpy(evaluation_pose(env, obs)[0][0]).copy()
+                            if reward_center is not None:
+                                minimum_distance = min(minimum_distance, float(np.linalg.norm(pos[:2] - reward_center)))
+                            if reward_cell is not None:
+                                x0, x1, y0, y1 = reward_cell
+                                physical_contact |= bool(x0 <= pos[0] < x1 and y0 <= pos[1] < y1)
+                            path += float(np.linalg.norm(pos[:2] - last[:2]))
+                            last = pos
+                            if done:
+                                break
+                            h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
+                            active = torch.nonzero(h[0, :n] > 0).flatten()
+                            ambiguous_trial_observations += int(active.numel() > 1)
+                            hit = int(active.item()) if active.numel() == 1 else -1
+                            if hit >= 0 and hit != source and first_other is None:
+                                first_other = hit
+                            if hit in first_times and first_times[hit] is None:
+                                first_times[hit] = elapsed
+                        for target in targets:
+                            deadline = pair_deadline(graph, source, target)
+                            hit_time = first_times[target]
+                            hit = hit_time is not None and hit_time <= deadline
+                            censored = not hit and done and elapsed < deadline
+                            rows.append(
+                                dict(
+                                    source=source,
+                                    repeat=rep,
+                                    prefix_seed=seed,
+                                    command=command,
+                                    target=target,
+                                    initial_action_probabilities=json.dumps(initial_prob),
+                                    commanded=command == target,
+                                    deadline=deadline,
+                                    hit=hit,
+                                    hit_time=hit_time,
+                                    first_distinct=first_other,
+                                    censored=censored,
+                                    timeout=not hit and not censored,
+                                    elapsed=elapsed,
+                                    path_length=path,
+                                    start_position=json.dumps(start_pos.tolist()),
+                                    endpoint=json.dumps(last.tolist()),
+                                    exact_start_verified=True,
+                                    physical_start_distance=start_distance,
+                                    physical_minimum_distance=minimum_distance,
+                                    physical_entry_r200=start_distance > 200 and minimum_distance <= 200,
+                                    physical_entry_r300=start_distance > 300 and minimum_distance <= 300,
+                                    physical_cell_contact=physical_contact,
+                                )
+                            )
+    finally:
+        env.close()
+    if any(not torch.equal(v, actor.state_dict()[k]) for k, v in before.items()):
+        raise RuntimeError("Policy or graph changed during matched intervention")
+    differences = []
+    for source, starts in panel.items():
+        for rep in range(len(starts)):
+            for target in starts[rep][2]:
+                group = [r for r in rows if r["source"] == source and r["repeat"] == rep and r["target"] == target]
+                actual = [float(r["hit"]) for r in group if r["commanded"] and not r["censored"]]
+                alternate = [float(r["hit"]) for r in group if not r["commanded"] and not r["censored"]]
+                if actual and alternate:
+                    differences.append(actual[0] - float(np.mean(alternate)))
+    eligible_sources = range(n) if focus_sources is None else focus_sources
+    supported_sources = sum(
+        int(pairs[source].sum() >= 2 and (focus_target is None or pairs[source, focus_target]))
+        for source in eligible_sources
+    )
+    if len(panel) < min(max_sources, supported_sources):
+        missing.append(
+            dict(reason="source_discovery_limit", requested=min(max_sources, supported_sources), found=len(panel))
+        )
+    if supported_sources < max_sources:
+        missing.append(
+            dict(reason="insufficient_observed_outgoing_pairs", requested=max_sources, supported=supported_sources)
+        )
+    for source, starts in panel.items():
+        if len(starts) < repeats:
+            missing.append(
+                dict(reason="insufficient_repeated_starts", source=source, requested=repeats, found=len(starts))
+            )
+    action_distances = []
+    for source, starts in panel.items():
+        for rep in range(len(starts)):
+            commands = {
+                r["command"]: np.asarray(json.loads(r["initial_action_probabilities"]))
+                for r in rows
+                if r["source"] == source and r["repeat"] == rep
+            }
+            ids = sorted(commands)
+            action_distances.extend(
+                float(np.abs(commands[a] - commands[b]).sum() / 2) for i, a in enumerate(ids) for b in ids[i + 1 :]
+            )
+    summary = dict(
+        protocol="landmark-matched-commands-v1",
+        checkpoint=str(checkpoint),
+        decisions=decisions,
+        supported_sources=supported_sources,
+        source_panel_coverage=len(panel) / supported_sources if supported_sources else 0.0,
+        mean_initial_action_total_variation=float(np.mean(action_distances)) if action_distances else None,
+        sources_evaluated=len(panel),
+        starts_evaluated=sum(len(v) for v in panel.values()),
+        max_sources=max_sources,
+        targets_per_source=targets_per_source,
+        repeats_requested=repeats,
+        missing=missing,
+        exact_start_verified=bool(rows),
+        policy_frozen=True,
+        graph_frozen=True,
+        paired_arrival_lift=float(np.mean(differences)) if differences else None,
+        paired_comparisons=len(differences),
+        trial_status="paired_trials_available" if differences else "unresolved_no_paired_trials",
+        ambiguous_discovery_observations=ambiguous_discovery_observations,
+        ambiguous_trial_observations=ambiguous_trial_observations,
+        censored_rows=sum(int(row["censored"]) for row in rows),
+        rows=len(rows),
+        focus_sources=focus_sources,
+        focus_target=focus_target,
+        physical_horizon=physical_horizon,
+        discovery_multiplier=discovery_multiplier,
+    )
+    return pd.DataFrame(rows), summary
+
+
 def run_interventions(
     run_dir: pathlib.Path,
     checkpoint: pathlib.Path,
@@ -303,10 +608,18 @@ def run_interventions(
     observed_targets_only: bool = False,
     local_successor_targets_only: bool = False,
     absent_options: dict | None = None,
+    landmark_options: dict | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     cfg, env, env_info, actor_critic, checkpoint, device = load_policy_env(
         run_dir, decision_cap, deterministic, 0, checkpoint
     )
+    if landmark_options is not None:
+        return run_landmark_matched_interventions(
+            cfg, env, env_info, actor_critic, checkpoint, device, decision_cap, deterministic, **landmark_options
+        )
+    if getattr(cfg, "dg_goal_input", "none") == "write":
+        env.close()
+        raise ValueError("DG-conditioned policies require landmark-matched-commands-v1 interventions")
     if getattr(cfg, "intrinsic_goal_mode", "none") == "ca3_absent_target":
         from sf_working_directories.IntrMotiv.evaluation.absent_goal_interventions import run_absent_goal_interventions
 
@@ -343,8 +656,8 @@ def run_interventions(
             dg = head_output[:, :n_nodes]
             active_ids = torch.nonzero(dg[0] > 0, as_tuple=False).flatten()
             exclusive_node = int(active_ids.item()) if active_ids.numel() == 1 else -1
-            position = as_numpy(obs["pos"][0])
-            rotation = as_numpy(obs["rot"][0])
+            position = as_numpy(evaluation_pose(env, obs)[0][0])
+            rotation = as_numpy(evaluation_pose(env, obs)[1][0])
             if active_trial is not None and exclusive_node >= 0:
                 active_trial.hit_mask |= 1 << exclusive_node
             completion = (
@@ -395,14 +708,14 @@ def run_interventions(
             obs, _, terminated, truncated, _ = env.step(actions)
             rnn_states = new_rnn_states
             if active_trial is not None:
-                next_position = as_numpy(obs["pos"][0])
+                next_position = as_numpy(evaluation_pose(env, obs)[0][0])
                 active_trial.path_length += float(np.linalg.norm(next_position[:2] - active_trial.last_position[:2]))
                 active_trial.last_position = next_position.copy()
                 active_trial.elapsed += 1
             dones = make_dones(terminated, truncated).cpu().numpy()
             if bool(dones[0]):
                 if active_trial is not None:
-                    endpoint = as_numpy(obs["pos"][0])
+                    endpoint = as_numpy(evaluation_pose(env, obs)[0][0])
                     rows.append(trial_row(active_trial, endpoint, -1, "censored_boundary", decision + 1))
                     counts[active_trial.source, active_trial.target] += 1
                     active_trial = None
@@ -470,6 +783,11 @@ def main() -> None:
             )
             if source in intervention
         },
+        landmark_options=(
+            {key: intervention[key] for key in ("max_sources", "targets_per_source", "repeats") if key in intervention}
+            if intervention.get("evaluation") == "landmark-matched-commands-v1"
+            else None
+        ),
         first_distinct=bool(intervention.get("terminate_on_first_distinct_exclusive_outcome", False)),
         observed_targets_only=bool(intervention.get("balanced_observed_alternative_targets", False)),
         local_successor_targets_only=bool(intervention.get("balanced_local_successor_targets", False)),

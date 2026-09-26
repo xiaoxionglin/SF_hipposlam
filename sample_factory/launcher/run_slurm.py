@@ -135,6 +135,7 @@ def run_slurm(run_description, args):
         sbatch_template = SBATCH_TEMPLATE_DEFAULT
 
     partition_directive = f"-p {args.slurm_partition} " if args.slurm_partition else ""
+    gpu_directive = f"#SBATCH --gres=gpu:{args.slurm_gpus_per_job}" if args.slurm_gpus_per_job > 0 else ""
     legacy_num_cpus = args.slurm_cpus_per_gpu * args.slurm_gpus_per_job
     if legacy_num_cpus == 0:
         legacy_num_cpus = args.slurm_cpus_per_gpu
@@ -156,6 +157,7 @@ def run_slurm(run_description, args):
             FILENAME=sbatch_file,
             PARTITION=partition_directive,
             GPU=args.slurm_gpus_per_job,
+            GPU_DIRECTIVE=gpu_directive,
             CPU=num_cpus,
             MEMORY=args.slurm_memory,
             TIMEOUT=args.slurm_timeout,
@@ -193,7 +195,8 @@ def run_slurm(run_description, args):
         command = ["sbatch"]
         if args.slurm_partition:
             command.extend(["-p", args.slurm_partition])
-        command.append(f"--gres=gpu:{args.slurm_gpus_per_job}")
+        if args.slurm_gpus_per_job > 0:
+            command.append(f"--gres=gpu:{args.slurm_gpus_per_job}")
         command.extend(["-c", str(num_cpus), "--parsable", "--output", job["stdout"]])
         if args.slurm_separate_stderr:
             command.extend(["--error", job["stderr"]])

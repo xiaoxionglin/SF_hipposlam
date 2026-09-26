@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from math import cos, hypot, radians, sin, tanh
 
 import gymnasium as gym
@@ -63,6 +65,10 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
         action_path_integration=False,
     ):
         super().__init__(env)
+        from hpc_runs.intrmotiv_study.geometry import AccessibleCoverage
+
+        self.geometry_record = getattr(env.unwrapped, "geometry_record", None)
+        self.accessible_coverage = AccessibleCoverage(self.geometry_record) if self.geometry_record else None
         self.raw_episode_return = self.episode_length = 0
         self.coverage_telemetry = coverage_telemetry
         self.coverage_grid_size = float(coverage_grid_size)
@@ -93,6 +99,10 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
+        if self.geometry_record:
+            from hpc_runs.intrmotiv_study.geometry import AccessibleCoverage
+
+            self.accessible_coverage = AccessibleCoverage(self.geometry_record)
         self.raw_episode_return = self.episode_length = 0
         self.coverage_cells = {}
         self.coverage_auc_sum = 0.0
@@ -144,6 +154,11 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
         )
         position = pose[:2] if pose is not None else legacy_position
         position_valid = position is not None and (not done or terminal_pose_fresh)
+        if self.accessible_coverage is not None:
+            if done and not terminal_pose_fresh:
+                self.accessible_coverage.hold()
+            else:
+                self.accessible_coverage.step(position if position_valid else None)
         heading_valid = (
             pose is not None
             and np.asarray(pose).size >= 3
@@ -237,6 +252,9 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
                 info["episode_extra_stats"][f"{level_name_key}_coverage_unique_cells"] = unique_cells
                 info["episode_extra_stats"][f"{level_name_key}_coverage_entropy"] = entropy
                 info["episode_extra_stats"][f"{level_name_key}_coverage_auc"] = float(coverage_auc)
+                if self.accessible_coverage is not None:
+                    for key, value in self.accessible_coverage.metrics().items():
+                        info["episode_extra_stats"][f"{level_name_key}_{key}"] = value
                 if self.pose_steps > 0:
                     pose_bins, pose_entropy, pose_auc = self._coverage_stats(
                         self.pose_cells, self.pose_auc_sum, self.pose_steps

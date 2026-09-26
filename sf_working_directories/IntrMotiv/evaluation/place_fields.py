@@ -31,6 +31,8 @@ def parse_args():
     parser.add_argument("--run-dir", action="append", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--max-num-frames", type=int, default=50000)
+    parser.add_argument("--coverage-episodes", type=int, default=0)
+    parser.add_argument("--random-coverage", action="store_true")
     parser.add_argument("--grain", type=int, default=19)
     parser.add_argument("--checkpoint-rank", type=int, default=1, help="0=newest, 1=second-newest, etc.")
     parser.add_argument(
@@ -48,6 +50,12 @@ def parse_args():
     panel = parser.add_mutually_exclusive_group()
     panel.add_argument("--record-observation-panel", type=pathlib.Path)
     panel.add_argument("--replay-observation-panel", type=pathlib.Path)
+    parser.add_argument(
+        "--panel-goal",
+        type=int,
+        default=None,
+        help="Force one landmark command during a common observation-panel replay",
+    )
     return parser.parse_args()
 
 
@@ -112,7 +120,21 @@ def load_checkpoint_dict(checkpoint: pathlib.Path, device: torch.device) -> dict
     """
     safe_globals = [np.core.multiarray.scalar, np.dtype, type(np.dtype(np.float64))]
     with torch.serialization.safe_globals(safe_globals):
-        return torch.load(checkpoint, map_location=device, weights_only=True)
+        # CPU audits/evaluation need model and metadata, not eager copies of
+        # gigabytes of replay tensors. Torch's private mmap preserves tensor
+        # values and safe unpickling while faulting storage pages on demand.
+        return torch.load(checkpoint, map_location=device, weights_only=True, mmap=device.type == "cpu")
+
+
+def evaluation_pose(env, obs):
+    """Read privileged pose without adding it to a corridor model observation."""
+    if "pos" in obs:
+        return obs["pos"].clone(), obs["rot"].clone()
+    base = env.unwrapped
+    return (
+        torch.as_tensor(np.array(base.last_debug_position, copy=True)).unsqueeze(0),
+        torch.as_tensor(np.array(base.last_debug_rotation, copy=True)).unsqueeze(0),
+    )
 
 
 def load_policy_env(
@@ -143,7 +165,11 @@ def load_policy_env(
     # variants; the parser bootstrap environment is not an evaluation override.
     cfg.max_num_frames = max_num_frames
     cfg.num_envs = 1
-    cfg.with_pos_obs = True
+    geometry_environment = cfg.env in {"corridor_geometry_noreward", "easy_landmark_maze_noreward"}
+    cfg.with_pos_obs = not geometry_environment
+    if geometry_environment:
+        # Evaluation must not consume the training cache's unused reset seeds.
+        cfg.dmlab_use_level_cache = False
     cfg.no_render = True
     cfg.use_jit = False
     cfg.device = "cpu"
@@ -179,6 +205,12 @@ def optional_graph_arrays(actor_critic) -> dict[str, np.ndarray]:
         ("control_edge_confidence", control, "edge_confidence"),
         ("control_attempts", control, "control_attempts"),
         ("control_tctrl", control, "tctrl"),
+        ("anchor_valid", control, "anchor_valid"),
+        ("anchor_generation", control, "anchor_generation"),
+        ("active_goal_mask", control, "active_goal_mask"),
+        ("active_generation", control, "active_generation"),
+        ("confirmation_count", control, "confirmation_count"),
+        ("command_count", control, "command_count"),
         ("passive_confidence", passive, "confidence"),
         ("passive_elapsed", passive, "elapsed"),
         ("birth_support", passive, "birth_support"),
@@ -188,6 +220,50 @@ def optional_graph_arrays(actor_critic) -> dict[str, np.ndarray]:
         if torch.is_tensor(value):
             arrays[output_name] = value.detach().cpu().numpy().copy()
     return arrays
+
+
+def contextual_alias_diagnostics(pose: pd.DataFrame, activity: np.ndarray, grain: int) -> dict[str, np.ndarray]:
+    """Measure spatial fragmentation of prediction-recognized active goals.
+
+    Coordinates are consumed only here, after the frozen rollout. They never
+    enter the policy, graph, calibration, or contextual recognition path.
+    A component contains occupied bins with at least one recognized sample;
+    the primary component is the one containing the most recognized samples.
+    """
+    from hpc_runs.intrmotiv_study.spatial_contract import _component_labels
+
+    activity = np.asarray(activity)
+    if activity.ndim != 2 or len(pose) != activity.shape[0]:
+        raise ValueError("Contextual activity must align with rollout poses")
+    recognized = activity > 0
+    component_count = np.zeros(activity.shape[1], dtype=np.int16)
+    recognized_count = recognized.sum(axis=0, dtype=np.int64)
+    off_primary_fraction = np.zeros(activity.shape[1], dtype=np.float32)
+    bins = (
+        np.linspace(*XBOUND, grain + 1),
+        np.linspace(*YBOUND, grain + 1),
+    )
+    x_bin = np.digitize(pose["x"].to_numpy(), bins[0]) - 1
+    y_bin = np.digitize(pose["y"].to_numpy(), bins[1]) - 1
+    in_bounds = (x_bin >= 0) & (x_bin < grain) & (y_bin >= 0) & (y_bin < grain)
+    for slot in range(activity.shape[1]):
+        selected = in_bounds & recognized[:, slot]
+        if not selected.any():
+            continue
+        counts = np.zeros((grain, grain), dtype=np.int64)
+        np.add.at(counts, (x_bin[selected], y_bin[selected]), 1)
+        labels, count = _component_labels(counts > 0)
+        component_count[slot] = count
+        masses = np.asarray([counts[labels == label].sum() for label in range(1, count + 1)])
+        off_primary_fraction[slot] = 1.0 - float(masses.max()) / float(masses.sum())
+    return {
+        "contextual_alias_component_count": component_count,
+        "contextual_alias_recognized_count": recognized_count,
+        "contextual_alias_off_primary_fraction": off_primary_fraction,
+        # This is a privileged, rollout-conditioned proxy for spatial false
+        # acceptance, not a reconstruction of online confirmation history.
+        "contextual_alias_false_accept_fraction": off_primary_fraction.copy(),
+    }
 
 
 def spatial_information(rate_map, occupancy):
@@ -204,6 +280,37 @@ def spatial_information(rate_map, occupancy):
     return float(np.nansum(rate_map[valid] * p_occ[valid] * np.log2(ratio[valid])))
 
 
+def goal_behavior_diagnostics(pose, goals, timeouts):
+    """Measure uninterrupted commands within physical episodes, not option timers."""
+    goals = np.asarray(goals).reshape(-1)
+    timeouts = np.asarray(timeouts).reshape(-1).astype(bool)
+    segments = []
+    for (_, _), group in pose.groupby(["agent", "num_traj"], sort=False):
+        previous = -1
+        duration = 0
+        repeats = 0
+        for index in group.index:
+            goal = int(goals[index])
+            if goal == previous and goal >= 0:
+                duration += 1
+                repeats += int(timeouts[index])
+            else:
+                if previous >= 0:
+                    segments.append(dict(goal=previous, decisions=duration, same_goal_timeouts=repeats))
+                previous = goal
+                duration = int(goal >= 0)
+                repeats = 0
+        if previous >= 0:
+            segments.append(dict(goal=previous, decisions=duration, same_goal_timeouts=repeats))
+    return dict(
+        segments=segments,
+        max_uninterrupted_decisions=max((s["decisions"] for s in segments), default=0),
+        max_same_goal_timeouts=max((s["same_goal_timeouts"] for s in segments), default=0),
+        timeout_reselections=sum(s["same_goal_timeouts"] for s in segments),
+        window_censored=True,
+    )
+
+
 def rollout_dg(
     run_dir: pathlib.Path,
     max_num_frames: int,
@@ -212,6 +319,7 @@ def rollout_dg(
     checkpoint_path: pathlib.Path | None = None,
     record_panel: pathlib.Path | None = None,
     replay_panel: pathlib.Path | None = None,
+    panel_goal: int | None = None,
 ):
     cfg, env, env_info, actor_critic, checkpoint, device = load_policy_env(
         run_dir, max_num_frames, deterministic, checkpoint_rank, checkpoint_path
@@ -220,17 +328,43 @@ def rollout_dg(
         from sf_working_directories.IntrMotiv.evaluation.observation_panel import replay_observations
 
         env.close()
-        pose, dg, logits = replay_observations(actor_critic, cfg, replay_panel, device)
-        return cfg, checkpoint, pose, dg, logits, optional_graph_arrays(actor_critic)
+        pose, dg, logits, worker = replay_observations(
+            actor_critic, cfg, replay_panel, device, goal_id=panel_goal, include_worker=True
+        )
+        arrays = optional_graph_arrays(actor_critic)
+        arrays.update(worker)
+        arrays["panel_goal"] = -1 if panel_goal is None else panel_goal
+        return cfg, checkpoint, pose, dg, logits, arrays
     panel_records = defaultdict(list)
 
     core_buffers = []
+    worker_buffers = []
+    contextual_goal_buffers = []
+    goal_buffers, timeout_buffers = [], []
     pre_threshold_buffers = []
 
     def core_hook(_module, _inp, out):
+        if isinstance(out, (tuple, list)) and getattr(_module, "hrl_enabled", False):
+            from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import HRLStateLayout
+
+            output, state = out
+            start = _module.target_condition_start
+            goal = output[:, start : start + _module.Hippo_n_feature]
+            goal_id = torch.where(goal.sum(-1) > 0, goal.argmax(-1), torch.full_like(goal.argmax(-1), -1))
+            hrl = _module._split_state(state)[1]
+            goal_buffers.append(goal_id.detach().cpu().clone())
+            timeout_buffers.append(
+                hrl[:, HRLStateLayout(_module.Hippo_n_feature).option_expired].detach().cpu().clone()
+            )
         if isinstance(out, (tuple, list)):
             out = out[0]
         core_buffers.append(out.detach().cpu().clone())
+        worker = getattr(_module, "last_worker_dg_activity", None)
+        if worker is not None:
+            worker_buffers.append(worker.detach().cpu().clone())
+        contextual_goal = getattr(_module, "last_contextual_goal_activity", None)
+        if contextual_goal is not None:
+            contextual_goal_buffers.append(contextual_goal.detach().cpu().clone())
 
     dict(actor_critic.named_modules())["core"].register_forward_hook(core_hook)
 
@@ -249,8 +383,7 @@ def rollout_dg(
     with torch.no_grad():
         while num_frames <= max_num_frames:
             # Pose belongs to the observation that generated this DG activity.
-            pos = obs["pos"].clone()
-            rot = obs["rot"].clone()
+            pos, rot = evaluation_pose(env, obs)
             if record_panel is not None:
                 from sf_working_directories.IntrMotiv.evaluation.observation_panel import record_observation
 
@@ -336,7 +469,15 @@ def rollout_dg(
         if pre_threshold_logits.shape[1] != n_feature:
             raise ValueError(f"Pre-threshold DG logits {pre_threshold_logits.shape} do not match F={n_feature}")
     pose = pd.DataFrame(pose_records).iloc[: dg.shape[0]].reset_index(drop=True)
-    return cfg, checkpoint, pose, dg, pre_threshold_logits, optional_graph_arrays(actor_critic)
+    arrays = optional_graph_arrays(actor_critic)
+    if goal_buffers:
+        arrays["behavior_goal_ids"] = torch.cat(goal_buffers).numpy()
+        arrays["option_timeouts"] = torch.cat(timeout_buffers).numpy()
+    if worker_buffers:
+        arrays["worker_dg_activity"] = torch.cat(worker_buffers).numpy()
+    if contextual_goal_buffers:
+        arrays["contextual_goal_activity"] = torch.cat(contextual_goal_buffers).numpy()
+    return cfg, checkpoint, pose, dg, pre_threshold_logits, arrays
 
 
 def _occupancy_corrected_maps(pose: pd.DataFrame, values: np.ndarray, grain: int):
@@ -488,6 +629,7 @@ def main():
             checkpoint_path=args.checkpoint,
             record_panel=args.record_observation_panel,
             replay_panel=args.replay_observation_panel,
+            panel_goal=args.panel_goal,
         )
         occupancy, rate_maps, si, active_fraction = compute_place_fields(pose, dg, args.grain)
         artifact = {
@@ -504,6 +646,49 @@ def main():
             "observation_panel": str(args.replay_observation_panel or ""),
         }
         artifact.update(graph_arrays)
+        if "behavior_goal_ids" in graph_arrays:
+            (run_out / "goal_behavior_diagnostics.json").write_text(
+                json.dumps(
+                    goal_behavior_diagnostics(pose, graph_arrays["behavior_goal_ids"], graph_arrays["option_timeouts"]),
+                    indent=2,
+                )
+                + "\n"
+            )
+        if "worker_dg_activity" in graph_arrays:
+            worker = graph_arrays["worker_dg_activity"]
+            _, worker_maps, worker_si, worker_fraction = compute_place_fields(pose, worker, args.grain)
+            artifact.update(
+                worker_rate_maps=worker_maps,
+                worker_spatial_information=worker_si,
+                worker_active_fraction=worker_fraction,
+            )
+            artifact.update(
+                {
+                    "worker_" + key: value
+                    for key, value in spatial_details_for_artifact(pose, worker, args.grain).items()
+                }
+            )
+        if "contextual_goal_activity" in graph_arrays:
+            contextual = graph_arrays["contextual_goal_activity"]
+            alias = contextual_alias_diagnostics(pose, contextual, args.grain)
+            artifact.update(alias)
+            eligible = alias["contextual_alias_recognized_count"] > 0
+            alias_summary = {
+                "definition": "Eight-connected occupied recognition bins; primary component has most recognized samples",
+                "privileged_evaluation_only": True,
+                "eligible_active_slots": int(eligible.sum()),
+                "mean_component_count": (
+                    float(alias["contextual_alias_component_count"][eligible].mean()) if eligible.any() else 0.0
+                ),
+                "mean_off_primary_fraction": (
+                    float(alias["contextual_alias_off_primary_fraction"][eligible].mean()) if eligible.any() else 0.0
+                ),
+                "rollout_conditioned_false_accept_fraction": (
+                    float(alias["contextual_alias_false_accept_fraction"][eligible].mean()) if eligible.any() else 0.0
+                ),
+                "historical_confirmation_rate": None,
+            }
+            (run_out / "contextual_alias_diagnostics.json").write_text(json.dumps(alias_summary, indent=2) + "\n")
         pre_threshold_summary = {}
         if pre_threshold_logits is not None:
             _, pre_threshold_maps, pre_threshold_mean, pre_threshold_std = compute_pre_threshold_maps(
@@ -534,7 +719,38 @@ def main():
         (run_out / "behavior_diagnostics.json").write_text(
             json.dumps(behavior_diagnostics(pose, dg, refractory=int(cfg.Hippo_R)), indent=2) + "\n"
         )
+        from hpc_runs.intrmotiv_study.geometry import (
+            geometry_from_config,
+            geometry_payload,
+            traversable_field_components,
+        )
+
+        geometry = geometry_payload(geometry_from_config(cfg))
+        if geometry:
+            geometry.update(
+                traversable_field_components(
+                    np.nan_to_num(rate_maps.transpose(2, 1, 0)), occupancy.T, geometry["geometry_accessible_mask"]
+                )
+            )
+            artifact.update(geometry)
         np.savez_compressed(run_out / "place_fields.npz", **artifact)
+        if args.coverage_episodes:
+            from sf_working_directories.IntrMotiv.evaluation.episode_coverage import evaluate_episodes
+
+            episode_cfg, episode_env, episode_info, episode_actor, _, _ = load_policy_env(
+                run_dir, 10000, False, args.checkpoint_rank, pathlib.Path(checkpoint)
+            )
+            episode_env.close()
+            evaluate_episodes(episode_cfg, episode_actor, episode_info, run_out, episodes=args.coverage_episodes)
+            if args.random_coverage:
+                evaluate_episodes(
+                    episode_cfg,
+                    episode_actor,
+                    episode_info,
+                    run_out,
+                    episodes=args.coverage_episodes,
+                    random_actions=True,
+                )
         if args.save_raw_activations:
             raw = {"dg": dg}
             if pre_threshold_logits is not None:

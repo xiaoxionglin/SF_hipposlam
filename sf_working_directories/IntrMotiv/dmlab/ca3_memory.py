@@ -1,5 +1,7 @@
 """Finite CA3 novelty, re-entry inhibition, and graph-free intrinsic goals."""
 
+from __future__ import annotations
+
 import torch
 from torch.nn import functional as F
 
@@ -96,3 +98,41 @@ def advance_reference_goal(state, previous_activity, current_activity, horizon, 
     goal = F.one_hot((result[:, 0].long() - 1).clamp_min(0), n)
     goal = goal.to(current_activity.dtype) * result[:, 0:1].gt(0)
     return result, goal
+
+
+def finite_shift_history(activity, injection_width, memory_length, initial_state=None):
+    """All additive CA3 states, using the same finite impulse.
+
+    ``activity`` is [time,batch,unit]. Each observation is injected into the
+    first R slots, then shifted one slot per decision. No subtraction is used:
+    zero/nonzero event identities are preserved for nonnegative DG activities.
+    This is the packed replay equivalent of the existing single-step update.
+    ``initial_state`` can provide the CA3 state at the start of each packed
+    sequence; it is shifted once before the first returned state.
+    """
+    if activity.ndim != 3 or not 1 <= injection_width <= memory_length:
+        raise ValueError("Invalid finite shift-register dimensions")
+    steps, batch, units = activity.shape
+    stream = activity.permute(1, 2, 0).reshape(batch * units, 1, steps)
+    kernel = activity.new_ones(1, 1, injection_width)
+    full = F.conv1d(F.pad(stream, (injection_width - 1, 0)), kernel).squeeze(1)
+    older = (
+        F.pad(full, (memory_length - injection_width, 0)).unfold(-1, memory_length - injection_width + 1, 1).flip(-1)
+    )
+    if injection_width > 1:
+        recent = (
+            F.pad(stream.squeeze(1), (injection_width - 2, 0)).unfold(-1, injection_width - 1, 1).flip(-1).cumsum(-1)
+        )
+        states = torch.cat((recent, older), -1)
+    else:
+        states = older
+    states = states.reshape(batch, units, steps, memory_length).permute(2, 0, 1, 3)
+    if initial_state is None:
+        return states
+    if initial_state.shape != (batch, units, memory_length):
+        raise ValueError("Initial CA3 state must have shape [batch,unit,memory]")
+    offsets = torch.arange(1, steps + 1, device=activity.device).unsqueeze(1)
+    source = torch.arange(memory_length, device=activity.device).unsqueeze(0) - offsets
+    valid = source.ge(0)
+    carried = initial_state[:, :, source.clamp_min(0)].permute(2, 0, 1, 3)
+    return states + carried * valid[:, None, None, :]

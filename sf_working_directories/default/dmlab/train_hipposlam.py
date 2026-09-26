@@ -13,7 +13,6 @@ from sample_factory.envs.env_utils import register_env
 from sample_factory.train import make_runner
 from sample_factory.utils.typing import Config, Env, PolicyID
 from sample_factory.utils.utils import experiment_dir
-from sf_xxl.dmlab.world_model_learner import add_world_model_args, make_world_model_learner
 from sf_working_directories.default.dmlab.custom_core import make_hipposlam_core
 from sf_working_directories.default.dmlab.custom_decoder import make_hipposlam_decoder
 from sf_working_directories.default.dmlab.custom_encoder import make_hipposlam_encoder
@@ -30,6 +29,7 @@ from sf_working_directories.default.dmlab.dmlab_level_cache import DmlabLevelCac
 # from sf_working_directories.default.dmlab.custom_learner import make_hipposlam_learner
 # from sf_working_directories.default.dmlab.custom_actor_critic import make_hipposlam_actor_critic
 from sf_working_directories.default.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
+from sf_xxl.dmlab.world_model_learner import add_world_model_args, make_world_model_learner
 
 
 class DmlabEnvWithCache:

@@ -1,0 +1,10 @@
+"""Short learner qualification for the paired frozen-DG controls."""
+
+from pathlib import Path
+
+from hpc_runs.intrmotiv_study import load_study
+from hpc_runs.intrmotiv_study.sample_factory import build_run_description
+
+SPEC = Path(__file__).with_name("studies") / "cued_reward5_frozen_dg_qualification_20260925.study.json"
+STUDY = load_study(SPEC)
+RUN_DESCRIPTION = build_run_description(STUDY)

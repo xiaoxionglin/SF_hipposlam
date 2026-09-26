@@ -8,7 +8,7 @@ The synchronized NEMO2 runtime copy is
 Keep its version and file contents aligned with this canonical copy before
 using new workflow features on the cluster.
 
-Current implementation version: `1.4.1`; current schema:
+Current implementation version: `1.11.0`; current schema:
 `intrmotiv/study/v1`.
 
 The version constants in `version.py` are authoritative. Do not copy this
@@ -63,3 +63,11 @@ When an established Python base factory cannot yet be expressed as a complete
 argument bundle, pass an explicit `experiment_builder(run)` callback to
 `build_run_description`. The callback may assemble the base command, but it
 must preserve the study-generated run names and ordering.
+
+## Latest common training window
+
+Use `collect-online STUDY BATCH_ROOT OUTPUT_DIR --latest-common` to align all
+runs to their latest shared step and metric coverage in one read per run.
+The study's `analysis.terminal_width` defines the window width. This is mutually
+exclusive with `--window-low/--window-high`; default collection is unchanged.
+See `04_implementation/standardized_study_workflow.md` for the repeat-8 example.

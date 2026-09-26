@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 
 from .analysis import linear_contrasts, summarize_records
 from .spatial import (
+    collect_cue_assignment_records,
     collect_spatial_detail_records,
     collect_spatial_records,
     discover_spatial_snapshots,
@@ -22,6 +23,7 @@ from .telemetry import (
     build_intervention_manifest,
     build_place_field_manifests,
     discover_nemo_checkpoints,
+    select_standard_place_field_rows,
     write_manifest,
 )
 from .tensorboard import collect_online_records
@@ -158,10 +160,33 @@ def command_collect_online(args: argparse.Namespace) -> None:
         if args.window_low is None or args.window_high is None:
             raise SpecError("--window-low and --window-high must be supplied together")
         fixed_window = (args.window_low, args.window_high)
-    records = collect_online_records(study, args.batch_root, fixed_window=fixed_window)
+    records = collect_online_records(
+        study,
+        args.batch_root,
+        fixed_window=fixed_window,
+        latest_common=args.latest_common,
+        progress=lambda done, total, name: print(f"Loaded {done}/{total}: {name}", flush=True),
+        history_output_dir=args.output_dir / "histories" if args.export_histories else None,
+        loader_backend=args.loader_backend,
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "per_run.csv", records)
     _analyze(study, records, args.output_dir)
+    manifest_path = args.output_dir / "analysis_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["collection"] = {
+        "mode": "latest_common" if args.latest_common else "fixed" if fixed_window else "per_run_terminal",
+        "step_tag": study.analysis.get("step_tag", "train/env_steps"),
+        "windows": sorted({(row["window_low"], row["window_high"]) for row in records}),
+        "scalar_size_guidance": (
+            0 if args.latest_common or args.export_histories else study.analysis.get("scalar_size_guidance", 30000)
+        ),
+        "loader_backend": args.loader_backend or study.analysis.get("loader_backend", "thread"),
+        "exported_histories": str(args.output_dir / "histories") if args.export_histories else None,
+    }
+    _write_json(manifest_path, manifest)
+    if args.latest_common:
+        print(f"Latest common window: {records[0]['window_low']}--{records[0]['window_high']} ({len(records)} runs)")
 
 
 def command_analyze_csv(args: argparse.Namespace) -> None:
@@ -201,18 +226,27 @@ def command_collect_spatial(args: argparse.Namespace) -> None:
     _write_csv(args.output_dir / "condition_summary.csv", condition_summary)
     _write_csv(args.output_dir / "seed_summary.csv", seed_summary)
 
-    detail_counts = {"per_unit_rows": 0, "per_field_rows": 0, "graph_edge_rows": 0}
+    detail_counts = {
+        "per_unit_rows": 0,
+        "per_field_rows": 0,
+        "graph_edge_rows": 0,
+        "cue_assignment_rows": 0,
+    }
     if args.include_details:
         unit_rows, field_rows, edge_rows = collect_spatial_detail_records(study, args.snapshot_root)
+        cue_rows = collect_cue_assignment_records(study, args.snapshot_root)
         _write_csv(args.output_dir / "per_unit.csv", unit_rows)
         if field_rows:
             _write_csv(args.output_dir / "per_field.csv", field_rows)
         if edge_rows:
             _write_csv(args.output_dir / "graph_edge.csv", edge_rows)
+        if cue_rows:
+            _write_csv(args.output_dir / "cue_assignment.csv", cue_rows)
         detail_counts = {
             "per_unit_rows": len(unit_rows),
             "per_field_rows": len(field_rows),
             "graph_edge_rows": len(edge_rows),
+            "cue_assignment_rows": len(cue_rows),
         }
 
     figures: list[Path] = []
@@ -239,8 +273,9 @@ def command_collect_spatial(args: argparse.Namespace) -> None:
 def command_render_telemetry(args: argparse.Namespace) -> None:
     study = load_study(args.study)
     inventory = discover_nemo_checkpoints(study, args.batch_root)
-    rows, trajectory = build_place_field_manifests(study, inventory)
-    intervention = build_intervention_manifest(study, rows)
+    all_rows, trajectory = build_place_field_manifests(study, inventory)
+    rows = select_standard_place_field_rows(study, all_rows)
+    intervention = build_intervention_manifest(study, all_rows)
     write_manifest(args.output_root / "analysis_manifest.tsv", rows)
     write_manifest(args.output_root / "trajectory_manifest.tsv", trajectory)
     if intervention:
@@ -289,6 +324,21 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("output_dir", type=Path)
     collect.add_argument("--window-low", type=int)
     collect.add_argument("--window-high", type=int)
+    collect.add_argument(
+        "--export-histories",
+        action="store_true",
+        help="save all selected scalar events for plots without another TensorBoard scan",
+    )
+    collect.add_argument(
+        "--loader-backend",
+        choices=("thread", "process"),
+        help="override the collection executor; recorded in analysis provenance",
+    )
+    collect.add_argument(
+        "--latest-common",
+        action="store_true",
+        help="align all runs to the latest shared metric step using analysis.terminal_width; read histories once",
+    )
     collect.set_defaults(func=command_collect_online)
 
     analyze = subparsers.add_parser("analyze-csv", help="analyze an existing per-run CSV")

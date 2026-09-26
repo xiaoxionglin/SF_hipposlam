@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -23,9 +24,15 @@ def test_command_control_detects_command_specificity_not_unconditional_visits():
     assert summarize_commands(rows, 2)["ctc_auc"] is None
 
 
-def test_observation_panel_rejects_home_storage(tmp_path):
+def test_observation_panel_rejects_home_storage(monkeypatch):
+    # tmp_path may correctly live in the allocated workspace on NEMO2.
+    # Exercise an actual home path and forbid writing even if validation breaks.
+    def forbidden_write(*args, **kwargs):
+        raise AssertionError("Home-storage validation did not run before writing")
+
+    monkeypatch.setattr(np, "savez_compressed", forbidden_write)
     with pytest.raises(ValueError):
-        save_panel(tmp_path / "panel.npz", {"dones": [np.zeros(1)]})
+        save_panel(Path.home() / "intrmotiv_forbidden_panel.npz", {"dones": [np.zeros(1)]})
 
 
 def test_common_panel_records_actions_for_contextual_replay_without_policy_input_changes():

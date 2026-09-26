@@ -155,6 +155,7 @@ class StudySpec:
     seeds: tuple[int, ...]
     common_args: tuple[str, ...]
     seed_arg: str
+    emit_tracking_identity: bool
     run_name_template: str
     condition_name_template: str
     expected_runs: int
@@ -193,6 +194,9 @@ class StudySpec:
 
         common_args = _strings(training.get("common_args", []), "training.common_args")
         seed_arg = training.get("seed_arg", "--seed={seed}")
+        emit_tracking_identity = training.get("emit_tracking_identity", declared_semver >= (1, 11, 0))
+        if not isinstance(emit_tracking_identity, bool):
+            raise SpecError("training.emit_tracking_identity must be a boolean")
         run_name_template = training.get("run_name_template")
         condition_template = training.get("condition_name_template", run_name_template)
         if not all(isinstance(item, str) for item in (seed_arg, run_name_template, condition_template)):
@@ -274,6 +278,7 @@ class StudySpec:
             seeds=seeds,
             common_args=common_args,
             seed_arg=seed_arg,
+            emit_tracking_identity=emit_tracking_identity,
             run_name_template=run_name_template,
             condition_name_template=condition_template,
             expected_runs=expected_runs,
@@ -314,10 +319,25 @@ class StudySpec:
                     metadata.update(base.metadata)
                     for factor, level in zip(self.factors, selected_levels):
                         metadata.update({f"{factor.name}_{key}": value for key, value in level.metadata.items()})
+                    run_name = _render(self.run_name_template, context, "training.run_name_template")
+                    condition = _render(
+                        self.condition_name_template,
+                        context,
+                        "training.condition_name_template",
+                    )
+                    tracking_args = ()
+                    if self.emit_tracking_identity:
+                        tracking_args = (
+                            f"--study_id={self.study_id}",
+                            f"--study_condition={condition}",
+                            f"--study_base={base.name}",
+                            f"--wandb_tags={condition}",
+                        )
                     arg_templates = [
                         *self.common_args,
                         *base.args,
                         *(arg for level in selected_levels for arg in level.args),
+                        *tracking_args,
                         self.seed_arg,
                     ]
                     args = tuple(_render(template, context, "training argument") for template in arg_templates)
@@ -326,16 +346,11 @@ class StudySpec:
                     flags = [arg.split("=", 1)[0] for arg in args]
                     duplicate_flags = sorted({flag for flag in flags if flags.count(flag) > 1})
                     if duplicate_flags:
-                        raise SpecError(
-                            f"run {_render(self.run_name_template, context, 'run name')!r} "
-                            f"defines duplicate flags {duplicate_flags!r}"
-                        )
+                        raise SpecError(f"run {run_name!r} " f"defines duplicate flags {duplicate_flags!r}")
                     runs.append(
                         RunSpec(
-                            name=_render(self.run_name_template, context, "training.run_name_template"),
-                            condition=_render(
-                                self.condition_name_template, context, "training.condition_name_template"
-                            ),
+                            name=run_name,
+                            condition=condition,
                             batch_name=self.batch_name,
                             base=base.name,
                             seed=seed,

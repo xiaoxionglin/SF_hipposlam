@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 import re
+import time
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -28,6 +30,7 @@ from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.dicts import iterate_recursively
 from sample_factory.utils.typing import ActionDistribution, Config, PolicyID
 from sample_factory.utils.utils import log
+from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import predictive_readout_loss
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import (
     build_transition_prediction_batch,
     transition_prediction_losses,
@@ -38,6 +41,8 @@ from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import (
     directional_recruitment_eligibility,
     graph_recruitment_eligibility,
 )
+from sf_working_directories.IntrMotiv.dmlab.dmlab30 import DMLAB_INSTRUCTIONS
+from sf_working_directories.IntrMotiv.dmlab.dmlab_gym import NAVIGATION_ACTION_SET
 from sf_working_directories.IntrMotiv.dmlab.empirical_her import (
     build_empirical_her_batch,
     normalize_empirical_her_advantage,
@@ -70,6 +75,86 @@ from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
     topological_state_size,
     update_topological_graph_from_rollout,
 )
+
+TASK_GENERAL_TRANSFER_ROOTS = frozenset(
+    {
+        "action_parameterization",
+        "controller_q",
+        "core",
+        "decoder",
+        "dg_transition_predictor",
+        "encoder",
+        "exploration_action_parameterization",
+        "exploration_decoder",
+        "goal_action_parameterizations",
+        "goal_decoders",
+        "obs_normalizer",
+    }
+)
+TASK_GENERAL_RESET_ROOTS = frozenset(
+    {
+        "critic_linear",
+        "critic_linear_external",
+        "critic_linear_internal",
+        "exploration_critic_linear",
+        "goal_critics",
+        "returns_normalizer",
+    }
+)
+TASK_GENERAL_STRUCTURAL_FIELDS = (
+    "Hippo_L",
+    "Hippo_R",
+    "Hippo_n_feature",
+    "ca3_state_readout_dim",
+    "ca3_state_readout_horizon",
+    "ca3_state_readout_mode",
+    "ca3_worker_goal_mode",
+    "controller_her",
+    "controller_learning",
+    "hrl_controllable_graph",
+    "hrl_goal_conditioning",
+    "hrl_manager_mode",
+)
+
+
+def classify_task_general_model_key(key: str) -> str:
+    """Classify every model tensor transferred by the task-general contract."""
+    if key == "core.fixed_task_target" or key.startswith("core.fixed_task_target."):
+        return "reset_fixed_task_binding"
+    root = key.split(".", 1)[0]
+    if root in TASK_GENERAL_TRANSFER_ROOTS:
+        return "transfer"
+    if root in TASK_GENERAL_RESET_ROOTS:
+        return "reset_reward_specific"
+    raise RuntimeError(f"Unclassified task-general model tensor: {key}")
+
+
+def task_general_transfer_metadata(cfg) -> dict:
+    """Describe the structural and ordered-action interface required for transfer."""
+    navigation = bool(getattr(cfg, "dmlab_navigation_action_set", False))
+    reduced = bool(getattr(cfg, "dmlab_reduced_action_set", False))
+    extended = bool(getattr(cfg, "dmlab_extended_action_set", False))
+    if not navigation or reduced or extended:
+        raise RuntimeError("task_general transfer requires the ordered navigation-eight action interface")
+    return {
+        "schema": "intrmotiv/task-general-transfer/v1",
+        "action_vectors": [list(action) for action in NAVIGATION_ACTION_SET],
+        "structural": {field: getattr(cfg, field, None) for field in TASK_GENERAL_STRUCTURAL_FIELDS},
+    }
+
+
+def _companion_transfer_metadata(checkpoint_path: str) -> dict:
+    """Read source structure from the run config when an older checkpoint lacks metadata."""
+    path = Path(checkpoint_path).expanduser().resolve()
+    candidates = (path.parent.parent / "config.json", path.parent.parent / "cfg.json", path.parent / "config.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            import json
+
+            with candidate.open() as stream:
+                source_cfg = AttrDict(json.load(stream))
+            return task_general_transfer_metadata(source_cfg)
+    raise RuntimeError(f"task_general transfer requires checkpoint metadata or a companion config.json: {path}")
 
 
 def reliable_graph_statistics(adjacency: Tensor, confidence: Tensor) -> dict[str, Tensor]:
@@ -121,8 +206,16 @@ def dg_gradient_interaction_stats(decoder_loss: Tensor, encoder_loss: Tensor, pr
             "cosine": zero,
             "row_conflict_fraction": zero,
         }
-    decoder_grads = torch.autograd.grad(decoder_loss, parameters, retain_graph=True, allow_unused=True)
-    encoder_grads = torch.autograd.grad(encoder_loss, parameters, retain_graph=True, allow_unused=True)
+    decoder_grads = (
+        torch.autograd.grad(decoder_loss, parameters, retain_graph=True, allow_unused=True)
+        if decoder_loss.requires_grad
+        else (None,) * len(parameters)
+    )
+    encoder_grads = (
+        torch.autograd.grad(encoder_loss, parameters, retain_graph=True, allow_unused=True)
+        if encoder_loss.requires_grad
+        else (None,) * len(parameters)
+    )
     ppo_sq = zero.clone()
     encoder_sq = zero.clone()
     dot = zero.clone()
@@ -347,7 +440,7 @@ def build_matched_encoder_credit(
     reward_scale: float,
     recipient: str,
 ) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
-    """Align each arrival to a verified within-rollout predecessor onset."""
+    """Align arrivals to verified within-rollout predecessor onsets on-device."""
     if progression.shape != candidates.shape or progression.shape != dominant.shape:
         raise ValueError("progression and activation masks must have identical shapes")
     if valids.shape != progression.shape[:2]:
@@ -363,59 +456,69 @@ def build_matched_encoder_credit(
     # are not new-onset candidates. None of them is a predecessor.
     predecessor_age = progression.masked_fill(progression.eq(0), int(baseline) + 100)
     nearest_lag = predecessor_age.min(dim=-1).values
-    counts = {
-        name: progression.new_zeros((), dtype=torch.float)
-        for name in (
-            "total",
-            "matchable",
-            "credited",
-            "boundary_dropped",
-            "alignment_failure",
-            "invalid_interval",
-            "collisions",
-            "reward_mass",
-            "source_lag_sum",
-            "source_lag_max",
-        )
-    }
+    names = (
+        "total",
+        "matchable",
+        "credited",
+        "boundary_dropped",
+        "alignment_failure",
+        "invalid_interval",
+        "collisions",
+        "reward_mass",
+        "source_lag_sum",
+        "source_lag_max",
+    )
+    counts = {name: progression.new_zeros((), dtype=torch.float) for name in names}
+    events = torch.nonzero(event_mask, as_tuple=False)
+    if not events.numel():
+        return rewards, row_mask, counts
 
-    for stream, arrival_t in torch.nonzero(event_mask, as_tuple=False).tolist():
-        counts["total"].add_(1.0)
-        lag = int(nearest_lag[stream, arrival_t].item())
-        if lag >= int(baseline):
-            counts["alignment_failure"].add_(1.0)
-            continue
-        source_t = int(arrival_t) - lag
-        if source_t < 0:
-            counts["boundary_dropped"].add_(1.0)
-            continue
-        counts["matchable"].add_(1.0)
-        if not bool(valids[stream, source_t : arrival_t + 1].bool().all()):
-            counts["invalid_interval"].add_(1.0)
-            continue
-        # Several rows can enter CA3 on the same source decision. They have the
-        # same nearest lag, but only one carries the behavior-time dominant
-        # label. Resolve the row inside that nearest-lag tie rather than using
-        # the lowest DG index and spuriously rejecting the event.
-        nearest_rows = predecessor_age[stream, arrival_t].eq(lag)
-        verified_rows = nearest_rows & dominant[stream, source_t]
-        if not bool(verified_rows.any()):
-            counts["alignment_failure"].add_(1.0)
-            continue
-        source_row = int(torch.nonzero(verified_rows, as_tuple=False)[0].item())
-        arrival_row = int(torch.nonzero(dominant[stream, arrival_t], as_tuple=False)[0].item())
-        credit_t, credit_row = (arrival_t, arrival_row) if recipient == "arrival" else (source_t, source_row)
-        if bool(row_mask[stream, credit_t, credit_row]):
-            counts["collisions"].add_(1.0)
-        reward = float(reward_scale) * float(lag)
-        rewards[stream, credit_t, credit_row].add_(reward)
-        row_mask[stream, credit_t, credit_row] = True
-        counts["credited"].add_(1.0)
-        counts["reward_mass"].add_(reward)
-        counts["source_lag_sum"].add_(float(lag))
-        counts["source_lag_max"].copy_(
-            torch.maximum(counts["source_lag_max"], counts["source_lag_max"].new_tensor(float(lag)))
-        )
+    stream, arrival_t = events.unbind(dim=1)
+    lag = nearest_lag[stream, arrival_t].long()
+    aligned = lag < int(baseline)
+    source_t = arrival_t - lag
+    inside = aligned & (source_t >= 0)
+    safe_source_t = source_t.clamp(0, progression.size(1) - 1)
+
+    # Prefix counts turn every variable-length validity interval into two
+    # indexed reads. This replaces one Python slice and CUDA scalar read per
+    # event without changing inclusive [source, arrival] semantics.
+    invalid = (~valids.bool()).long()
+    invalid_prefix = F.pad(invalid.cumsum(dim=1), (1, 0))
+    invalid_count = invalid_prefix[stream, arrival_t + 1] - invalid_prefix[stream, safe_source_t]
+    interval_valid = invalid_count == 0
+
+    # Several rows can enter CA3 on the same source decision. They have the
+    # same nearest lag, but only the behavior-time dominant row is verified.
+    nearest_rows = predecessor_age[stream, arrival_t].eq(lag.unsqueeze(1))
+    verified_rows = nearest_rows & dominant[stream, safe_source_t]
+    verified = verified_rows.any(dim=1)
+    accepted = inside & interval_valid & verified
+    source_row = verified_rows.to(torch.int64).argmax(dim=1)
+    arrival_row = dominant[stream, arrival_t].to(torch.int64).argmax(dim=1)
+    credit_t = arrival_t if recipient == "arrival" else safe_source_t
+    credit_row = arrival_row if recipient == "arrival" else source_row
+
+    flat_index = (stream * progression.size(1) + credit_t) * progression.size(2) + credit_row
+    accepted_index = flat_index[accepted]
+    accepted_lag = lag[accepted].to(dtype=rewards.dtype)
+    reward_values = accepted_lag * float(reward_scale)
+    rewards.view(-1).scatter_add_(0, accepted_index, reward_values)
+    if accepted_index.numel():
+        row_mask.view(-1)[accepted_index.unique()] = True
+
+    accepted_count = accepted.sum().to(dtype=torch.float)
+    unique_count = accepted_index.unique().numel()
+    counts["total"] = events.new_tensor(events.size(0), dtype=torch.float)
+    counts["matchable"] = inside.sum().to(dtype=torch.float)
+    counts["credited"] = accepted_count
+    counts["boundary_dropped"] = (aligned & (source_t < 0)).sum().to(dtype=torch.float)
+    counts["alignment_failure"] = ((~aligned) | (inside & interval_valid & ~verified)).sum().to(dtype=torch.float)
+    counts["invalid_interval"] = (inside & ~interval_valid).sum().to(dtype=torch.float)
+    counts["collisions"] = accepted_count - float(unique_count)
+    counts["reward_mass"] = reward_values.sum()
+    counts["source_lag_sum"] = accepted_lag.sum()
+    counts["source_lag_max"] = accepted_lag.max() if accepted_lag.numel() else counts["source_lag_max"]
     return rewards, row_mask, counts
 
 
@@ -589,6 +692,32 @@ def target_reward_magnitude(
     return reward
 
 
+def worker_reward_from_magnitude(
+    reward, hit, *, control_outcome="target_hit", wrong_outcome=None, n_targets=None, command_set_size=None
+):
+    worker_reward = hit * reward
+    if control_outcome == "first_distinct":
+        if wrong_outcome is None:
+            raise ValueError("first_distinct reward requires wrong_outcome")
+        wrong = wrong_outcome.to(dtype=reward.dtype)
+        if wrong.shape != worker_reward.shape:
+            raise ValueError("Wrong-outcome mask must align with worker reward transitions")
+        if command_set_size is None:
+            if n_targets is None or int(n_targets) <= 2:
+                raise ValueError("first_distinct reward requires n_targets > 2 or command_set_size")
+            # One source is excluded, leaving n_targets - 1 possible commands;
+            # for a fixed in-set outcome, n_targets - 2 commands are wrong.
+            wrong_denominator = float(int(n_targets) - 2)
+        else:
+            if command_set_size.shape != worker_reward.shape:
+                raise ValueError("Command-set size must align with worker reward transitions")
+            wrong_denominator = (command_set_size.to(reward.dtype) - 1.0).clamp_min(1.0)
+        worker_reward = worker_reward - wrong * reward / wrong_denominator
+    elif control_outcome != "target_hit":
+        raise ValueError(f"Unknown HRL control outcome: {control_outcome}")
+    return worker_reward
+
+
 def target_success_worker_reward(
     internal_reward: Tensor,
     target_hit: Tensor,
@@ -607,26 +736,14 @@ def target_success_worker_reward(
 ) -> Tensor:
     hit = target_hit[:, 2:].to(dtype=internal_reward.dtype)
     reward = target_reward_magnitude(internal_reward, baseline, reward_scale, mode, hit_reward, distance_bonus_coeff)
-    worker_reward = hit * reward
-    if control_outcome == "first_distinct":
-        if wrong_outcome is None:
-            raise ValueError("first_distinct reward requires wrong_outcome")
-        wrong = wrong_outcome.to(dtype=internal_reward.dtype)
-        if wrong.shape != worker_reward.shape:
-            raise ValueError("Wrong-outcome mask must align with worker reward transitions")
-        if command_set_size is None:
-            if n_targets is None or int(n_targets) <= 2:
-                raise ValueError("first_distinct reward requires n_targets > 2 or command_set_size")
-            # One source is excluded, leaving n_targets - 1 possible commands;
-            # for a fixed in-set outcome, n_targets - 2 commands are wrong.
-            wrong_denominator = float(int(n_targets) - 2)
-        else:
-            if command_set_size.shape != worker_reward.shape:
-                raise ValueError("Command-set size must align with worker reward transitions")
-            wrong_denominator = (command_set_size.to(reward.dtype) - 1.0).clamp_min(1.0)
-        worker_reward = worker_reward - wrong * reward / wrong_denominator
-    elif control_outcome != "target_hit":
-        raise ValueError(f"Unknown HRL control outcome: {control_outcome}")
+    worker_reward = worker_reward_from_magnitude(
+        reward,
+        hit,
+        control_outcome=control_outcome,
+        wrong_outcome=wrong_outcome,
+        n_targets=n_targets,
+        command_set_size=command_set_size,
+    )
     if exploration_mode is None:
         return worker_reward
     if exploration_reward is None:
@@ -713,6 +830,17 @@ class BaseDistanceRecorder(BaseLearner):
         BaseLearner.__init__(self, cfg, env_info, policy_versions_tensor, policy_id, param_server)
         self._online_spatial = None
 
+    def init(self):
+        result = super().init()
+        if getattr(self.cfg, "save_initial_checkpoint", False) and self.env_steps == 0 and self.train_step == 0:
+            self._save_impl("initial", "", 1)
+        return result
+
+    def _save_crossed_frame_targets(self, previous_frames):
+        targets = [int(x) for x in getattr(self.cfg, "checkpoint_frame_targets", "").split(",") if x.strip()]
+        if any(previous_frames < target <= self.env_steps for target in targets):
+            self.save_milestone()
+
     def _capture_online_spatial(self, buff: TensorDict) -> None:
         if not bool(getattr(self.cfg, "online_spatial_telemetry", False)):
             return
@@ -723,7 +851,13 @@ class BaseDistanceRecorder(BaseLearner):
                 self.cfg, self.env_info, self.policy_id, self.env_steps, getattr(self, "actor_critic", None)
             )
         valids = (buff["policy_id"] == self.policy_id) & (
-            self.train_step - buff["policy_version"] < self.cfg.max_policy_lag
+            self.train_step
+            - (
+                buff["controller_fresh_version"].squeeze(-1)
+                if "controller_fresh_version" in buff
+                else buff["policy_version"]
+            )
+            < self.cfg.max_policy_lag
         )
         self._online_spatial.append_batch(buff, valids)
 
@@ -733,7 +867,9 @@ class BaseDistanceRecorder(BaseLearner):
         self._maybe_update_cfg()
         self._maybe_load_policy()
         self._capture_online_spatial(batch)
+        previous_frames = self.env_steps
         stats = super().train(batch)
+        self._save_crossed_frame_targets(previous_frames)
         if stats is None or getattr(self, "_online_spatial", None) is None:
             return stats
         spatial_stats = self._online_spatial.on_env_steps(self.env_steps)
@@ -886,6 +1022,12 @@ class BaseDistanceRecorder(BaseLearner):
         stored = option_state[..., self._hrl_layout().persistent_start]
         current = self._policy_graph().representation_generation.to(device=stored.device, dtype=stored.dtype)
         return stored.eq(current)
+
+    def _prepare_recurrent_replay_head(self, head_outputs, mb):
+        if getattr(self.cfg, "dg_goal_input", "none") != "write":
+            return head_outputs
+        target = self._behavior_targets_from_states(mb.rnn_states)
+        return torch.cat((head_outputs, target.to(head_outputs.dtype)), dim=-1)
 
     def _override_core_outputs_for_replay(self, core_outputs: Tensor, mb: AttrDict) -> Tensor:
         """Teacher-force the behavior target before PPO evaluates the decoder."""
@@ -1101,6 +1243,110 @@ class BaseDistanceRecorder(BaseLearner):
         # return checkpoint_path
         return re.sub(r"see_\d+", f"see_{self.cfg.seed}", checkpoint_path)
 
+    def _initialize_transfer_weights(self) -> None:
+        path = getattr(self.cfg, "transfer_model_path", None)
+        scope = getattr(self.cfg, "transfer_scope", "none")
+        if not path or scope == "none":
+            return
+        checkpoint = self.load_checkpoint([path], self.device)
+        if checkpoint is None or "model" not in checkpoint:
+            raise RuntimeError(f"Could not load transfer checkpoint: {path}")
+        source = checkpoint["model"]
+        destination = self.actor_critic.state_dict()
+        dg_prefixes = (
+            "encoder.DG_projection.linear.",
+            "encoder.DG_projection.batchnorm1d.",
+        )
+        if scope == "task_general":
+            source_metadata = checkpoint.get("task_general_transfer") or _companion_transfer_metadata(path)
+            destination_metadata = task_general_transfer_metadata(self.cfg)
+            if source_metadata != destination_metadata:
+                raise RuntimeError(
+                    "Task-general transfer interface mismatch: "
+                    f"source={source_metadata}, destination={destination_metadata}"
+                )
+            source_classes = {key: classify_task_general_model_key(key) for key in source}
+            destination_classes = {key: classify_task_general_model_key(key) for key in destination}
+            source_transfer = {key for key, category in source_classes.items() if category == "transfer"}
+            expected = {key for key, category in destination_classes.items() if category == "transfer"}
+            if source_transfer != expected:
+                missing = sorted(expected - source_transfer)
+                unexpected = sorted(source_transfer - expected)
+                raise RuntimeError(
+                    f"Task-general transfer tensor inventory mismatch: missing={missing}, unexpected={unexpected}"
+                )
+            selected = {key: source[key] for key in expected}
+            self.task_general_transfer_inventory = {
+                "transferred": sorted(expected),
+                "reset": sorted(key for key, category in destination_classes.items() if category != "transfer"),
+            }
+        else:
+            prefixes = dg_prefixes
+            if scope == "policy":
+                prefixes += ("decoder.", "action_parameterization.")
+                if getattr(getattr(self.actor_critic, "core", None), "dg_goal_modulation", None) is not None:
+                    prefixes += ("core.dg_goal_modulation",)
+            selected = {k: v for k, v in source.items() if k.startswith(prefixes)}
+            expected = {k for k in destination if k.startswith(prefixes)}
+        if set(selected) != expected:
+            missing = sorted(expected - set(selected))
+            unexpected = sorted(set(selected) - expected)
+            raise RuntimeError(f"Transfer tensor inventory mismatch: missing={missing}, unexpected={unexpected}")
+        mismatched = {
+            k: (tuple(selected[k].shape), tuple(destination[k].shape))
+            for k in expected
+            if selected[k].shape != destination[k].shape
+        }
+        if mismatched:
+            raise RuntimeError(f"Transfer tensor shape mismatch: {mismatched}")
+        if bool(getattr(self.cfg, "transfer_graph", False)):
+            graph_prefix = "core.policy_graph."
+            graph_keys = {
+                key
+                for key in source
+                if key.startswith(graph_prefix)
+                and key not in (graph_prefix + "reward_goal_value", graph_prefix + "reward_goal_count")
+            }
+            if not graph_keys or not graph_keys.issubset(destination):
+                raise RuntimeError("Source and destination policy graphs are incompatible")
+            graph_mismatches = {
+                key: (tuple(source[key].shape), tuple(destination[key].shape))
+                for key in graph_keys
+                if source[key].shape != destination[key].shape
+            }
+            if graph_mismatches:
+                raise RuntimeError(f"Graph transfer tensor shape mismatch: {graph_mismatches}")
+            selected.update({key: source[key] for key in graph_keys})
+            log.info("Initialized %d graph evidence buffers from %s", len(graph_keys), path)
+        destination.update(selected)
+        self.actor_critic.load_state_dict(destination, strict=True)
+        log.info("Initialized %d %s transfer tensors from %s", len(selected), scope, path)
+
+    def _get_checkpoint_dict(self):
+        checkpoint = super()._get_checkpoint_dict()
+        if bool(getattr(self.cfg, "dmlab_navigation_action_set", False)):
+            checkpoint["task_general_transfer"] = task_general_transfer_metadata(self.cfg)
+            if getattr(self.cfg, "transfer_scope", "none") == "task_general":
+                checkpoint["task_general_model_inventory"] = {
+                    key: classify_task_general_model_key(key) for key in checkpoint["model"]
+                }
+        return checkpoint
+
+    def _apply_transfer_freeze(self) -> None:
+        if bool(getattr(self.cfg, "transfer_freeze_dg", False)):
+            projection = self.actor_critic.encoder.DG_projection
+            projection.freeze_running_stats = True
+            for parameter in projection.parameters():
+                parameter.requires_grad = False
+            log.info("Froze DG weights and normalization statistics for transfer")
+        if bool(getattr(self.cfg, "transfer_freeze_worker", False)):
+            for module in (self.actor_critic.decoder, self.actor_critic.action_parameterization):
+                module.requires_grad_(False)
+            modulation = getattr(getattr(self.actor_critic, "core", None), "dg_goal_modulation", None)
+            if modulation is not None:
+                modulation.requires_grad_(False)
+            log.info("Froze goal-conditioned worker and action head for transfer")
+
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
         """
         Docstring for load_from_checkpoint
@@ -1119,7 +1365,9 @@ class BaseDistanceRecorder(BaseLearner):
             checkpoints.append(self._replace_checkpoint_policy_id(self.cfg.load_model_path, policy_id))
         checkpoint_dict = self.load_checkpoint(checkpoints, self.device)
         if checkpoint_dict is None:
-            log.debug("Did not load from checkpoint, starting from scratch!")
+            log.debug("Did not load a downstream checkpoint, starting a new run")
+            if load_progress:
+                self._initialize_transfer_weights()
         else:
             log.debug("Loading model from checkpoint")
             # if we're replacing our policy with another policy (under PBT), let's not reload the env_steps
@@ -1127,6 +1375,8 @@ class BaseDistanceRecorder(BaseLearner):
             if load_progress:  # see above
                 self._maybe_reset_critic()
                 self._maybe_reset_decoder()
+        if load_progress:
+            self._apply_transfer_freeze()
 
     def _calculate_sequence_core(self, rnn_state: Tensor, minibatch_size: int | tuple):
         """
@@ -1161,7 +1411,7 @@ class BaseDistanceRecorder(BaseLearner):
             torch.cat(
                 (
                     (sequence_core != 0).to(dtype=torch.int),
-                    torch.ones(sequence_core.shape[:-1] + (1,), dtype=torch.int),
+                    torch.ones(sequence_core.shape[:-1] + (1,), dtype=torch.int, device=sequence_core.device),
                 ),
                 dim=-1,
             ),
@@ -2259,7 +2509,15 @@ class DoubleDistanceLearnerReward(BaseDistanceRecorder):
             valids: Tensor = buff["policy_id"] == self.policy_id
             # ignore experience that was older than the threshold even before training started
             curr_policy_version: int = self.train_step
-            buff["valids"][:, :-1] = valids & (curr_policy_version - buff["policy_version"] < self.cfg.max_policy_lag)
+            buff["valids"][:, :-1] = valids & (
+                curr_policy_version
+                - (
+                    buff["controller_fresh_version"].squeeze(-1)
+                    if "controller_fresh_version" in buff
+                    else buff["policy_version"]
+                )
+                < self.cfg.max_policy_lag
+            )
             # for last T+1 step, we want to use the validity of the previous step
             buff["valids"][:, -1] = buff["valids"][:, -2]
             # log.info(f'RNN_states Shape: {buff["rnn_states"].shape}')
@@ -3181,25 +3439,246 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         else:
             return 0
 
-    def _calculate_losses(
-        self, mb: AttrDict, num_invalids: int, iterative_phase: str
-    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
-        additional_stats = AttrDict()
-        with torch.no_grad(), self.timing.add_time("losses_init"):
-            recurrence: int = self.cfg.recurrence
+    def _calculate_fresh_encoder_loss(self, outputs, mb, valids, num_invalids, recurrence, additional_stats):
+        """Original real-rollout DG objective, independent of controller losses.
 
-            # PPO clipping
-            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
-            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
-            clip_ratio_low = 1.0 / clip_ratio_high
-            clip_value = self.cfg.ppo_clip_value
+        The caller owns the single fresh forward and optimizer schedule. Replay
+        must never call this method or use it to update normalization statistics.
+        """
+        n_dg = int(self.cfg.Hippo_n_feature)
+        expanded = int(self.cfg.Hippo_R) + int(self.cfg.Hippo_L) - 1
+        learner_dg = outputs.core_outputs[:, : n_dg * expanded].view(-1, n_dg, expanded)[:, :, 0]
+        with self.timing.add_time("encoder_losses"):
+            learner_active = outputs.head_outputs[:, : int(self.cfg.Hippo_n_feature)] > 0
+            scheduled_credit_mask = mb["encoder_credit_activation_mask"].bool()
+            applied_credit_mask = scheduled_credit_mask & learner_active
+            reward_by_row = mb["rewards_encoder"]
+            if reward_by_row.ndim == 1:
+                reward_by_row = reward_by_row.unsqueeze(1).expand_as(applied_credit_mask)
+            scheduled_reward_mass = (reward_by_row * scheduled_credit_mask).sum()
+            applied_reward_mass = (reward_by_row * applied_credit_mask).sum()
+            scheduled_credit_count = scheduled_credit_mask.sum()
+            applied_credit_count = applied_credit_mask.sum()
+            additional_stats["encoder_credit_scheduled_count"] = scheduled_credit_count.detach().float()
+            additional_stats["encoder_credit_applied_count"] = applied_credit_count.detach().float()
+            additional_stats["encoder_credit_scheduled_mass"] = scheduled_reward_mass.detach().float()
+            additional_stats["encoder_credit_applied_mass"] = applied_reward_mass.detach().float()
+            additional_stats["encoder_credit_replay_match"] = (
+                applied_credit_count.float() / scheduled_credit_count.clamp_min(1).float()
+            ).detach()
+            # noinspection PyTypeChecker
+            encoder_loss = self._encoder_loss(
+                outputs.head_outputs,
+                mb["rewards_encoder"],
+                applied_credit_mask,
+                valids,
+                num_invalids,
+            )
+            encoder_credit_loss = encoder_loss
+            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
 
-            valids = mb.valids
-            if int(valids.sum().item()) < 2:
-                raise RuntimeError("Learner update invariant violated: fewer than two valid decisions reached PPO")
+            if self.cfg.extra_encoder_losses:
+                (
+                    encoder_penalty_loss,
+                    encoder_reward_loss,
+                    encoder_batch_loss,
+                    encoder_batch_unused_count,
+                ) = self._extra_encoder_loss(
+                    outputs.head_outputs,
+                    mb["rnn_states"].detach(),
+                    mb["encoder_dominant_activation_mask"],
+                    mb["encoder_non_dominant_activation_mask"],
+                    outputs.minibatch_size,
+                    valids,
+                    num_invalids,
+                )
+                encoder_loss += encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
+            else:
+                encoder_loss += l1_loss
+                encoder_batch_unused_count = outputs.head_outputs.sum() * 0.0
+                encoder_penalty_loss = encoder_reward_loss = encoder_batch_loss = encoder_batch_unused_count
+            population_loss, usage_loss, density_loss, collision_loss = self._population_usage_loss(
+                outputs.head_outputs
+            )
+            (
+                global_punishment_loss,
+                row_repulsion_loss,
+                temporal_exclusion_loss,
+                path_scatter_loss,
+                dg_regularizer_stats,
+            ) = self._anti_collapse_losses(
+                outputs.head_outputs,
+                mb["rnn_states"],
+                mb["encoder_dominant_activation_mask"],
+                valids,
+                num_invalids,
+            )
+            encoder_loss += (
+                population_loss
+                + global_punishment_loss
+                + row_repulsion_loss
+                + temporal_exclusion_loss
+                + path_scatter_loss
+            )
+            transition_mode = getattr(self.cfg, "dg_transition_prediction", "none")
+            transition_loss = encoder_loss * 0.0
+            transition_stats = {
+                "main_loss": transition_loss.detach(),
+                "control_loss": transition_loss.detach(),
+                "validation_main_ce": transition_loss.detach(),
+                "validation_control_ce": transition_loss.detach(),
+                "validation_state_gain": transition_loss.detach(),
+                "validation_accuracy": transition_loss.detach(),
+                "validation_count": transition_loss.detach(),
+            }
+            scheduled_prediction = transition_loss.detach()
+            applied_prediction = transition_loss.detach()
+            boundary_prediction = transition_loss.detach()
+            predictor = getattr(self.actor_critic, "dg_transition_predictor", None)
+            if transition_mode != "none":
+                if predictor is None:
+                    raise RuntimeError("DG transition prediction is enabled without a predictor")
+                prediction_batch = build_transition_prediction_batch(
+                    learner_dg,
+                    mb["hrl_control_completed"],
+                    mb["hrl_control_target_timeout"],
+                    mb["hrl_control_source"],
+                    mb["hrl_control_command_target"],
+                    mb["hrl_control_outcome_id"],
+                    mb["hrl_control_elapsed"],
+                    valids,
+                    recurrence,
+                    n_dg,
+                )
+                transition_loss, transition_stats = transition_prediction_losses(predictor, prediction_batch)
+                scheduled_prediction = prediction_batch.scheduled_count.detach().float()
+                applied_prediction = prediction_batch.applied_count.detach().float()
+                boundary_prediction = prediction_batch.boundary_drop_count.detach().float()
+                encoder_loss = (
+                    encoder_loss + float(getattr(self.cfg, "dg_transition_prediction_coeff", 0.1)) * transition_loss
+                )
+            encoder_loss *= self.cfg.encoder_grad_coeff
+            core = getattr(self.actor_critic, "core", None)
+            readout = getattr(core, "state_readout", None)
+            predictor = getattr(core, "innovation_predictor", None)
+            prediction_zero = outputs.core_outputs.sum() * 0.0
+            additional_stats["ca3_readout_enabled"] = prediction_zero
+            for name in (
+                "total_loss",
+                "prediction_loss",
+                "active_loss",
+                "zero_loss",
+                "var_loss",
+                "cov_loss",
+                "latent_std_mean",
+                "latent_std_min",
+                "valid_targets",
+                "active_fraction",
+                "state_shuffle_delta",
+                "action_shuffle_delta",
+            ):
+                additional_stats[f"ca3_readout_{name}"] = prediction_zero
+            if readout is not None and predictor is not None:
+                prediction = predictive_readout_loss(
+                    readout,
+                    predictor,
+                    outputs.core_outputs,
+                    mb["actions"],
+                    valids,
+                    mb["dones"],
+                    recurrence,
+                    n_dg,
+                    expanded,
+                    int(self.cfg.ca3_state_readout_horizon),
+                    float(self.cfg.ca3_state_readout_active_coeff),
+                    float(self.cfg.ca3_state_readout_zero_coeff),
+                    float(self.cfg.ca3_state_readout_var_coeff),
+                    float(self.cfg.ca3_state_readout_cov_coeff),
+                )
+                encoder_loss = encoder_loss + float(self.cfg.ca3_state_readout_loss_coeff) * prediction.loss
+                additional_stats["ca3_readout_total_loss"] = prediction.loss.detach()
+                additional_stats["ca3_readout_prediction_loss"] = prediction.prediction_loss.detach()
+                additional_stats["ca3_readout_active_loss"] = prediction.active_loss.detach()
+                additional_stats["ca3_readout_zero_loss"] = prediction.zero_loss.detach()
+                additional_stats["ca3_readout_var_loss"] = prediction.var_loss.detach()
+                additional_stats["ca3_readout_cov_loss"] = prediction.cov_loss.detach()
+                additional_stats["ca3_readout_latent_std_mean"] = prediction.latent_std_mean
+                additional_stats["ca3_readout_latent_std_min"] = prediction.latent_std_min
+                additional_stats["ca3_readout_valid_targets"] = prediction.valid_targets
+                additional_stats["ca3_readout_active_fraction"] = prediction.active_fraction
+                additional_stats["ca3_readout_state_shuffle_delta"] = prediction.state_shuffle_delta
+                additional_stats["ca3_readout_action_shuffle_delta"] = prediction.action_shuffle_delta
+                additional_stats["ca3_readout_enabled"] = prediction_zero + 1.0
+                if getattr(self.cfg, "ca3_graph_anchor_mode", "off") != "off":
+                    self._pending_contextual_anchors = (
+                        outputs.core_outputs[:, : n_dg * expanded].detach(),
+                        mb["actions"].detach(),
+                        valids.detach(),
+                        mb["dones"].detach(),
+                        mb["rnn_states"][:, : n_dg * expanded].detach(),
+                        int(recurrence),
+                    )
+            additional_stats["encoder_loss"] = encoder_loss
+            additional_stats["dg_transition_prediction_loss"] = transition_loss.detach()
+            additional_stats["dg_transition_prediction_main_loss"] = transition_stats["main_loss"]
+            additional_stats["dg_transition_prediction_control_loss"] = transition_stats["control_loss"]
+            additional_stats["dg_transition_prediction_validation_main_ce"] = transition_stats["validation_main_ce"]
+            additional_stats["dg_transition_prediction_validation_control_ce"] = transition_stats[
+                "validation_control_ce"
+            ]
+            additional_stats["dg_transition_prediction_validation_state_gain"] = transition_stats[
+                "validation_state_gain"
+            ]
+            additional_stats["dg_transition_prediction_validation_accuracy"] = transition_stats["validation_accuracy"]
+            additional_stats["dg_transition_prediction_validation_count"] = transition_stats["validation_count"]
+            additional_stats["dg_transition_prediction_scheduled_count"] = scheduled_prediction
+            additional_stats["dg_transition_prediction_applied_count"] = applied_prediction
+            additional_stats["dg_transition_prediction_boundary_drop_count"] = boundary_prediction
+            additional_stats["dg_transition_prediction_replay_match"] = applied_prediction / (
+                scheduled_prediction - boundary_prediction
+            ).clamp_min(1.0)
+            gradient_zero = encoder_loss.detach().new_zeros(())
+            additional_stats["dg_ppo_gradient_norm"] = gradient_zero
+            additional_stats["dg_encoder_gradient_norm"] = gradient_zero
+            additional_stats["dg_gradient_norm_ratio"] = gradient_zero
+            additional_stats["dg_gradient_cosine"] = gradient_zero
+            additional_stats["dg_gradient_row_conflict_fraction"] = gradient_zero
+            zero_credit = encoder_loss.detach() * 0.0
+            if getattr(self.cfg, "encoder_reward_recipient", "arrival") == "source":
+                additional_stats["encoder_source_credit_loss"] = encoder_credit_loss.detach()
+                additional_stats["encoder_arrival_credit_loss"] = zero_credit
+            else:
+                additional_stats["encoder_arrival_credit_loss"] = encoder_credit_loss.detach()
+                additional_stats["encoder_source_credit_loss"] = zero_credit
+            additional_stats["intrinsic_rewards"] = mb.get("rewards_worker", mb["rewards"])
+            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
+            additional_stats["encoder_reward_loss"] = encoder_reward_loss
+            additional_stats["batch_reward_loss"] = encoder_batch_loss
+            additional_stats["encoder_batch_unused_count"] = encoder_batch_unused_count
+            additional_stats["encoder_population_loss"] = population_loss
+            additional_stats["encoder_usage_loss"] = usage_loss
+            additional_stats["encoder_density_loss"] = density_loss
+            additional_stats["encoder_collision_loss"] = collision_loss
+            additional_stats["encoder_global_punishment_loss"] = global_punishment_loss
+            additional_stats["encoder_row_repulsion_loss"] = row_repulsion_loss
+            additional_stats["encoder_ca3_temporal_exclusion_loss"] = temporal_exclusion_loss
+            additional_stats["encoder_path_scatter_loss"] = path_scatter_loss
+            additional_stats["dg_pre_threshold_mean"] = dg_regularizer_stats[0]
+            additional_stats["dg_pre_threshold_above_fraction"] = dg_regularizer_stats[1]
+            additional_stats["dg_ca3_conflict_fraction"] = dg_regularizer_stats[2]
+            additional_stats["dg_ca3_conflicting_activation_fraction"] = dg_regularizer_stats[3]
+            additional_stats["dg_ca3_conflict_activity"] = dg_regularizer_stats[4]
+            additional_stats["dg_path_scatter_conflict_fraction"] = dg_regularizer_stats[5]
 
+        return encoder_loss
+
+    def _forward_fresh_dg(self, mb, recurrence, valids, iterative_phase, additional_stats):
+        """The parent's one fresh forward and its original DG diagnostics."""
         projection = self.actor_critic.encoder.DG_projection
-        update_running_stats = iterative_phase in (SIMULTANEOUS, ENCODER)
+        update_running_stats = iterative_phase in (SIMULTANEOUS, ENCODER) and (
+            not bool(getattr(self.cfg, "transfer_freeze_dg", False))
+            or bool(getattr(projection, "calibrate_frozen_on_first_batch", False))
+        )
         stats_context = getattr(projection, "running_stats_update", None)
         if stats_context is None:
             outputs = self._forward_pass(mb=mb, recurrence=recurrence, valids=valids, return_outputs=[True, True, True])
@@ -3253,6 +3732,62 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             additional_stats["dg_normalized_logit_variance_error"] = zero
 
         additional_stats["Head Output"] = outputs.head_outputs[:, : getattr(self.cfg, "Hippo_n_feature", 64)]
+
+        return outputs
+
+    def _record_goal_condition_diagnostics(self, outputs, mb, additional_stats):
+        with torch.no_grad():
+            if self._uses_policy_graph():
+                behavior_target = self._behavior_targets_from_states(mb.rnn_states)
+                alternate_target = behavior_target.roll(1, dims=0)
+                alternate = self.actor_critic.forward_tail(
+                    self._with_worker_target(outputs.core_outputs.detach(), alternate_target),
+                    values_only=False,
+                    sample_actions=False,
+                )
+                goal_valid = behavior_target.sum(dim=-1).gt(0)
+                action_delta = (
+                    (outputs.result["action_logits"].detach() - alternate["action_logits"]).abs().mean(dim=-1)
+                )
+                action_probability_tv = categorical_action_total_variation(
+                    outputs.result["action_logits"].detach(), alternate["action_logits"]
+                )
+                value_delta = (outputs.result["values"].detach() - alternate["values"]).abs()
+                additional_stats["goal_condition_target_valid_fraction"] = goal_valid.float().mean()
+                additional_stats["goal_condition_action_sensitivity"] = (
+                    action_delta[goal_valid].mean() if goal_valid.any() else action_delta.sum() * 0.0
+                )
+                additional_stats["goal_condition_action_probability_tv"] = (
+                    action_probability_tv[goal_valid].mean() if goal_valid.any() else action_probability_tv.sum() * 0.0
+                )
+                additional_stats["goal_condition_value_span"] = (
+                    value_delta[goal_valid].mean() if goal_valid.any() else value_delta.sum() * 0.0
+                )
+            else:
+                goal_zero = outputs.core_outputs.detach().sum() * 0.0
+                additional_stats["goal_condition_target_valid_fraction"] = goal_zero
+                additional_stats["goal_condition_action_sensitivity"] = goal_zero
+                additional_stats["goal_condition_action_probability_tv"] = goal_zero
+                additional_stats["goal_condition_value_span"] = goal_zero
+
+    def _calculate_losses(
+        self, mb: AttrDict, num_invalids: int, iterative_phase: str, *, record_goal_diagnostics: bool = True
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+        additional_stats = AttrDict()
+        with torch.no_grad(), self.timing.add_time("losses_init"):
+            recurrence: int = self.cfg.recurrence
+
+            # PPO clipping
+            clip_ratio_high = 1.0 + self.cfg.ppo_clip_ratio  # e.g. 1.1
+            # this still works with e.g. clip_ratio = 2, while PPO's 1-r would give negative ratio
+            clip_ratio_low = 1.0 / clip_ratio_high
+            clip_value = self.cfg.ppo_clip_value
+
+            valids = mb.valids
+            if int(valids.sum().item()) < 2:
+                raise RuntimeError("Learner update invariant violated: fewer than two valid decisions reached PPO")
+
+        outputs = self._forward_fresh_dg(mb, recurrence, valids, iterative_phase, additional_stats)
 
         with self.timing.add_time("post_forward"):
             action_distribution = self.actor_critic.action_distribution()
@@ -3364,206 +3899,17 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             additional_stats["empirical_her_ratio"] = empirical_her_ratio
             additional_stats["empirical_her_clip_fraction"] = empirical_her_clip_fraction
             additional_stats["empirical_her_valid_fraction"] = empirical_her_valid_fraction
-            with torch.no_grad():
-                if self._uses_policy_graph():
-                    behavior_target = self._behavior_targets_from_states(mb.rnn_states)
-                    alternate_target = behavior_target.roll(1, dims=0)
-                    alternate = self.actor_critic.forward_tail(
-                        self._with_worker_target(outputs.core_outputs.detach(), alternate_target),
-                        values_only=False,
-                        sample_actions=False,
-                    )
-                    goal_valid = behavior_target.sum(dim=-1).gt(0)
-                    action_delta = (
-                        (outputs.result["action_logits"].detach() - alternate["action_logits"]).abs().mean(dim=-1)
-                    )
-                    action_probability_tv = categorical_action_total_variation(
-                        outputs.result["action_logits"].detach(), alternate["action_logits"]
-                    )
-                    value_delta = (outputs.result["values"].detach() - alternate["values"]).abs()
-                    additional_stats["goal_condition_target_valid_fraction"] = goal_valid.float().mean()
-                    additional_stats["goal_condition_action_sensitivity"] = (
-                        action_delta[goal_valid].mean() if goal_valid.any() else action_delta.sum() * 0.0
-                    )
-                    additional_stats["goal_condition_action_probability_tv"] = (
-                        action_probability_tv[goal_valid].mean()
-                        if goal_valid.any()
-                        else action_probability_tv.sum() * 0.0
-                    )
-                    additional_stats["goal_condition_value_span"] = (
-                        value_delta[goal_valid].mean() if goal_valid.any() else value_delta.sum() * 0.0
-                    )
-                else:
-                    goal_zero = outputs.core_outputs.detach().sum() * 0.0
-                    additional_stats["goal_condition_target_valid_fraction"] = goal_zero
-                    additional_stats["goal_condition_action_sensitivity"] = goal_zero
-                    additional_stats["goal_condition_action_probability_tv"] = goal_zero
-                    additional_stats["goal_condition_value_span"] = goal_zero
+            # Evaluate the alternate target only when this minibatch will be summarized.
+            if record_goal_diagnostics:
+                self._record_goal_condition_diagnostics(outputs, mb, additional_stats)
 
             kl_old, kl_loss = self.kl_loss_func(
                 self.actor_critic.action_space, mb.action_logits, action_distribution, valids, num_invalids
             )
 
-        with self.timing.add_time("encoder_losses"):
-            learner_active = outputs.head_outputs[:, : int(self.cfg.Hippo_n_feature)] > 0
-            scheduled_credit_mask = mb["encoder_credit_activation_mask"].bool()
-            applied_credit_mask = scheduled_credit_mask & learner_active
-            reward_by_row = mb["rewards_encoder"]
-            if reward_by_row.ndim == 1:
-                reward_by_row = reward_by_row.unsqueeze(1).expand_as(applied_credit_mask)
-            scheduled_reward_mass = (reward_by_row * scheduled_credit_mask).sum()
-            applied_reward_mass = (reward_by_row * applied_credit_mask).sum()
-            scheduled_credit_count = scheduled_credit_mask.sum()
-            applied_credit_count = applied_credit_mask.sum()
-            additional_stats["encoder_credit_scheduled_count"] = scheduled_credit_count.detach().float()
-            additional_stats["encoder_credit_applied_count"] = applied_credit_count.detach().float()
-            additional_stats["encoder_credit_scheduled_mass"] = scheduled_reward_mass.detach().float()
-            additional_stats["encoder_credit_applied_mass"] = applied_reward_mass.detach().float()
-            additional_stats["encoder_credit_replay_match"] = (
-                applied_credit_count.float() / scheduled_credit_count.clamp_min(1).float()
-            ).detach()
-            # noinspection PyTypeChecker
-            encoder_loss = self._encoder_loss(
-                outputs.head_outputs,
-                mb["rewards_encoder"],
-                applied_credit_mask,
-                valids,
-                num_invalids,
-            )
-            encoder_credit_loss = encoder_loss
-            l1_loss = self._l1_loss(outputs.head_outputs, valids, num_invalids)
-
-            if self.cfg.extra_encoder_losses:
-                (
-                    encoder_penalty_loss,
-                    encoder_reward_loss,
-                    encoder_batch_loss,
-                    encoder_batch_unused_count,
-                ) = self._extra_encoder_loss(
-                    outputs.head_outputs,
-                    mb["rnn_states"].detach(),
-                    mb["encoder_dominant_activation_mask"],
-                    mb["encoder_non_dominant_activation_mask"],
-                    outputs.minibatch_size,
-                    valids,
-                    num_invalids,
-                )
-                encoder_loss += encoder_reward_loss + encoder_penalty_loss + encoder_batch_loss
-            else:
-                encoder_loss += l1_loss
-                encoder_batch_unused_count = outputs.head_outputs.sum() * 0.0
-            population_loss, usage_loss, density_loss, collision_loss = self._population_usage_loss(
-                outputs.head_outputs
-            )
-            (
-                global_punishment_loss,
-                row_repulsion_loss,
-                temporal_exclusion_loss,
-                path_scatter_loss,
-                dg_regularizer_stats,
-            ) = self._anti_collapse_losses(
-                outputs.head_outputs,
-                mb["rnn_states"],
-                mb["encoder_dominant_activation_mask"],
-                valids,
-                num_invalids,
-            )
-            encoder_loss += (
-                population_loss
-                + global_punishment_loss
-                + row_repulsion_loss
-                + temporal_exclusion_loss
-                + path_scatter_loss
-            )
-            transition_mode = getattr(self.cfg, "dg_transition_prediction", "none")
-            transition_loss = encoder_loss * 0.0
-            transition_stats = {
-                "main_loss": transition_loss.detach(),
-                "control_loss": transition_loss.detach(),
-                "validation_main_ce": transition_loss.detach(),
-                "validation_control_ce": transition_loss.detach(),
-                "validation_state_gain": transition_loss.detach(),
-                "validation_accuracy": transition_loss.detach(),
-                "validation_count": transition_loss.detach(),
-            }
-            scheduled_prediction = transition_loss.detach()
-            applied_prediction = transition_loss.detach()
-            boundary_prediction = transition_loss.detach()
-            predictor = getattr(self.actor_critic, "dg_transition_predictor", None)
-            if transition_mode != "none":
-                if predictor is None:
-                    raise RuntimeError("DG transition prediction is enabled without a predictor")
-                prediction_batch = build_transition_prediction_batch(
-                    learner_dg,
-                    mb["hrl_control_completed"],
-                    mb["hrl_control_target_timeout"],
-                    mb["hrl_control_source"],
-                    mb["hrl_control_command_target"],
-                    mb["hrl_control_outcome_id"],
-                    mb["hrl_control_elapsed"],
-                    valids,
-                    recurrence,
-                    n_dg,
-                )
-                transition_loss, transition_stats = transition_prediction_losses(predictor, prediction_batch)
-                scheduled_prediction = prediction_batch.scheduled_count.detach().float()
-                applied_prediction = prediction_batch.applied_count.detach().float()
-                boundary_prediction = prediction_batch.boundary_drop_count.detach().float()
-                encoder_loss = (
-                    encoder_loss + float(getattr(self.cfg, "dg_transition_prediction_coeff", 0.1)) * transition_loss
-                )
-            encoder_loss *= self.cfg.encoder_grad_coeff
-            additional_stats["encoder_loss"] = encoder_loss
-            additional_stats["dg_transition_prediction_loss"] = transition_loss.detach()
-            additional_stats["dg_transition_prediction_main_loss"] = transition_stats["main_loss"]
-            additional_stats["dg_transition_prediction_control_loss"] = transition_stats["control_loss"]
-            additional_stats["dg_transition_prediction_validation_main_ce"] = transition_stats["validation_main_ce"]
-            additional_stats["dg_transition_prediction_validation_control_ce"] = transition_stats[
-                "validation_control_ce"
-            ]
-            additional_stats["dg_transition_prediction_validation_state_gain"] = transition_stats[
-                "validation_state_gain"
-            ]
-            additional_stats["dg_transition_prediction_validation_accuracy"] = transition_stats["validation_accuracy"]
-            additional_stats["dg_transition_prediction_validation_count"] = transition_stats["validation_count"]
-            additional_stats["dg_transition_prediction_scheduled_count"] = scheduled_prediction
-            additional_stats["dg_transition_prediction_applied_count"] = applied_prediction
-            additional_stats["dg_transition_prediction_boundary_drop_count"] = boundary_prediction
-            additional_stats["dg_transition_prediction_replay_match"] = applied_prediction / (
-                scheduled_prediction - boundary_prediction
-            ).clamp_min(1.0)
-            gradient_zero = encoder_loss.detach().new_zeros(())
-            additional_stats["dg_ppo_gradient_norm"] = gradient_zero
-            additional_stats["dg_encoder_gradient_norm"] = gradient_zero
-            additional_stats["dg_gradient_norm_ratio"] = gradient_zero
-            additional_stats["dg_gradient_cosine"] = gradient_zero
-            additional_stats["dg_gradient_row_conflict_fraction"] = gradient_zero
-            zero_credit = encoder_loss.detach() * 0.0
-            if getattr(self.cfg, "encoder_reward_recipient", "arrival") == "source":
-                additional_stats["encoder_source_credit_loss"] = encoder_credit_loss.detach()
-                additional_stats["encoder_arrival_credit_loss"] = zero_credit
-            else:
-                additional_stats["encoder_arrival_credit_loss"] = encoder_credit_loss.detach()
-                additional_stats["encoder_source_credit_loss"] = zero_credit
-            additional_stats["intrinsic_rewards"] = mb["rewards"]
-            additional_stats["encoder_penalty_loss"] = encoder_penalty_loss
-            additional_stats["encoder_reward_loss"] = encoder_reward_loss
-            additional_stats["batch_reward_loss"] = encoder_batch_loss
-            additional_stats["encoder_batch_unused_count"] = encoder_batch_unused_count
-            additional_stats["encoder_population_loss"] = population_loss
-            additional_stats["encoder_usage_loss"] = usage_loss
-            additional_stats["encoder_density_loss"] = density_loss
-            additional_stats["encoder_collision_loss"] = collision_loss
-            additional_stats["encoder_global_punishment_loss"] = global_punishment_loss
-            additional_stats["encoder_row_repulsion_loss"] = row_repulsion_loss
-            additional_stats["encoder_ca3_temporal_exclusion_loss"] = temporal_exclusion_loss
-            additional_stats["encoder_path_scatter_loss"] = path_scatter_loss
-            additional_stats["dg_pre_threshold_mean"] = dg_regularizer_stats[0]
-            additional_stats["dg_pre_threshold_above_fraction"] = dg_regularizer_stats[1]
-            additional_stats["dg_ca3_conflict_fraction"] = dg_regularizer_stats[2]
-            additional_stats["dg_ca3_conflicting_activation_fraction"] = dg_regularizer_stats[3]
-            additional_stats["dg_ca3_conflict_activity"] = dg_regularizer_stats[4]
-            additional_stats["dg_path_scatter_conflict_fraction"] = dg_regularizer_stats[5]
+        encoder_loss = self._calculate_fresh_encoder_loss(
+            outputs, mb, valids, num_invalids, recurrence, additional_stats
+        )
 
         loss_summaries = dict(
             ratio=ratio,
@@ -3656,7 +4002,14 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                         extra_decoder_loss,
                         encoder_loss,
                         loss_summaries,
-                    ) = self._calculate_losses(mb, num_invalids, iterative_phase)
+                    ) = self._calculate_losses(
+                        mb,
+                        num_invalids,
+                        iterative_phase,
+                        record_goal_diagnostics=(
+                            with_summaries and epoch == summaries_epoch and batch_num == summaries_batch
+                        ),
+                    )
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
@@ -3747,7 +4100,9 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
                     with self.param_server.policy_lock:
                         self.optimizer.step()
-                        if iterative_phase in (SIMULTANEOUS, ENCODER):
+                        if iterative_phase in (SIMULTANEOUS, ENCODER) and not bool(
+                            getattr(self.cfg, "transfer_freeze_dg", False)
+                        ):
                             projection = self.actor_critic.encoder.DG_projection
                             normalize_dg_projection_rows(projection.linear)
                             poststep_update = getattr(projection, "post_step_update_running_stats", None)
@@ -3868,7 +4223,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             non_dominant_activations,
         )
 
-    def _calculate_internal_reward(self, buff, additional_step):
+    def _calculate_reward_components(self, buff, additional_step):
         buff["rewards_external"] = buff["rewards"].clone()
         (
             internal_reward,
@@ -3961,7 +4316,21 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             buff["hrl_control_outcome_id"] = outcome_labels["outcome"]
             if command_set_size is not None:
                 buff["hrl_control_command_set_size"] = command_set_size
+        buff["rewards_worker"] = decoder_reward.clone()
         buff["rewards"] = decoder_reward
+        return (
+            baseline,
+            encoder_reward,
+            progression,
+            candidate_activations,
+            dominant_activations,
+            non_dominant_activations,
+        )
+
+    def _calculate_internal_reward(self, buff, additional_step):
+        baseline, encoder_reward, progression, candidate_activations, dominant_activations, non_dominant_activations = (
+            self._calculate_reward_components(buff, additional_step)
+        )
         dominant_rollout = dominant_activations[:, 1:-1]
         credit_mask = dominant_rollout
         if bool(getattr(self.cfg, "encoder_reward_require_local_predecessor", False)):
@@ -3988,8 +4357,28 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         buff["encoder_dominant_activation_mask"] = dominant_rollout
         buff["encoder_non_dominant_activation_mask"] = non_dominant_activations[:, 1:-1]
 
+    def _select_ppo_reward(self, buff):
+        """Honor an explicit reward-source choice in the single-value learner.
+
+        Intrinsic worker reward remains available for diagnostics and encoder
+        credit. PPO and the reward manager must consume the same task reward.
+        Legacy studies without an explicit choice keep their historical path.
+        """
+        if self._advantage_reward_source() == "external":
+            buff["rewards"] = buff["rewards_external"].clone()
+
     def _prepare_batch(self, batch: TensorDict) -> Tuple[TensorDict, int, int]:
         with torch.no_grad():
+            phase_started = time.perf_counter()
+
+            def record_phase(name):
+                nonlocal phase_started
+                stats = getattr(self, "controller_stats", None)
+                now = time.perf_counter()
+                if stats is not None:
+                    stats[f"prepare_phase/{name}"] = now - phase_started
+                phase_started = now
+
             # create a shallow copy so we can modify the dictionary
             # we still reference the same buffers though
             buff = shallow_recursive_copy(batch)
@@ -3998,7 +4387,15 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             valids: Tensor = buff["policy_id"] == self.policy_id
             # ignore experience that was older than the threshold even before training started
             curr_policy_version: int = self.train_step
-            buff["valids"][:, :-1] = valids & (curr_policy_version - buff["policy_version"] < self.cfg.max_policy_lag)
+            buff["valids"][:, :-1] = valids & (
+                curr_policy_version
+                - (
+                    buff["controller_fresh_version"].squeeze(-1)
+                    if "controller_fresh_version" in buff
+                    else buff["policy_version"]
+                )
+                < self.cfg.max_policy_lag
+            )
             eligible_before_generation = buff["valids"][:, :-1].clone()
             generation_matches = self._current_generation_mask(buff["rnn_states"][:, :-1])
             generation_valids, stale_rollouts = complete_rollout_generation_mask(
@@ -4040,6 +4437,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 return buff, dataset_size, dataset_size
             # for last T+1 step, we want to use the validity of the previous step
             buff["valids"][:, -1] = buff["valids"][:, -2]
+            record_phase("generation")
             graph_stats = self._update_policy_graph_from_rollout(buff["rnn_states"], buff["valids"][:, :-1])
             if graph_stats is not None:
                 self._last_graph_rollout_stats = {
@@ -4053,6 +4451,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     key: float(value.detach().cpu().item()) for key, value in passive_stats.items()
                 }
             self._queue_dg_recruitment_candidates(buff)
+            record_phase("graph")
             # log.info(f'RNN_states Shape: {buff["rnn_states"].shape}')
             # log.info(f'Internal Reward1: {buff["rewards"][:,:10]}')
             # log.info(f'Reward Shape1: {buff["rewards"].shape}')
@@ -4064,16 +4463,20 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
             del buff["obs"]  # don't need non-normalized obs anymore
+            record_phase("normalize_observations")
 
             # calculate estimated value for the next step (T+1)
             normalized_last_obs = buff["normalized_obs"][:, -1]
             additional_step = self.actor_critic(normalized_last_obs, buff["rnn_states"][:, -1], values_only=True)
             next_values = additional_step["values"]
             buff["values"][:, -1] = next_values
+            record_phase("bootstrap_forward")
 
             self._calculate_internal_reward(buff, additional_step)
+            record_phase("internal_reward")
+            self._select_ppo_reward(buff)
 
-            if self.cfg.normalize_returns:
+            if self.cfg.normalize_returns and getattr(self.cfg, "controller_learning", "ppo") != "ddqn":
                 # Since our value targets are normalized, the values will also have normalized statistics.
                 # We need to denormalize them before using them for GAE caculation and value bootstrapping.
                 # rl_games PPO uses a similar approach, see:
@@ -4108,6 +4511,36 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 )
                 # here returns are not normalized yet, so we should use denormalized values
                 buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
+                if getattr(self.cfg, "hrl_direct_target_selection", "frontier") == "reward_value":
+                    states = buff["rnn_states"][:, :-1]
+                    option_states = self._hrl_state_from_rnn(states)
+                    topological_states = self._topological_state_from_rnn(states)
+                    if getattr(self, "_reward_manager_diagnostic_count", 0) < 3:
+                        from .hrl_controllable_graph import HRLStateLayout
+                        from .topological_frontier import TopologicalStateLayout
+
+                        option_layout = HRLStateLayout(self.cfg.Hippo_n_feature)
+                        topo_layout = TopologicalStateLayout(self.cfg.Hippo_n_feature)
+                        log.info(
+                            "Reward manager batch: age0=%d source=%d goal=%d reset=%d valid=%d",
+                            int((option_states[..., option_layout.age] == 0).sum()),
+                            int((option_states[..., option_layout.source] > 0).sum()),
+                            int((topological_states[..., topo_layout.final_goal] > 0).sum()),
+                            int((option_states[..., option_layout.option_reset] > 0).sum()),
+                            int(buff["valids"][:, :-1].sum()),
+                        )
+                        self._reward_manager_diagnostic_count = getattr(self, "_reward_manager_diagnostic_count", 0) + 1
+                    self._last_reward_manager_updates = self._policy_graph().update_reward_goal_values(
+                        option_states,
+                        topological_states,
+                        buff["returns"],
+                        buff["valids"][:, :-1],
+                        (
+                            buff["normalized_obs"][DMLAB_INSTRUCTIONS][:, :-1, 0]
+                            if int(getattr(self.cfg, "reward_instruction_count", 0))
+                            else None
+                        ),
+                    )
 
             # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
             for key in ["normalized_obs", "rnn_states", "values", "valids"]:
@@ -4121,7 +4554,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             buff["rewards_cpu"] = buff["rewards"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
 
             # return normalization parameters are only used on the learner, no need to lock the mutex
-            if self.cfg.normalize_returns:
+            if self.cfg.normalize_returns and getattr(self.cfg, "controller_learning", "ppo") != "ddqn":
                 self.actor_critic.returns_normalizer(buff["returns"])  # in-place
 
             num_invalids = dataset_size - buff["valids"].sum().item()
@@ -4137,7 +4570,19 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 # likewise, some invalid values of log_prob_actions can cause NaNs or infs
                 buff["log_prob_actions"][invalid_indices] = -1  # -1 seems like a safe value
 
+            record_phase("finalize")
             return buff, dataset_size, num_invalids
+
+    def _record_goal_modulation_summaries(self, stats):
+        dg_modulation = getattr(self.actor_critic.core, "dg_goal_modulation", None)
+        if dg_modulation is not None:
+            stats["dg_goal_modulation_norm"] = dg_modulation.detach().norm().float()
+            grad = dg_modulation.grad
+            stats["dg_goal_modulation_gradient_norm"] = grad.norm().detach().float() if grad is not None else 0.0
+            for goal_id in range(int(self.cfg.Hippo_n_feature)):
+                stats[f"dg_goal_gradient_{goal_id:03d}"] = (
+                    grad[goal_id].norm().detach().float() if grad is not None else 0.0
+                )
 
     def _record_summaries(self, train_loop_vars):
         var = train_loop_vars  # TODO: Think of a better way, why is this necessary? Just redirecting pointer?
@@ -4703,6 +5148,25 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.ca3_predictor_time_mae = var.additional_stats["ca3_predictor_time_mae"].detach().float()
         stats.ca3_predictor_positive_fraction = var.additional_stats["ca3_predictor_positive_fraction"].detach().float()
         for name in (
+            "enabled",
+            "total_loss",
+            "prediction_loss",
+            "active_loss",
+            "zero_loss",
+            "var_loss",
+            "cov_loss",
+            "latent_std_mean",
+            "latent_std_min",
+            "valid_targets",
+            "active_fraction",
+            "state_shuffle_delta",
+            "action_shuffle_delta",
+        ):
+            key = f"ca3_readout_{name}"
+            if key in var.additional_stats:
+                value = var.additional_stats[key]
+                stats[key] = value.detach().float() if torch.is_tensor(value) else float(value)
+        for name in (
             "loss",
             "main_loss",
             "control_loss",
@@ -4719,16 +5183,12 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             stats[f"dg_transition_prediction_{name}"] = (
                 var.additional_stats[f"dg_transition_prediction_{name}"].detach().float()
             )
-        stats.hrl_goal_condition_target_valid_fraction = (
-            var.additional_stats["goal_condition_target_valid_fraction"].detach().float()
-        )
-        stats.hrl_goal_condition_action_sensitivity = (
-            var.additional_stats["goal_condition_action_sensitivity"].detach().float()
-        )
-        stats.hrl_goal_condition_action_probability_tv = (
-            var.additional_stats["goal_condition_action_probability_tv"].detach().float()
-        )
-        stats.hrl_goal_condition_value_span = var.additional_stats["goal_condition_value_span"].detach().float()
+        # Unexpected high-loss summaries may not have requested the diagnostic.
+        # Omit missing measurements instead of logging zeros or stale values.
+        for name in ("target_valid_fraction", "action_sensitivity", "action_probability_tv", "value_span"):
+            key = f"goal_condition_{name}"
+            if key in var.additional_stats:
+                stats[f"hrl_{key}"] = var.additional_stats[key].detach().float()
         stats.hrl_behavior_replay_mismatch = var.additional_stats["behavior_replay_mismatch"].detach().float()
         for branch in ("goal", "free"):
             stats[f"hrl_{branch}_policy_loss"] = var.additional_stats[f"{branch}_policy_loss"].detach().float()
@@ -4863,6 +5323,26 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats.dg_recruitment_goal_adapter_reset_count = float(self._last_recruitment_stats["goal_adapter_reset_count"])
         stats.dg_recruitment_goal_adapter_reset_total = float(self._goal_adapter_reset_count)
         decoder = self.actor_critic.decoder
+        self._record_goal_modulation_summaries(stats)
+        if self._uses_policy_graph():
+            goals = self._behavior_targets_from_states(var.mb.rnn_states).detach()
+            decision_counts = (goals * var.mb.valids.unsqueeze(-1)).sum(0)
+            probabilities = decision_counts / decision_counts.sum().clamp_min(1)
+            stats.goal_command_entropy = -(probabilities * probabilities.clamp_min(1e-12).log()).sum()
+            stats.goal_commanded_count = (decision_counts > 0).sum().float()
+            stats.goal_eligible_count = (self._policy_graph().node_visits > 0).sum().float()
+            raw_hrl = self._hrl_state_from_rnn(var.mb.rnn_states)
+            new_attempt = (raw_hrl[:, self._hrl_layout().option_reset] > 0) & var.mb.valids
+            for goal_id in range(int(self.cfg.Hippo_n_feature)):
+                stats[f"goal_decisions_{goal_id:03d}"] = decision_counts[goal_id]
+                stats[f"goal_attempts_{goal_id:03d}"] = (goals[:, goal_id] * new_attempt).sum()
+                commanded = var.mb["hrl_control_command_target"].long() == goal_id
+                stats[f"goal_successes_{goal_id:03d}"] = (
+                    (commanded & var.mb["hrl_control_correct_outcome"].bool() & var.mb.valids).sum().float()
+                )
+                stats[f"goal_timeouts_{goal_id:03d}"] = (
+                    (commanded & var.mb["hrl_control_target_timeout"].bool() & var.mb.valids).sum().float()
+                )
         stats.hrl_goal_decoder_parameter_count = float(sum(parameter.numel() for parameter in decoder.parameters()))
         target_modulation = getattr(decoder, "target_modulation", None)
         if torch.is_tensor(target_modulation):
@@ -4913,6 +5393,21 @@ class OnlineSpatialDefaultLearner(DefaultLearner):
 def make_hipposlam_learner(
     cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer
 ) -> BaseLearner:
+    if getattr(cfg, "controller_learning", "ppo") != "ppo":
+        # Stored-state production passed all six fresh and real-restart gates.
+        # Keep unreleased reconstruction behind its original guard.
+        if (
+            not getattr(cfg, "controller_preflight", False)
+            and getattr(cfg, "controller_replay_state", "reconstruct") != "stored"
+        ):
+            raise RuntimeError("Full-system production remains guarded until all six 2M-frame preflights pass")
+        from .controller_learner import ControllerLearner
+        from .controller_transport import validate_controller_config
+
+        validate_controller_config(cfg)
+        return ControllerLearner(cfg, env_info, policy_versions_tensor, policy_id, param_server)
+    if bool(getattr(cfg, "controller_her", False)):
+        raise ValueError("controller_her requires the separate off-policy auxiliary learner")
     if cfg.distance_learning:
         if cfg.double_value:
             return DoubleDistanceLearnerReward(cfg, env_info, policy_versions_tensor, policy_id, param_server)

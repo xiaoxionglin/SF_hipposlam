@@ -1,9 +1,12 @@
 import pytest
 import torch
-
 from intrmotiv_transfer import (
-    CA3TargetPredictor, advance_action_history, advance_ca3,
-    future_target_labels, previous_action_onehot, shadow_prediction_loss,
+    CA3TargetPredictor,
+    advance_action_history,
+    advance_ca3,
+    future_target_labels,
+    previous_action_onehot,
+    shadow_prediction_loss,
     skip_silent_ca3,
 )
 
@@ -12,7 +15,7 @@ from intrmotiv_transfer import (
 def test_silent_skip_matches_stepwise_updates_without_mutating_real_state(delay):
     state = torch.arange(20, dtype=torch.float32).reshape(2, 2, 5)
     original = state.clone()
-    next_dg = torch.tensor([[0., 2.], [1., 0.]])
+    next_dg = torch.tensor([[0.0, 2.0], [1.0, 0.0]])
     expected = state.clone()
     for _ in range(delay - 1):
         expected = advance_ca3(expected, torch.zeros_like(next_dg), 2)
@@ -25,8 +28,8 @@ def test_silent_skip_matches_stepwise_updates_without_mutating_real_state(delay)
 
 
 def test_skipping_a_nonzero_intermediate_input_is_not_exact():
-    state, event = torch.zeros(1, 2, 5), torch.tensor([[0., 1.]])
-    middle = advance_ca3(state, torch.tensor([[2., 0.]]), 2)
+    state, event = torch.zeros(1, 2, 5), torch.tensor([[0.0, 1.0]])
+    middle = advance_ca3(state, torch.tensor([[2.0, 0.0]]), 2)
     actual = advance_ca3(middle, event, 2)
     assert not torch.equal(actual, skip_silent_ca3(state, event, 2, 2))
 
@@ -36,7 +39,7 @@ def test_action_history_reset_sentinel_and_causal_order():
     original = history.clone()
     updated = advance_action_history(history, torch.tensor([1, 2]), torch.tensor([True, False]))
     assert updated[0].eq(0).all()
-    assert updated[1, -1].tolist() == [0., 0., 1.]
+    assert updated[1, -1].tolist() == [0.0, 0.0, 1.0]
     assert torch.equal(updated[1, :-1], history[1, 1:])
     assert torch.equal(history, original)
     assert previous_action_onehot(torch.tensor([3]), 3).eq(0).all()
@@ -63,8 +66,8 @@ def test_observed_positive_is_usable_even_when_remaining_window_is_short():
     targets, dg, dones = fixture()
     dg[:, 4] = 1
     hit, delay, valid = future_target_labels(targets, dg, dones, 3)
-    assert hit.tolist() == [[0., 1., 1., 1., 0.]]
-    assert delay.tolist() == [[0., 3., 2., 1., 0.]]
+    assert hit.tolist() == [[0.0, 1.0, 1.0, 1.0, 0.0]]
+    assert delay.tolist() == [[0.0, 3.0, 2.0, 1.0, 0.0]]
     assert valid.tolist() == [[True, True, True, True, False]]
 
 
@@ -109,8 +112,15 @@ def test_head_only_update_cannot_change_encoder_or_actor():
     before_head = [p.detach().clone() for p in head.parameters()]
     optimizer = torch.optim.Adam(head.parameters(), lr=0.01)
     targets = torch.eye(2).repeat(3, 1)
-    loss, _ = shadow_prediction_loss(head, ca3, targets, torch.tensor([1., 0., 1., 0., 1., 0.]),
-                                     torch.tensor([1., 0., 2., 0., 3., 0.]), torch.ones(6, dtype=torch.bool), 3)
+    loss, _ = shadow_prediction_loss(
+        head,
+        ca3,
+        targets,
+        torch.tensor([1.0, 0.0, 1.0, 0.0, 1.0, 0.0]),
+        torch.tensor([1.0, 0.0, 2.0, 0.0, 3.0, 0.0]),
+        torch.ones(6, dtype=torch.bool),
+        3,
+    )
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -122,8 +132,9 @@ def test_head_only_update_cannot_change_encoder_or_actor():
 
 def test_all_censored_batch_has_finite_zero_loss_and_zero_head_gradient():
     head = CA3TargetPredictor(4, 2, 8)
-    loss, stats = shadow_prediction_loss(head, torch.zeros(3, 4), torch.zeros(3, 2),
-                                        torch.zeros(3), torch.zeros(3), torch.zeros(3, dtype=torch.bool), 4)
+    loss, stats = shadow_prediction_loss(
+        head, torch.zeros(3, 4), torch.zeros(3, 2), torch.zeros(3), torch.zeros(3), torch.zeros(3, dtype=torch.bool), 4
+    )
     assert loss.item() == 0
     assert stats["usable_count"].item() == 0
     loss.backward()
@@ -135,7 +146,13 @@ def test_positive_time_error_is_reported_in_decisions():
     with torch.no_grad():
         for p in head.parameters():
             p.zero_()  # sigmoid(0) * horizon = 4 decisions
-    _, stats = shadow_prediction_loss(head, torch.zeros(2, 4), torch.eye(2),
-                                     torch.tensor([1., 0.]), torch.tensor([1., 0.]),
-                                     torch.ones(2, dtype=torch.bool), 8)
+    _, stats = shadow_prediction_loss(
+        head,
+        torch.zeros(2, 4),
+        torch.eye(2),
+        torch.tensor([1.0, 0.0]),
+        torch.tensor([1.0, 0.0]),
+        torch.ones(2, dtype=torch.bool),
+        8,
+    )
     assert stats["time_mae_decisions"].item() == 3

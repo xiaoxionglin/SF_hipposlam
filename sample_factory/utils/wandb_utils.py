@@ -43,7 +43,10 @@ def init_wandb(cfg):
             job_type=cfg.wandb_job_type,
             tags=cfg.wandb_tags,
             resume="allow",
-            settings=wandb.Settings(start_method="fork"),
+            # W&B 0.25 removed the legacy ``start_method`` setting. The SDK
+            # now owns its service process lifecycle, and an empty Settings
+            # object remains compatible with older supported releases.
+            settings=wandb.Settings(),
             dir=wandb_dir(cfg, True),
         )
 

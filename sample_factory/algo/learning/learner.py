@@ -223,7 +223,16 @@ class BaseLearner(Configurable):
         self.actor_critic._apply(share_mem)
         self.actor_critic.train()
 
-        params = list(self.actor_critic.parameters())
+        # Modules can opt into a stable LR ratio without coupling the generic
+        # scheduler to application-specific parameter names.
+        grouped = {}
+        for parameter in self.actor_critic.parameters():
+            scale = float(getattr(parameter, "_intrmotiv_lr_scale", 1.0))
+            grouped.setdefault(scale, []).append(parameter)
+        params = [
+            {"params": group, "lr": self.cfg.learning_rate * scale, "intrmotiv_lr_scale": scale}
+            for scale, group in sorted(grouped.items())
+        ]
 
         optimizer_cls = dict(adam=torch.optim.Adam, lamb=Lamb)
         if self.cfg.optimizer not in optimizer_cls:
@@ -509,13 +518,13 @@ class BaseLearner(Configurable):
 
     def _optimizer_lr(self):
         for param_group in self.optimizer.param_groups:
-            return param_group["lr"]
+            return param_group["lr"] / float(param_group.get("intrmotiv_lr_scale", 1.0))
 
     def _apply_lr(self, lr: float) -> None:
         """Change learning rate in the optimizer."""
         if lr != self._optimizer_lr():
             for param_group in self.optimizer.param_groups:
-                param_group["lr"] = lr
+                param_group["lr"] = lr * float(param_group.get("intrmotiv_lr_scale", 1.0))
 
     def _get_minibatches(self, batch_size, experience_size):
         """Generating minibatches for training."""
@@ -577,6 +586,26 @@ class BaseLearner(Configurable):
             if head_only:
                 return outputs
 
+        replay_head = getattr(self, "_prepare_recurrent_replay_head", None)
+        if replay_head is not None:
+            head_outputs = replay_head(head_outputs, mb)
+
+        # Some recurrent models record exogenous decisions while acting (for
+        # example a hierarchical manager command).  Replay those facts inside
+        # the core instead of recomputing historical decisions from mutable
+        # model state.  Concatenating before packing guarantees that conditions
+        # receive exactly the same episode splitting and sorting as the head.
+        replay_conditions = None
+        replay_condition_hook = getattr(self, "_recurrent_replay_conditions", None)
+        if replay_condition_hook is not None:
+            replay_conditions = replay_condition_hook(mb)
+            if replay_conditions is not None:
+                if replay_conditions.shape[0] != head_outputs.shape[0]:
+                    raise ValueError("Recurrent replay conditions must align with policy-head rows")
+                replay_conditions = replay_conditions.to(device=head_outputs.device, dtype=head_outputs.dtype)
+                replay_head_size = head_outputs.size(-1)
+                head_outputs = torch.cat((head_outputs, replay_conditions), dim=-1)
+
         # initial rnn states
         with self.timing.add_time("bptt_initial"):
             if self.cfg.use_rnn:
@@ -590,6 +619,11 @@ class BaseLearner(Configurable):
                     recurrence,
                     getattr(self.cfg, "rnn_persistent_state_size", 0),
                 )
+                replay_conditions_padded = None
+                if replay_conditions is not None:
+                    condition_seq = head_output_seq._replace(data=head_output_seq.data[:, replay_head_size:])
+                    head_output_seq = head_output_seq._replace(data=head_output_seq.data[:, :replay_head_size])
+                    replay_conditions_padded, _ = torch.nn.utils.rnn.pad_packed_sequence(condition_seq)
             else:
                 rnn_states = mb.rnn_states[::recurrence]
 
@@ -597,7 +631,12 @@ class BaseLearner(Configurable):
         with self.timing.add_time("bptt"):
             if self.cfg.use_rnn:
                 with self.timing.add_time("bptt_forward_core"):
-                    core_output_seq, _ = self.actor_critic.forward_core(head_output_seq, rnn_states)
+                    if replay_conditions_padded is None:
+                        core_output_seq, _ = self.actor_critic.forward_core(head_output_seq, rnn_states)
+                    else:
+                        core_output_seq, _ = self.actor_critic.forward_core(
+                            head_output_seq, rnn_states, replay_conditions=replay_conditions_padded
+                        )
                 core_outputs = build_core_out_from_seq(core_output_seq, inverted_select_inds)
                 del core_output_seq
             else:
@@ -839,11 +878,12 @@ class BaseLearner(Configurable):
         with self.timing.add_time("prepare_batch"):
             buff, experience_size, num_invalids = self._prepare_batch(batch)
 
-        if num_invalids >= experience_size:
+        num_valids = experience_size - num_invalids
+        if num_valids < 2:
             if self.cfg.with_pbt:
-                log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
+                log.warning("Fewer than two valid samples in the batch; with PBT this can follow a weight replacement")
             else:
-                log.error(f"Learner {self.policy_id=} received an entire batch of invalid data, skipping...")
+                log.warning(f"Learner {self.policy_id=} received only {num_valids} valid samples, skipping this batch")
             return None
         else:
             with self.timing.add_time("train"):

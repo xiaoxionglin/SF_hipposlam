@@ -2,6 +2,7 @@ import os
 from collections import deque
 from typing import Dict, Optional
 
+import deepmind_lab
 import numpy as np
 from tensorboardX import SummaryWriter
 
@@ -39,10 +40,15 @@ class DmLabSpec:
 
 
 DMLAB_ENVS = [
+    DmLabSpec("easy_landmark_maze_noreward", "easy_landmark_maze_noreward"),
+    DmLabSpec("corridor_geometry_noreward", "corridor_geometry_noreward"),
     DmLabSpec("openfield_map2_fixed_loc1", "hippodunk/openfield_map2_fixed_loc1"),
     DmLabSpec("openfield_map2_fixed_loc2", "hippodunk/openfield_map2_fixed_loc2"),
     DmLabSpec("openfield_map2_fixed_loc3", "openfield_map2_fixed_loc3"),
     DmLabSpec("openfield_map2_fixed_loc3_noreward", "openfield_map2_fixed_loc3_noreward"),
+    DmLabSpec("openfield_map2_fixed_reward_dg50", "openfield_map2_fixed_reward_dg50"),
+    DmLabSpec("openfield_map2_fixed_reward_dg51", "openfield_map2_fixed_reward_dg51"),
+    DmLabSpec("openfield_map2_cued_reward5", "openfield_map2_cued_reward5"),
     DmLabSpec(
         "openfield_map2_fixed_loc3_fixedlength_noreward",
         "openfield_map2_fixed_loc3_fixedlength_noreward",
@@ -128,6 +134,9 @@ def make_dmlab_env_impl(
     dmlab_level_caches_per_policy: Dict[PolicyID, DmlabLevelCache] = None,
     **_kwargs,
 ):
+    runfiles_path = getattr(cfg, "dmlab_runfiles_path", None)
+    if runfiles_path:
+        deepmind_lab.set_runfiles_path(os.path.abspath(runfiles_path))
     skip_frames = cfg.env_frameskip
 
     gpu_idx = 0
@@ -146,6 +155,28 @@ def make_dmlab_env_impl(
     log.info(cfg.depth_sensor)
     # depth_sensor=False
     log.info(f"depth_sensor  dmlab env {depth_sensor}")
+    from hpc_runs.intrmotiv_study.geometry import geometry_from_config
+
+    geometry = geometry_from_config(cfg)
+    extra_cfg = dict(spec.extra_cfg)
+    cache_path = cfg.dmlab_level_cache_path
+    if geometry is not None:
+        if cfg.with_pos_obs:
+            raise ValueError("Geometry studies prohibit privileged position as policy input")
+        extra_cfg.update(
+            geometrySeed=geometry["map_seed"],
+            wallRemovalProbability=geometry["wall_removal_probability"],
+            mapRows=geometry.get("entity_shape", [21, 21])[0],
+            mapCols=geometry.get("entity_shape", [21, 21])[1],
+            geometryHash=geometry["sha256"],
+        )
+        if geometry.get("schema") == "intrmotiv/map-geometry/v2":
+            extra_cfg.update(
+                cueLayoutSeed=geometry["cue_layout_seed"],
+                landmarkCues=geometry["cue_mode"],
+                cueLayoutHash=geometry["cue_layout_sha256"],
+            )
+        cache_path = os.path.join(cache_path, geometry.get("cue_layout_sha256", geometry["sha256"]))
     env = DmlabGymEnv_custom(
         task_id,
         level,
@@ -157,13 +188,15 @@ def make_dmlab_env_impl(
         get_dataset_path(cfg),
         cfg.dmlab_with_instructions,
         cfg.dmlab_extended_action_set,
-        cfg.dmlab_level_cache_path,
+        cache_path,
         gpu_idx,
         dmlab_level_caches_per_policy,
-        spec.extra_cfg,
+        extra_cfg,
         render_mode,
+        capture_terminal_observation=getattr(cfg, "controller_learning", "ppo") in ("ddqn", "shadow"),
         depth_sensor=depth_sensor,
         reduced_action_set=cfg.dmlab_reduced_action_set,
+        navigation_action_set=cfg.dmlab_navigation_action_set,
         with_number_instruction=cfg.with_number_instruction,
         with_pos_obs=cfg.with_pos_obs,
         with_pos_telemetry=cfg.exploration_coverage_telemetry,
@@ -173,6 +206,8 @@ def make_dmlab_env_impl(
             or getattr(cfg, "dg_context_history", "ca3") == "ca3_action"
         ),
     )
+
+    env.geometry_record = geometry
 
     if env_config and "env_id" in env_config:
         env.seed(env_config["env_id"])
@@ -191,6 +226,10 @@ def make_dmlab_env_impl(
         exploration_window_steps=getattr(cfg, "exploration_window_steps", 0),
         action_path_integration=getattr(cfg, "hrl_action_path_integration", False),
     )
+    from .controller_transport import ControllerIdentity, enabled
+
+    if enabled(cfg):
+        env = ControllerIdentity(env, int(env_config.get("env_id", 0)) if env_config else 0)
     return env
 
 

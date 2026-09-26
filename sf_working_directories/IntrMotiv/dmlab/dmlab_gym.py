@@ -44,6 +44,17 @@ REDUCED_ACTION_SET = (
     # (0, 0, 0, 0, 1, 0, 0),  # Fire.
 )
 
+NAVIGATION_ACTION_SET = (
+    (0, 0, 0, 1, 0, 0, 0),  # Forward
+    (0, 0, 0, -1, 0, 0, 0),  # Backward
+    (0, 0, -1, 0, 0, 0, 0),  # Strafe Left
+    (0, 0, 1, 0, 0, 0, 0),  # Strafe Right
+    (-20, 0, 0, 0, 0, 0, 0),  # Look Left
+    (20, 0, 0, 0, 0, 0, 0),  # Look Right
+    (-20, 0, 0, 1, 0, 0, 0),  # Look Left + Forward
+    (20, 0, 0, 1, 0, 0, 0),  # Look Right + Forward
+)
+
 EXTENDED_ACTION_SET = (
     (0, 0, 0, 1, 0, 0, 0),  # Forward
     (0, 0, 0, -1, 0, 0, 0),  # Backward
@@ -209,6 +220,7 @@ class DmlabGymEnv(gym.Env):
             self.last_reset_seed = self.random_state.randint(0, 2**31 - 1)
 
         self.dmlab.reset(seed=self.last_reset_seed)
+        self.geometry_verified = False
         self.last_observation = self.format_obs_dict(self.dmlab.observations())
         return self.last_observation, {}
 
@@ -226,7 +238,7 @@ class DmlabGymEnv(gym.Env):
         if not terminated:
             obs_dict = self.format_obs_dict(self.dmlab.observations())
             self.last_observation = obs_dict
-        info = {"num_frames": self.action_repeat}
+        info = {"num_frames": self.action_repeat, "intrmotiv_final_observation_valid": not terminated}
         return self.last_observation, reward, terminated, truncated, info
 
     def render(self) -> Optional[np.ndarray]:
@@ -299,14 +311,17 @@ class DmlabGymEnv_custom(gym.Env):
         render_mode: Optional[str] = None,
         depth_sensor=True,
         reduced_action_set=False,
+        navigation_action_set=False,
         with_number_instruction=True,
         with_pos_obs=False,
         with_pos_telemetry=False,
         with_online_spatial_telemetry=False,
         action_path_integration=False,
+        capture_terminal_observation=False,
     ):
 
         # self.depth_sensor = depth_sensor
+        self.capture_terminal_observation = capture_terminal_observation
         self.width = res_w
         self.height = res_h
 
@@ -343,6 +358,14 @@ class DmlabGymEnv_custom(gym.Env):
         observation_format = [self.main_observation]
         if self.with_instructions:
             observation_format += [self.instructions_observation]
+        self.geometry_expected_hash = (extra_cfg or {}).get("geometryHash")
+        self.cue_layout_expected_hash = (extra_cfg or {}).get("cueLayoutHash")
+        self.geometry_record = None
+        self.geometry_verified = False
+        if self.geometry_expected_hash:
+            observation_format += ["GEOMETRY.ENTITY_LAYER"]
+        if self.cue_layout_expected_hash:
+            observation_format += ["GEOMETRY.CUE_MANIFEST"]
         self.with_pos_obs = with_pos_obs
         self.with_pos_telemetry = with_pos_telemetry
         self.with_online_spatial_telemetry = bool(with_online_spatial_telemetry)
@@ -386,6 +409,9 @@ class DmlabGymEnv_custom(gym.Env):
         if reduced_action_set:
             log.info("using reduced action set!")
             self.action_set = REDUCED_ACTION_SET
+        if navigation_action_set:
+            log.info("using eight-action navigation set!")
+            self.action_set = NAVIGATION_ACTION_SET
         self.action_list = np.array(self.action_set, dtype=np.intc)  # DMLAB requires intc type for actions
 
         self.last_observation = None
@@ -470,6 +496,18 @@ class DmlabGymEnv_custom(gym.Env):
         """SampleFactory traditionally uses 'obs' key for the 'main' observation."""
         env_obs_dict["obs"] = env_obs_dict.pop(self.main_observation)
 
+        entity = env_obs_dict.pop("GEOMETRY.ENTITY_LAYER", None)
+        cue_manifest = env_obs_dict.pop("GEOMETRY.CUE_MANIFEST", None)
+        if getattr(self, "geometry_expected_hash", None):
+            from hpc_runs.intrmotiv_study.geometry import verify_cue_manifest, verify_entity
+
+            if not self.geometry_verified:
+                verify_entity(entity, {"sha256": self.geometry_expected_hash})
+                if getattr(self, "cue_layout_expected_hash", None):
+                    verify_cue_manifest(cue_manifest, self.geometry_record)
+                    if self.geometry_record["cue_layout_sha256"] != self.cue_layout_expected_hash:
+                        raise RuntimeError("Configured cue layout hash differs from geometry record")
+                self.geometry_verified = True
         position = env_obs_dict.pop("DEBUG.POS.TRANS", None)
         rotation = env_obs_dict.pop("DEBUG.POS.ROT", None)
         if position is not None:
@@ -509,6 +547,14 @@ class DmlabGymEnv_custom(gym.Env):
     def _terminal_debug_observations(self):
         """Return terminal debug observations when the DMLab build permits it."""
         try:
+            # The certified binding keeps the final frame after engine shutdown.
+            # Pose telemetry needs this even when PPO does not request a final
+            # policy observation for replay.
+            terminal_reader = getattr(self.dmlab, "terminal_observations", None)
+            if terminal_reader is not None:
+                terminal = terminal_reader()
+                if terminal is not None:
+                    return terminal
             return self.dmlab.observations()
         except Exception:  # DMLab may reject observations after is_running() becomes false.
             return None
@@ -554,6 +600,7 @@ class DmlabGymEnv_custom(gym.Env):
 
         self.previous_action = len(self.action_set)
         self.dmlab.reset(seed=self.last_reset_seed)
+        self.geometry_verified = False
         self.last_observation = self.format_obs_dict(self.dmlab.observations())
         return self.last_observation, {}
 
@@ -573,11 +620,20 @@ class DmlabGymEnv_custom(gym.Env):
         if not terminated:
             obs_dict = self.format_obs_dict(self.dmlab.observations())
             self.last_observation = obs_dict
+        terminal_observation_valid = not terminated
+        if terminated and getattr(self, "capture_terminal_observation", False):
+            terminal_reader = getattr(self.dmlab, "terminal_observations", None)
+            final = terminal_reader() if terminal_reader is not None else self._terminal_debug_observations()
+            if final is not None and self.main_observation in final:
+                # Read the engine after the action and before SF autoresets it.
+                # Never certify the Python-side previous-observation fallback.
+                self.last_observation = self.format_obs_dict(final)
+                terminal_observation_valid = True
         terminal_pose_fresh = True
         if terminated and self.with_pos_telemetry:
-            terminal_pose_fresh = self._refresh_terminal_debug_pose()
+            terminal_pose_fresh = terminal_observation_valid or self._refresh_terminal_debug_pose()
 
-        info = {"num_frames": self.action_repeat}
+        info = {"num_frames": self.action_repeat, "intrmotiv_final_observation_valid": terminal_observation_valid}
         if self.with_pos_telemetry and self.last_debug_position is not None and self.last_debug_rotation is not None:
             # DMLab rotations are (pitch, yaw, roll) in degrees. Keep only the
             # horizontal pose needed by telemetry. This private value is

@@ -42,7 +42,7 @@ def next_dg_event_labels(dg, dones_after, valids, horizon):
     steps = dg.size(1)
     for delta in range(1, min(horizon, steps - 1) + 1):
         end = steps - delta
-        alive[:, :end] &= ~dones_after[:, delta - 1:steps - 1].bool() & valids[:, delta:].bool()
+        alive[:, :end] &= ~dones_after[:, delta - 1 : steps - 1].bool() & valids[:, delta:].bool()
         observed[:, :end] += alive[:, :end].long()
         first = alive[:, :end] & ~hit[:, :end] & dg[:, delta:].gt(0).any(-1)
         outcome[:, :end] = torch.where(first[..., None], dg[:, delta:], outcome[:, :end])
@@ -67,7 +67,8 @@ class DGEventWorldModel(nn.Module):
         self.n_features = n_features
         self.action_count = action_count
         self.network = nn.Sequential(
-            nn.Linear(ca3_size + action_count, hidden_size), nn.ReLU(),
+            nn.Linear(ca3_size + action_count, hidden_size),
+            nn.ReLU(),
             nn.Linear(hidden_size, 2 * n_features + 2),
         )
 
@@ -82,8 +83,8 @@ class DGEventWorldModel(nn.Module):
         n = self.n_features
         return {
             "hit_logit": raw[:, 0],
-            "dg_logits": raw[:, 1:1 + n],
-            "dg_amplitude": F.softplus(raw[:, 1 + n:1 + 2 * n]),
+            "dg_logits": raw[:, 1 : 1 + n],
+            "dg_amplitude": F.softplus(raw[:, 1 + n : 1 + 2 * n]),
             "delay_fraction": raw[:, -1].sigmoid(),
         }
 
@@ -119,16 +120,17 @@ def event_prediction_loss(model, ca3, actions, labels, horizon):
     if positive.any():
         active = target[positive] > 0
         loss = loss + F.binary_cross_entropy_with_logits(raw["dg_logits"][positive], active.float())
-        loss = loss + F.smooth_l1_loss(
-            raw["dg_amplitude"][positive][active].log1p(), target[positive][active].log1p()
-        )
+        loss = loss + F.smooth_l1_loss(raw["dg_amplitude"][positive][active].log1p(), target[positive][active].log1p())
         predicted_delay = 1 + (horizon - 1) * raw["delay_fraction"][positive]
         loss = loss + F.smooth_l1_loss(predicted_delay / horizon, delay[positive] / horizon)
         time_mae = (predicted_delay - delay[positive]).abs().mean()
         dg_accuracy = ((raw["dg_logits"][positive] >= 0) == active).all(-1).float().mean()
     return loss, {
-        "loss": loss.detach(), "usable_count": usable.sum(), "positive_count": positive.sum(),
-        "hit_accuracy": hit_accuracy.detach(), "dg_exact_match": dg_accuracy.detach(),
+        "loss": loss.detach(),
+        "usable_count": usable.sum(),
+        "positive_count": positive.sum(),
+        "hit_accuracy": hit_accuracy.detach(),
+        "dg_exact_match": dg_accuracy.detach(),
         "time_mae_decisions": time_mae.detach(),
         "positive_fraction": positive.sum().float() / usable.sum().clamp_min(1),
     }

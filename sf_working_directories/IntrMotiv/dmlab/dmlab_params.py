@@ -24,6 +24,15 @@ def dmlab_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_dmlab_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    p.add_argument("--dmlab_map_seed", type=int, default=1001)
+    p.add_argument("--dmlab_wall_removal_probability", type=float, default=0.0)
+    p.add_argument("--dmlab_map_rows", type=int, default=21)
+    p.add_argument("--dmlab_map_cols", type=int, default=21)
+    p.add_argument("--dmlab_cue_layout_seed", type=int, default=20260923)
+    p.add_argument("--dmlab_landmark_cues", choices=("rich", "none"), default="rich")
+    p.add_argument(
+        "--dmlab_geometry_manifest", default="", help="Verified geometry archive; empty uses bundled archive"
+    )
 
     p.add_argument("--res_w", default=96, type=int, help="Game frame width after resize")
     p.add_argument("--res_h", default=72, type=int, help="Game frame height after resize")

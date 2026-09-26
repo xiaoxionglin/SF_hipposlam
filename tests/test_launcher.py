@@ -79,6 +79,25 @@ class TestLauncher:
         assert metadata["run_name"] == "batch"
         assert metadata["jobs"] == [{"job_id": "", "status": "generated", "experiment": "00_exp"}]
 
+    def test_slurm_print_only_renders_gpu_resource_directive(self, tmp_path):
+        template = tmp_path / "template.sh"
+        template.write_text("#!/bin/bash\n$GPU_DIRECTIVE\n$CMD\n", encoding="utf-8")
+        workdir = tmp_path / "slurm"
+        args_list = [
+            "--backend=slurm",
+            f"--train_dir={tmp_path / 'train'}",
+            f"--slurm_workdir={workdir}",
+            f"--slurm_sbatch_template={template}",
+            "--slurm_gpus_per_job=1",
+            "--slurm_print_only=True",
+        ]
+        args = launcher_argparser(args_list).parse_args(args_list)
+        description = RunDescription("batch", [Experiment("exp", "echo train", [{}])])
+
+        assert slurm_launcher.run_slurm(description, args) == 0
+        generated = (workdir / "sbatch_00_exp.sh").read_text(encoding="utf-8")
+        assert "#SBATCH --gres=gpu:1" in generated
+
     def test_slurm_submission_failure_is_recorded(self, tmp_path, monkeypatch):
         template = tmp_path / "template.sh"
         template.write_text("#!/bin/bash\n$CMD\n", encoding="utf-8")

@@ -12,7 +12,7 @@ if [[ ! $row_index =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-workspace_root=${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-train}
+workspace_root=${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-corridor-geometry}
 require_workspace_path() {
   local path=$1
   local label=$2
@@ -88,18 +88,37 @@ fi
 
 # NEMO2's node prolog may replace a submitted TMPDIR with /tmp. Set every
 # runtime path again inside the job so the storage policy is deterministic.
-export TMPDIR=$output_dir/tmp
+# Keep native/multiprocessing socket paths below the Unix-domain limit.
+export TMPDIR="$workspace_root/tmp/pf_${SLURM_JOB_ID:-local}_${row_index}"
 export DMLAB_CACHE_DIR=$output_dir/dmlab_cache
 export XDG_CACHE_HOME=$output_dir/cache
 export WANDB_DIR=$output_dir/wandb
 export WANDB_MODE=disabled
+export TORCH_HOME="$workspace_root/IntrMotiv/SF_hipposlam/runtime/cache/torch"
 require_workspace_path "$TMPDIR" "TMPDIR"
 require_workspace_path "$DMLAB_CACHE_DIR" "DMLab cache"
 require_workspace_path "$XDG_CACHE_HOME" "XDG cache"
 require_workspace_path "$WANDB_DIR" "W&B directory"
+require_workspace_path "$TORCH_HOME" "Fixed pretrained-model cache"
 mkdir -p "$output_dir/raw" "$output_dir/slurm" "$TMPDIR" "$DMLAB_CACHE_DIR" "$XDG_CACHE_HOME" "$WANDB_DIR"
 
-cd /home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam
+# sbatch executes a spool copy: BASH_SOURCE alone cannot locate the checkout.
+runtime_source=${INTRMOTIV_RUNTIME_SOURCE:-${SLURM_SUBMIT_DIR:-}}
+if [[ -z $runtime_source ]]; then
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  runtime_source=$(cd "$script_dir/../../.." && pwd)
+fi
+if [[ ! -f $runtime_source/sf_working_directories/IntrMotiv/evaluation/place_fields.py ]]; then
+  echo "Invalid IntrMotiv evaluator source: $runtime_source" >&2
+  exit 2
+fi
+cd "$runtime_source"
+# A direct Python script otherwise resolves an older editable installation.
+export PYTHONPATH="$runtime_source${PYTHONPATH:+:$PYTHONPATH}"
+terminal_binding=${INTRMOTIV_TERMINAL_BINDING:-$workspace_root/IntrMotiv/SF_hipposlam/runtime/controller_terminal_binding_v1}
+if [[ -d $terminal_binding ]]; then
+  export PYTHONPATH="$runtime_source:$terminal_binding${PYTHONPATH:+:$PYTHONPATH}"
+fi
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 export OPENBLAS_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
@@ -118,6 +137,13 @@ if [[ -n ${PLACE_FIELD_REPLAY_PANEL:-} ]]; then
   panel_args+=(--replay-observation-panel "$PLACE_FIELD_REPLAY_PANEL")
 fi
 place_field_max_frames=${PLACE_FIELD_MAX_FRAMES:-10000}
+coverage_args=()
+if [[ ${PLACE_FIELD_COVERAGE_EPISODES:-0} -gt 0 ]]; then
+  coverage_args+=(--coverage-episodes "$PLACE_FIELD_COVERAGE_EPISODES")
+fi
+if [[ ${PLACE_FIELD_RANDOM_COVERAGE:-0} == 1 ]]; then
+  coverage_args+=(--random-coverage)
+fi
 
 /home/fr/fr_xl1014/.conda/envs/SFgit/bin/python \
   sf_working_directories/IntrMotiv/evaluation/place_fields.py \
@@ -127,4 +153,4 @@ place_field_max_frames=${PLACE_FIELD_MAX_FRAMES:-10000}
   --label-suffix "$label_suffix" \
   --max-num-frames "$place_field_max_frames" \
   --no-plots \
-  "${deterministic_args[@]}" "${panel_args[@]}"
+  "${deterministic_args[@]}" "${panel_args[@]}" "${coverage_args[@]}"

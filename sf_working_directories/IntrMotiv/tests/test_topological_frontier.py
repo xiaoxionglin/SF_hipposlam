@@ -6,6 +6,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
+from sf_working_directories.IntrMotiv.dmlab import topological_frontier as tf
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
 from sf_working_directories.IntrMotiv.dmlab.dmlab_gym import DmlabGymEnv_custom
 from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
@@ -85,6 +86,40 @@ def test_least_tested_target_requires_observation_excludes_source_and_breaks_tie
     graph.control_attempts[0, 1] = 1.0
     assert select_least_tested_target(graph, 0, 1.0) == 1
     assert select_least_tested_target(graph, 2, 1.0) == 0
+
+
+def test_reward_manager_updates_final_goal_and_selects_it():
+    graph = PolicyControllableGraph(3)
+    layout = HRLStateLayout(3)
+    topo_layout = TopologicalStateLayout(3)
+    option = torch.zeros(1, 2, hrl_option_state_size(3))
+    topology = torch.zeros(1, 2, topological_state_size(3))
+    option[0, 0, layout.source] = 1
+    option[0, 0, layout.target] = 2  # a temporary next hop
+    topology[0, 0, topo_layout.final_goal] = 3
+    option[0, 1, layout.source] = 1
+    option[0, 1, layout.age] = 1
+    topology[0, 1, topo_layout.final_goal] = 3
+    count = graph.update_reward_goal_values(
+        option, topology, torch.tensor([[10.0, 0.0]]), torch.ones(1, 2, dtype=torch.bool)
+    )
+    assert count == 1
+    assert graph.reward_goal_value[0, 2] == 10
+    assert graph.reward_goal_count[0, 2] == 1
+    assert graph.reward_goal_count[0, 1] == 0
+
+    torch.manual_seed(4)
+    result, next_topology, _ = _manager_step(
+        torch.zeros(1, hrl_option_state_size(3)),
+        torch.zeros(1, topological_state_size(3)),
+        torch.tensor([[1.0, 0.0, 0.0]]),
+        graph,
+        direct_target_selection="reward_value",
+        edge_exploration=True,
+        target_timing="immediate",
+    )
+    assert int(result[0, layout.target].item()) == 3
+    assert int(next_topology[0, topo_layout.final_goal].item()) == 3
 
 
 def test_first_distinct_wrong_outcome_terminates_without_changing_state_shape():
@@ -934,3 +969,26 @@ def test_default_core_state_size_is_unchanged_when_new_flags_are_disabled():
     assert core.topological_state_size == 0
     assert core.action_feature_size == 0
     assert core.total_state_size == 3 * (2 + 3 - 1) + 13 + hrl_option_state_size(3)
+
+
+def test_graph_planning_caches_include_active_set_and_do_not_enter_checkpoints():
+    graph = PolicyControllableGraph(4, ca3_size=4, contextual=True)
+    graph.anchor_valid[:] = True
+    graph.active_goal_mask[:] = True
+    graph.active_generation.copy_(graph.anchor_generation)
+    graph.tctrl[0, 1] = 2
+    graph.edge_confidence[0, 1] = 3
+    graph.control_attempts[0, 1] = 3
+    keys = set(graph.state_dict())
+    first = validated_paths(graph, 0.5)
+    cached = graph._validated_paths_cache
+    second = validated_paths(graph, 0.5)
+    assert graph._validated_paths_cache is cached
+    assert all(torch.equal(left, right) for left, right in zip(first, second))
+    graph.active_goal_mask[1] = False
+    third = validated_paths(graph, 0.5)
+    assert torch.isinf(third[0][0, 1])
+    assert graph._validated_paths_cache is not cached
+    gains = tf._graph_connectivity_gains(graph, reliable_edges(graph, 0.5))
+    assert gains.shape == (4, 4)
+    assert set(graph.state_dict()) == keys

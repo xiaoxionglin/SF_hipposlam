@@ -3,6 +3,7 @@
 import torch
 from torch import Tensor, nn
 
+
 class CA3TargetPredictor(nn.Module):
     """Shadow predictor for target hit probability and conditional hit time."""
 

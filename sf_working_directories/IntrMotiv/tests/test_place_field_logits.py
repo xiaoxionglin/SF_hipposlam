@@ -11,9 +11,35 @@ from sf_working_directories.IntrMotiv.evaluation.analyze_place_field_manifest im
 from sf_working_directories.IntrMotiv.evaluation.place_fields import (
     compute_place_fields,
     compute_pre_threshold_maps,
+    contextual_alias_diagnostics,
     load_checkpoint_dict,
     optional_graph_arrays,
 )
+
+
+def test_contextual_alias_diagnostics_uses_largest_recognized_component():
+    pose = pd.DataFrame(
+        {
+            "x": [150.0, 250.0, 1850.0, 1850.0, 150.0],
+            "y": [150.0, 150.0, 1850.0, 1750.0, 250.0],
+        }
+    )
+    activity = np.asarray(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 0.0],
+            [1.0, 0.0],
+        ]
+    )
+
+    result = contextual_alias_diagnostics(pose, activity, grain=19)
+
+    assert result["contextual_alias_component_count"].tolist() == [2, 0]
+    assert result["contextual_alias_recognized_count"].tolist() == [4, 0]
+    assert np.isclose(result["contextual_alias_off_primary_fraction"][0], 0.25)
+    assert np.isclose(result["contextual_alias_false_accept_fraction"][0], 0.25)
 
 
 def test_pre_threshold_maps_preserve_signed_logits_and_occupancy():
@@ -48,6 +74,12 @@ def test_optional_graph_arrays_preserve_checkpoint_graph_and_assignment_buffers(
         edge_confidence=torch.ones(2, 2),
         control_attempts=torch.full((2, 2), 2.0),
         tctrl=torch.full((2, 2), 3.0),
+        anchor_valid=torch.tensor([True, False]),
+        anchor_generation=torch.tensor([2, 0]),
+        active_goal_mask=torch.tensor([True, False]),
+        active_generation=torch.tensor([2, -1]),
+        confirmation_count=torch.tensor([1, 0]),
+        command_count=torch.tensor([4, 0]),
     )
     passive = SimpleNamespace(
         confidence=torch.full((2, 2), 4.0),
@@ -66,6 +98,12 @@ def test_optional_graph_arrays_preserve_checkpoint_graph_and_assignment_buffers(
         "control_edge_confidence",
         "control_attempts",
         "control_tctrl",
+        "anchor_valid",
+        "anchor_generation",
+        "active_goal_mask",
+        "active_generation",
+        "confirmation_count",
+        "command_count",
         "passive_confidence",
         "passive_elapsed",
         "birth_support",

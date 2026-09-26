@@ -10,7 +10,7 @@ if [[ ! $row_index =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-workspace_root=${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-train}
+workspace_root=${INTRMOTIV_WORKSPACE_ROOT:-/work/classic/fr_xl1014-corridor-geometry}
 require_workspace_path() {
   local path=$1
   local label=$2
@@ -64,7 +64,7 @@ require_workspace_path "$run_dir" "Run directory"
 [[ -f $checkpoint ]] || { echo "Checkpoint does not exist: $checkpoint" >&2; exit 2; }
 [[ -d $run_dir ]] || { echo "Run directory does not exist: $run_dir" >&2; exit 2; }
 
-export TMPDIR=$output_dir/tmp
+export TMPDIR="$workspace_root/tmp/ctrl_${SLURM_JOB_ID:-local}_${row_index}"
 export DMLAB_CACHE_DIR=$output_dir/dmlab_cache
 export XDG_CACHE_HOME=$output_dir/cache
 export WANDB_DIR=$output_dir/wandb
@@ -75,7 +75,18 @@ require_workspace_path "$XDG_CACHE_HOME" "XDG cache"
 require_workspace_path "$WANDB_DIR" "W&B directory"
 mkdir -p "$output_dir/raw" "$output_dir/slurm" "$TMPDIR" "$DMLAB_CACHE_DIR" "$XDG_CACHE_HOME" "$WANDB_DIR"
 
-cd /home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam
+runtime_source=${INTRMOTIV_RUNTIME_SOURCE:-${SLURM_SUBMIT_DIR:-}}
+[[ -f $runtime_source/sf_working_directories/IntrMotiv/evaluation/target_control_interventions.py ]] || {
+  echo "Invalid evaluator source: $runtime_source" >&2; exit 2;
+}
+cd "$runtime_source"
+export PYTHONPATH="$runtime_source${PYTHONPATH:+:$PYTHONPATH}"
+terminal_binding=${INTRMOTIV_TERMINAL_BINDING:-$workspace_root/IntrMotiv/SF_hipposlam/runtime/controller_terminal_binding_v1}
+if [[ -d $terminal_binding ]]; then
+  export PYTHONPATH="$runtime_source:$terminal_binding${PYTHONPATH:+:$PYTHONPATH}"
+fi
+export TORCH_HOME="$workspace_root/IntrMotiv/SF_hipposlam/runtime/cache/torch"
+require_workspace_path "$TORCH_HOME" "Fixed pretrained-model cache"
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 export OPENBLAS_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}

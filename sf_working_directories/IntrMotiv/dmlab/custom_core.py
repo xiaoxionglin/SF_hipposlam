@@ -9,6 +9,7 @@ from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 from sample_factory.model.core import ModelCore, ModelCoreIdentity, ModelCoreRNN
 from sample_factory.utils.typing import Config
 from sample_factory.utils.utils import log
+from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import CA3StateReadout, CausalDGInnovationPredictor
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import ContextualDGFeedback
 from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import (
     RECRUITMENT_HISTORY_SIZE,
@@ -476,6 +477,8 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.R = getattr(cfg, "Hippo_R", 8)
         self.L = getattr(cfg, "Hippo_L", 48)
         self.Hippo_n_feature = getattr(cfg, "Hippo_n_feature", 64)
+        self.reward_instruction_count = int(getattr(cfg, "reward_instruction_count", 0))
+        input_size -= self.reward_instruction_count
         if input_size < self.Hippo_n_feature:
             raise Warning(f"Input size {input_size} must be at least Hippo_n_feature ({self.Hippo_n_feature})")
         self.bypass_size = input_size - self.Hippo_n_feature
@@ -487,6 +490,34 @@ class SimpleSequenceWithBypassCore(ModelCore):
         # Total output dimension when bypass features are concatenated.
         self.base_state_size = self.core_output_size + self.bypass_size
         self.hrl_enabled = bool(getattr(cfg, "hrl_controllable_graph", False))
+        self.fixed_task_conditioning = bool(getattr(cfg, "fixed_task_conditioning", False))
+        if self.fixed_task_conditioning and self.hrl_enabled:
+            raise ValueError("fixed task conditioning bypasses HRL and requires hrl_controllable_graph=False")
+        self.fixed_task_goal_mixture = bool(getattr(cfg, "fixed_task_goal_mixture", False))
+        if self.fixed_task_goal_mixture and not self.fixed_task_conditioning:
+            raise ValueError("fixed task goal mixture requires fixed task conditioning")
+        initial_target = torch.full((self.Hippo_n_feature,), 1.0 / float(self.Hippo_n_feature))
+        if self.fixed_task_goal_mixture:
+            initial_target = torch.zeros(self.Hippo_n_feature)
+            goal_init = getattr(cfg, "fixed_task_goal_init", "nominated")
+            if goal_init == "nominated":
+                target_id = int(getattr(cfg, "fixed_task_target_id", 0))
+                if not 0 <= target_id < self.Hippo_n_feature:
+                    raise ValueError("fixed_task_target_id is outside the DG capacity")
+                initial_target[target_id] = 9.0  # approximately 99.2% on the nominated ID at F64
+            elif goal_init == "uniform_jitter":
+                # The fresh FiLM table starts at zero. Exactly equal mixture
+                # weights preserve row symmetry and cannot identify a goal.
+                generator = torch.Generator().manual_seed(int(getattr(cfg, "seed", 0)) + 1907)
+                initial_target = 0.01 * torch.randn(self.Hippo_n_feature, generator=generator)
+            elif goal_init != "uniform":
+                raise ValueError(f"Unknown fixed_task_goal_init={goal_init}")
+        if self.fixed_task_conditioning and self.reward_instruction_count:
+            initial_target = initial_target.repeat(self.reward_instruction_count, 1)
+            if self.fixed_task_goal_mixture:
+                generator = torch.Generator().manual_seed(int(getattr(cfg, "seed", 0)) + 2907)
+                initial_target += 0.01 * torch.randn(initial_target.shape, generator=generator)
+        self.fixed_task_target = nn.Parameter(initial_target) if self.fixed_task_conditioning else None
         self.hrl_graph_memory = getattr(cfg, "hrl_graph_memory", "episode")
         if self.hrl_graph_memory not in ("episode", "policy_buffer"):
             raise ValueError(f"Unknown hrl_graph_memory={self.hrl_graph_memory}")
@@ -508,7 +539,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.hrl_direct_target_selection = getattr(cfg, "hrl_direct_target_selection", "frontier")
         if self.hrl_control_outcome not in ("target_hit", "first_distinct"):
             raise ValueError(f"Unknown hrl_control_outcome={self.hrl_control_outcome}")
-        if self.hrl_direct_target_selection not in ("frontier", "least_tested", "local_successor"):
+        if self.hrl_direct_target_selection not in ("frontier", "least_tested", "local_successor", "reward_value"):
             raise ValueError(f"Unknown hrl_direct_target_selection={self.hrl_direct_target_selection}")
         self.topological_enabled = self.hrl_manager_mode != "visit_direct"
         self.action_path_integration = bool(getattr(cfg, "hrl_action_path_integration", False))
@@ -568,7 +599,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
         )
         self.action_feature_size = ACTION_FEATURE_SIZE if self.action_path_integration else 0
         self.policy_base_output_size = self.base_state_size - self.action_feature_size - self.context_action_count
-        self.hrl_condition_size = self.Hippo_n_feature if self.hrl_enabled else 0
+        self.hrl_condition_size = self.Hippo_n_feature if (self.hrl_enabled or self.fixed_task_conditioning) else 0
         if self.topological_enabled and self.motion_policy_input:
             self.hrl_condition_size += MOTION_POLICY_SIZE
         if self.topological_enabled and self.landmark_geometry == "se2":
@@ -584,8 +615,51 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.mode_condition_start = self.geometry_condition_start + (
             GEOMETRY_POLICY_SIZE if self.topological_enabled and self.landmark_geometry == "se2" else 0
         )
+        self.readout_mode = getattr(cfg, "ca3_state_readout_mode", "off")
+        self.worker_goal_mode = getattr(cfg, "ca3_worker_goal_mode", "target_id")
+        self.anchor_mode = getattr(cfg, "ca3_graph_anchor_mode", "off")
+        self.contextual_graph_hits = bool(getattr(cfg, "ca3_graph_contextual_hits", False))
+        self.state_readout = None
+        self.innovation_predictor = None
+        if self.readout_mode != "off":
+            state_dim = int(getattr(cfg, "ca3_state_readout_dim", 16))
+            action_count = (
+                5
+                if bool(getattr(cfg, "dmlab_reduced_action_set", False))
+                else (
+                    15
+                    if bool(getattr(cfg, "dmlab_extended_action_set", False))
+                    else (8 if bool(getattr(cfg, "dmlab_navigation_action_set", False)) else 9)
+                )
+            )
+            self.state_readout = CA3StateReadout(
+                self.core_output_size, state_dim, float(getattr(cfg, "ca3_state_readout_lr_scale", 0.2))
+            )
+            self.innovation_predictor = CausalDGInnovationPredictor(
+                state_dim,
+                action_count,
+                int(getattr(cfg, "ca3_state_readout_horizon", 16)),
+                self.Hippo_n_feature,
+                int(getattr(cfg, "ca3_state_readout_hidden_size", 128)),
+                bool(getattr(cfg, "ca3_state_readout_action_conditioning", True)),
+            )
+        contextual_anchors = self.anchor_mode != "off"
+        signature_dim = 0
+        if contextual_anchors:
+            probe_horizons = {1, max(1, self.innovation_predictor.horizon // 2), self.innovation_predictor.horizon}
+            signature_dim = len(probe_horizons) * self.innovation_predictor.action_count * self.Hippo_n_feature
         self.policy_graph = (
-            PolicyControllableGraph(self.Hippo_n_feature)
+            PolicyControllableGraph(
+                self.Hippo_n_feature,
+                self.core_output_size if contextual_anchors else 0,
+                contextual_anchors,
+                int(getattr(cfg, "ca3_context_calibration_capacity", 512)),
+                int(getattr(cfg, "ca3_state_readout_horizon", 16)) if contextual_anchors else 0,
+                signature_dim,
+                getattr(cfg, "ca3_context_candidate_mode", "exclusive"),
+                getattr(cfg, "ca3_context_similarity_space", "probe"),
+                reward_instruction_count=self.reward_instruction_count,
+            )
             if self.hrl_enabled and self.hrl_graph_memory == "policy_buffer"
             else None
         )
@@ -612,6 +686,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 self.context_gradient_mode,
             )
         self.last_dg_activity = None
+        # Evaluation-only observation of the activity that remains after
+        # contextual recognition. The policy never reads this attribute.
+        self.last_contextual_goal_activity = None
         self.last_context_feedback_stats = {}
 
     def _split_state(self, rnn_states):
@@ -688,7 +765,66 @@ class SimpleSequenceWithBypassCore(ModelCore):
             self.L,
         )
 
-    def _update_hrl(self, hrl_state, dg_activity, prev_core_state, action_features=None):
+    def worker_view(self, output: Tensor, goal_ca3: Tensor | None = None, goal_override_mask: Tensor | None = None):
+        """Detached worker-only z-state and optional continuous goal view."""
+        if self.readout_mode != "worker":
+            return output.detach()
+        assert self.state_readout is not None
+        state = self.state_readout(output[:, : self.core_output_size]).detach()
+        bypass = output[:, self.core_output_size : self.target_condition_start]
+        condition = output[:, self.target_condition_start : self.target_condition_start + self.Hippo_n_feature]
+        suffix = output[:, self.target_condition_start + self.Hippo_n_feature :]
+        if self.worker_goal_mode == "target_id":
+            goal = condition
+        else:
+            if self.policy_graph is None:
+                online_goal = output.new_zeros(output.size(0), self.core_output_size)
+            else:
+                online_goal = condition @ self.policy_graph.anchor_ca3.to(condition)
+            if goal_ca3 is not None:
+                mask = goal_override_mask
+                if mask is None:
+                    mask = torch.ones(output.size(0), dtype=torch.bool, device=output.device)
+                online_goal = torch.where(mask.reshape(-1, 1), goal_ca3.to(online_goal), online_goal)
+            goal = online_goal if self.worker_goal_mode == "raw_ca3" else self.state_readout(online_goal).detach()
+        return torch.cat((state, bypass.detach(), goal.detach(), suffix.detach()), dim=-1)
+
+    def fixed_task_condition(self, reward_instruction: Tensor | None = None) -> Tensor:
+        """Return an episode-constant, differentiable mixture of source goals."""
+        if self.fixed_task_target is None:
+            raise RuntimeError("No fixed task condition is configured")
+        target = self.fixed_task_target.softmax(-1) if self.fixed_task_goal_mixture else self.fixed_task_target
+        if self.reward_instruction_count:
+            if reward_instruction is None:
+                raise ValueError("Flat reward mixture requires the current instruction")
+            return torch.matmul(reward_instruction.to(dtype=target.dtype), target)
+        return target
+
+    @property
+    def worker_target_condition_start(self) -> int:
+        if self.readout_mode != "worker":
+            return self.target_condition_start
+        return int(getattr(self.cfg, "ca3_state_readout_dim", 16)) + self.target_condition_start - self.core_output_size
+
+    @property
+    def worker_goal_size(self) -> int:
+        if self.worker_goal_mode == "target_id":
+            return self.Hippo_n_feature
+        if self.worker_goal_mode == "raw_ca3":
+            return self.core_output_size
+        return int(getattr(self.cfg, "ca3_state_readout_dim", 16))
+
+    def _update_hrl(
+        self, hrl_state, dg_activity, prev_core_state, action_features=None, current_ca3=None, reward_instruction=None
+    ):
+        if self.contextual_graph_hits:
+            assert self.policy_graph is not None and self.state_readout is not None and current_ca3 is not None
+            dg_activity = self.policy_graph.contextual_activity(
+                dg_activity, current_ca3, self.state_readout, self.innovation_predictor
+            )
+            self.last_contextual_goal_activity = dg_activity.detach()
+        else:
+            self.last_contextual_goal_activity = None
         if self.hrl_graph_memory == "policy_buffer":
             assert self.policy_graph is not None
             if self.topological_enabled:
@@ -727,6 +863,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     control_outcome=self.hrl_control_outcome,
                     direct_target_selection=self.hrl_direct_target_selection,
                     min_target_visits=self.hrl_min_target_visits,
+                    reward_instruction=(
+                        (reward_instruction.argmax(dim=-1) + 1) if reward_instruction is not None else None
+                    ),
                 )
                 target = condition[:, : self.Hippo_n_feature]
                 geometry = condition[:, self.Hippo_n_feature : self.Hippo_n_feature + GEOMETRY_POLICY_SIZE]
@@ -796,7 +935,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             raise RuntimeError("CA3 target predictor is disabled")
         return self.ca3_predictor(ca3_state, target_onehot)
 
-    def forward(self, head_output, rnn_states):
+    def forward(self, head_output, rnn_states, *, replay_conditions=None, replay_padded=False):
         """
         Args:
             head_output: Either a Tensor of shape (B, input_size) (single time step)
@@ -810,13 +949,60 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 or is a PackedSequence with the time dimension preserved.
               - new_rnn_states is updated similarly.
         """
+        if replay_padded and replay_conditions is None:
+            raise ValueError("Padded outputs require explicit replay conditions")
+        if replay_conditions is not None:
+            if (
+                not isinstance(head_output, PackedSequence)
+                or self.context_feedback is not None
+                or self.graph_recruitment
+            ):
+                raise ValueError(
+                    "Exogenous conditions require finite packed replay without contextual/recruitment state"
+                )
         # Case: head_output is a PackedSequence (multiple time steps)
         if isinstance(head_output, PackedSequence):
             # Unpack the sequence.
             # head_output is a namedtuple with (data, batch_sizes, sorted_indices, unsorted_indices)
             _, batch_sizes, sorted_indices, unsorted_indices = head_output
             padded, lengths = nn.utils.rnn.pad_packed_sequence(head_output)
+            reward_instruction = None
+            if self.reward_instruction_count:
+                reward_instruction = padded[..., -self.reward_instruction_count :]
+                padded = padded[..., : -self.reward_instruction_count]
             T, B, input_size = padded.shape  # T: time steps, B: max batch size
+            if replay_conditions is not None and replay_conditions.shape != (T, B, self.hrl_condition_size):
+                raise ValueError("Incomplete exogenous condition history")
+
+            if replay_conditions is not None:
+                from .ca3_memory import finite_shift_history
+
+                base, hrl, _, _ = self._split_state(rnn_states)
+                if self.action_feature_size or self.context_action_history_size:
+                    raise ValueError("Finite replay does not support contextual action histories")
+                initial_ca3 = base[:, : self.core_output_size].view(B, self.Hippo_n_feature, self.expanded_length)
+                trace = finite_shift_history(
+                    padded[:, :, : self.Hippo_n_feature],
+                    self.R,
+                    self.expanded_length,
+                    initial_state=initial_ca3,
+                )
+                trace = trace.flatten(2)
+                bypass = padded[:, :, self.Hippo_n_feature :]
+                output = torch.cat((trace, bypass, replay_conditions), -1)
+                indices = lengths.to(padded.device) - 1
+                batch_indices = torch.arange(B, device=padded.device)
+                final_base = torch.cat((trace[indices, batch_indices], bypass[indices, batch_indices]), -1)
+                final_state = torch.cat((final_base, hrl), -1)
+                if self.behavior_goal_state_size:
+                    final_state = torch.cat(
+                        (final_state, self._behavior_descriptor(replay_conditions[indices, batch_indices])), -1
+                    )
+                return (
+                    output
+                    if replay_padded
+                    else nn.utils.rnn.pack_padded_sequence(output, lengths, enforce_sorted=False)
+                ), final_state
 
             # Separate core state and bypass part from the recurrent state.
             base_rnn_states, hrl_state, recruitment_history, context_action_history = self._split_state(rnn_states)
@@ -878,11 +1064,21 @@ class SimpleSequenceWithBypassCore(ModelCore):
                         action_valid = padded[t, valid_idx, action_start:action_end]
                     else:
                         action_valid = curr_core.new_zeros((curr_core.size(0), ACTION_FEATURE_SIZE))
-                    hrl_valid, target_valid = self._update_hrl(
-                        hrl_state[valid_idx], curr_core, prev_core_valid, action_valid
-                    )
-                    hrl_state[valid_idx] = hrl_valid
-                    hrl_seq[t, valid_idx] = target_valid
+                    if replay_conditions is None:
+                        hrl_valid, target_valid = self._update_hrl(
+                            hrl_state[valid_idx],
+                            curr_core,
+                            prev_core_valid,
+                            action_valid,
+                            tmp_state[0].flatten(1),
+                            reward_instruction[t, valid_idx] if reward_instruction is not None else None,
+                        )
+                        hrl_state[valid_idx] = hrl_valid
+                        hrl_seq[t, valid_idx] = target_valid
+                    else:
+                        # Historical commands are recorded facts. Reconstruct
+                        # memory without planning new historical manager actions.
+                        hrl_seq[t, valid_idx] = replay_conditions[t, valid_idx]
                 # Save the flattened core state (for all batches) at time t.
                 out_core[t] = new_core_state[0].view(B, self.core_output_size)
             # torch.save(out_core, "./train_dir/rnn_states.pt")
@@ -929,6 +1125,11 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 out_total = out_core
             if self.hrl_enabled:
                 out_total = torch.cat([out_total, hrl_seq], dim=2)
+            elif self.fixed_task_conditioning:
+                fixed_target = self.fixed_task_condition(reward_instruction)
+                if reward_instruction is None:
+                    fixed_target = fixed_target.view(1, 1, -1).expand(T, B, -1)
+                out_total = torch.cat([out_total, fixed_target], dim=2)
 
             # Repack the output using the original lengths.
             if feedback_count:
@@ -941,6 +1142,10 @@ class SimpleSequenceWithBypassCore(ModelCore):
         else:
             # Case: head_output is a plain tensor (single time step)
             B = head_output.size(0)
+            reward_instruction = None
+            if self.reward_instruction_count:
+                reward_instruction = head_output[:, -self.reward_instruction_count :]
+                head_output = head_output[:, : -self.reward_instruction_count]
             core_input = head_output[:, : self.Hippo_n_feature]
             bypass_input = head_output[:, self.Hippo_n_feature :] if self.bypass_size > 0 else None
 
@@ -980,7 +1185,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     action_features = head_output[:, action_start:action_end]
                 else:
                     action_features = core_input.new_zeros((B, ACTION_FEATURE_SIZE))
-                hrl_state, target = self._update_hrl(hrl_state, core_input, core_state, action_features)
+                hrl_state, target = self._update_hrl(
+                    hrl_state, core_input, core_state, action_features, flat_core, reward_instruction
+                )
                 hidden_action_features = self.action_feature_size + self.context_action_count
                 policy_base_out = base_out[:, :-hidden_action_features] if hidden_action_features else base_out
                 out = torch.cat([policy_base_out, target], dim=1)
@@ -996,6 +1203,11 @@ class SimpleSequenceWithBypassCore(ModelCore):
             else:
                 hidden_action_features = self.action_feature_size + self.context_action_count
                 out = base_out[:, :-hidden_action_features] if hidden_action_features else base_out
+                if self.fixed_task_conditioning:
+                    fixed_target = self.fixed_task_condition(reward_instruction)
+                    if reward_instruction is None:
+                        fixed_target = fixed_target.unsqueeze(0).expand(B, -1)
+                    out = torch.cat([out, fixed_target], dim=1)
                 state_parts = [base_out]
                 if self.graph_recruitment:
                     state_parts.append(recruitment_history)
@@ -1980,7 +2192,12 @@ def make_hipposlam_core(cfg: Config, core_input_size: int) -> ModelCore:
                 getattr(cfg, "intrinsic_goal_mode", "none") != "none"
                 or getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
             )
-            core = (FiniteMemoryCore if memory else SimpleSequenceWithBypassCore)(cfg, core_input_size)
+            if getattr(cfg, "dg_goal_input", "none") == "write":
+                from sf_working_directories.IntrMotiv.dmlab.goal_conditioned_dg import GoalConditionedDGCore
+
+                core = GoalConditionedDGCore(cfg, core_input_size)
+            else:
+                core = (FiniteMemoryCore if memory else SimpleSequenceWithBypassCore)(cfg, core_input_size)
         elif cfg.core_name == "BypassSS_binary":
             core = SimpleSequenceWithBypassCore_binary(cfg, core_input_size)
         elif cfg.core_name == "Default":

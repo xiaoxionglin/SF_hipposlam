@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 # from asyncio.sslproto import add_flowcontrol_defaults
 import copy
+import math
 from contextlib import contextmanager
 from email import header
 from logging import warning
@@ -291,6 +294,8 @@ class DGProjection_batchnorm_relu(nn.Module):
         # It deliberately defaults to false so actor inference, value bootstrap,
         # and decoder-only phases can never mutate the shared statistics.
         self._running_stats_update_enabled = False
+        self.freeze_running_stats = False
+        self.calibrate_frozen_on_first_batch = False
         self.last_running_stats_updated = False
         self.last_poststep_calibration_updated = False
         self.last_raw_logits: torch.Tensor | None = None
@@ -462,7 +467,29 @@ class DGProjection_batchnorm_relu(nn.Module):
             self._cached_projection_input = x.detach()
         x = self.project_logits(x)  # Shape: [batch_size, out_features]
         self.last_raw_logits = x
-        if self.batchnorm_semantics == "running_consistent":
+        if self.freeze_running_stats:
+            self.last_running_stats_updated = False
+            if (
+                self.calibrate_frozen_on_first_batch
+                and self.training
+                and self._running_stats_update_enabled
+                and int(self.batchnorm1d.num_batches_tracked.item()) == 0
+            ):
+                # Calibrate a fresh random projection from one unlabeled learner
+                # minibatch, then keep both weights and moments fixed.
+                self._update_running_moments(self.batchnorm1d, x.detach())
+                self.last_running_stats_updated = True
+            x = F.batch_norm(
+                x,
+                self.batchnorm1d.running_mean,
+                self.batchnorm1d.running_var,
+                weight=None,
+                bias=None,
+                training=False,
+                momentum=0.0,
+                eps=self.batchnorm1d.eps,
+            )
+        elif self.batchnorm_semantics == "running_consistent":
             x = self._running_consistent_normalize(x)
         elif self.batchnorm_semantics in ("running_poststep_atomic", "input_centered_atomic"):
             self.last_running_stats_updated = False
@@ -684,6 +711,15 @@ class DGProjectionWithRunningQuantile(nn.Module):
 
 
 class DepthEncoder(Encoder):
+    """Sample depth with a backward-compatible, explicitly selected response.
+
+    Legacy mode preserves the sampled input exactly, including preprocessing.
+    Capped inverse mode restores raw RGBD codes from fixed observation scaling
+    and returns 10 / max(depth, 1). This gives a ten-channel L2 norm of
+    about 1.05 at depth 30 and 0.21 at 150; this is a reference scale, not an
+    empirical match to visual features. Codes are not world distances.
+    """
+
     def __init__(self, cfg, size=10):
         super().__init__(cfg)
 
@@ -693,13 +729,41 @@ class DepthEncoder(Encoder):
         if cfg.encoder_conv_architecture not in ("resnet_impala", "pretrained_resnet", "layer2_resnet18"):
             raise NotImplementedError(f"Unknown resnet architecture {cfg.encoder_conv_architecture}")
 
+        # None lets saved configs from the earlier mode/gain interface load
+        # unchanged even when the parser adds the new field during resume.
+        inverse = getattr(cfg, "depth_sensor_inverse", None)
+        if inverse is None:
+            self.depth_mode = getattr(cfg, "depth_sensor_mode", "legacy")
+            self.depth_gain = float(getattr(cfg, "depth_sensor_gain", 10.0))
+        else:
+            self.depth_mode = "capped_inverse" if inverse else "legacy"
+            self.depth_gain = 10.0
+        if self.depth_mode not in ("legacy", "capped_inverse"):
+            raise ValueError(f"Unknown depth_sensor_mode {self.depth_mode!r}")
+        self.depth_obs_scale = float(getattr(cfg, "obs_scale", 1.0))
+        self.depth_obs_mean = float(getattr(cfg, "obs_subtract_mean", 0.0))
+        if self.depth_mode == "capped_inverse":
+            if not math.isfinite(self.depth_gain) or self.depth_gain <= 0:
+                raise ValueError("depth_sensor_gain must be finite and positive")
+            if not math.isfinite(self.depth_obs_scale) or self.depth_obs_scale <= 0:
+                raise ValueError("capped_inverse requires finite positive obs_scale")
+            if not math.isfinite(self.depth_obs_mean):
+                raise ValueError("capped_inverse requires finite obs_subtract_mean")
+            keys = getattr(cfg, "normalize_input_keys", None)
+            if getattr(cfg, "normalize_input", False) and (keys is None or "obs" in keys):
+                raise ValueError("capped_inverse requires normalize_input=False for obs")
+
         self.downsample = nn.Upsample(size=(1, 10))
 
         self.encoder_out_size = size
 
     def forward(self, obs: Tensor):
-        x = self.downsample(obs)
-        return x
+        depth = self.downsample(obs)
+        if self.depth_mode == "legacy":
+            return depth
+        # ObservationNormalizer applies fixed scaling even with normalize_input=False.
+        depth = depth * self.depth_obs_scale + self.depth_obs_mean
+        return depth.clamp_min(1.0).reciprocal() * self.depth_gain
 
     def get_out_size(self) -> int:
         return self.encoder_out_size
@@ -834,6 +898,9 @@ class HipposlamEncoder(Encoder):
 
         self.with_number_instruction = cfg.with_number_instruction
         self.number_instruction_coef = getattr(cfg, "number_instruction_coef", 1)
+        self.reward_instruction_count = int(getattr(cfg, "reward_instruction_count", 0))
+        if self.reward_instruction_count and not self.with_number_instruction:
+            raise ValueError("Cued reward tasks require number instructions")
         if self.with_number_instruction:
             # repurposed it to encode map number
             self.instructions_lstm_units = 3
@@ -900,6 +967,10 @@ class HipposlamEncoder(Encoder):
                 cfg.Hippo_n_feature,
                 intercept=intercept,
                 batchnorm_semantics=getattr(cfg, "dg_batchnorm_semantics", "legacy_batch"),
+            )
+            self.DG_projection.freeze_running_stats = bool(getattr(cfg, "transfer_freeze_dg", False))
+            self.DG_projection.calibrate_frozen_on_first_batch = bool(
+                getattr(cfg, "transfer_calibrate_frozen_dg", False)
             )
         elif cfg.DG_name == "batchnorm_relu_fixed":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
@@ -969,6 +1040,12 @@ class HipposlamEncoder(Encoder):
             else:
                 self.context_action_count = 9
             self.encoder_out_size += self.context_action_count
+        self.dg_goal_write = getattr(cfg, "dg_goal_input", "none") == "write"
+        if self.dg_goal_write:
+            self.encoder_out_size += int(cfg.Hippo_n_feature)
+        # The new task cue is transported only to the manager. Keeping it out
+        # of DG and worker inputs preserves exact source tensor dimensions.
+        self.encoder_out_size += self.reward_instruction_count
         self.cpu_device = torch.device("cpu")
 
         # log.info("=================================== memory=========================")
@@ -998,10 +1075,23 @@ class HipposlamEncoder(Encoder):
             obs_cnn = obs_dict["obs"][:, :3, :, :]
         else:
             obs_cnn = obs_dict["obs"][:, :, :, :]
-        x = self.basic_encoder(obs_cnn)
+        if "controller_visual" in obs_dict:
+            if any(parameter.requires_grad for parameter in self.basic_encoder.parameters()):
+                raise ValueError("Only a genuinely fixed visual trunk may be cached")
+            x = obs_dict["controller_visual"]
+            if x.size(-1) != self.basic_encoder.get_out_size() or x.dtype != torch.float32:
+                raise ValueError("Invalid exact frozen-trunk cache")
+        else:
+            x = self.basic_encoder(obs_cnn)
+        if getattr(self.cfg, "controller_learning", "ppo") != "ppo":
+            self._controller_visual = x.detach()
 
         if self.with_number_instruction:
             instr = obs_dict[DMLAB_INSTRUCTIONS]
+            if self.reward_instruction_count:
+                # Every reward variant uses source map 3. The source DG and
+                # worker therefore retain their original map-identity input.
+                instr = torch.full_like(instr, 3)
             last_outputs = (
                 torch.nn.functional.one_hot(instr.squeeze(1) - 1, num_classes=3) * self.number_instruction_coef
             )
@@ -1044,7 +1134,11 @@ class HipposlamEncoder(Encoder):
         # feature stream is a controller bypass and is not part of DG credit.
         # Detaching here keeps encoder-only updates local to DG while the
         # unchanged bypass below remains differentiable for PPO.
-        if self.context_feedback == "none":
+        goal_preactivation = None
+        if self.dg_goal_write:
+            goal_preactivation = self.DG_projection.preactivation(x.detach())
+            tmp_out = self.DG_projection.activation(goal_preactivation - self.DG_projection.intercept)
+        elif self.context_feedback == "none":
             tmp_out = self.DG_projection(x.detach())
         else:
             if not isinstance(self.DG_projection, DGProjection_batchnorm_relu):
@@ -1092,6 +1186,16 @@ class HipposlamEncoder(Encoder):
             action_onehot = action_onehot * valid_action.unsqueeze(1).to(dtype=tmp_out.dtype)
             tmp_out = torch.cat((tmp_out, action_onehot), dim=1)
 
+        if self.reward_instruction_count:
+            instruction = obs_dict[DMLAB_INSTRUCTIONS].long().view(-1)
+            if bool(((instruction < 1) | (instruction > self.reward_instruction_count)).any()):
+                raise ValueError("Reward instruction is outside the declared site range")
+            cue = F.one_hot(instruction - 1, self.reward_instruction_count).to(
+                device=tmp_out.device, dtype=tmp_out.dtype
+            )
+            tmp_out = torch.cat((tmp_out, cue), dim=1)
+        if goal_preactivation is not None:
+            tmp_out = torch.cat((tmp_out, goal_preactivation.detach()), dim=1)
         return tmp_out
 
     def get_out_size(self) -> int:

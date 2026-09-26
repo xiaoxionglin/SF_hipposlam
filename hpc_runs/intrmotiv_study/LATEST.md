@@ -1,13 +1,157 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.5.0`
+- Implementation: `1.12.0` (landmark geometry and cue-aware spatial telemetry)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 runtime copy: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/hpc_runs/intrmotiv_study/`
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
 
+## 1.12.0 landmark geometry and cue-aware telemetry
+
+Map geometry v2 adds an optional, privileged cue-site contract while retaining
+the v1 reader for corridor artifacts. Online and offline NPZ files remain schema
+v1 with optional cue arrays. Spatial collection now reports cue visitation,
+traversable-geodesic peak distance, one-to-one cue/peak assignments, raw and
+capacity-normalized cue coverage, and decal/color subsets. Standard field rows
+remain separate from matched-command intervention rows.
+
+The reference implementation is the easy-landmark screen: a fixed native
+11-by-11 entity map produced by DMLab's original random-maze algorithm at 85%
+wall removal. Its 9-by-9 interior has 74 accessible cells, with 10 decals and
+10 colored wall faces plus a same-sites neutral control. Its three StudySpecs,
+exact fingerprints, local native evidence, and
+remaining NEMO2 gates are recorded in
+`06_experiments/easy_landmark_maze_implementation_20260923.md`. Version 1.12.0
+is synchronized to an isolated NEMO2 worktree. The 53-test canonical suite,
+six-test native DMLab suite, and workspace-resident submission audit pass. A
+dedicated 4.6 TB workspace at `/work/classic/fr_xl1014-easy-landmark-maze`
+contains all future landmark artifacts. Six 2M qualification jobs are active
+under StudySpec `546c8aa71462861681537efb5d9a597ebf6ecd3ecc2e8c8700ab038bc5199bc0`
+and must pass before production release.
+
+## 1.11.0 flat tracking identity
+
+New Sample Factory studies declaring workflow 1.11 or later emit `study_id`,
+`study_condition`, and `study_base` by default as
+ordinary saved/W&B configuration fields. `study_condition` is the canonical
+flat, seed-independent dashboard grouping key. Existing studies remain
+byte-for-byte command compatible because earlier declared workflow versions
+default the option off.
+
+The workflow also emits one `wandb_tags` entry equal to `study_condition`.
+Sample Factory duplicates this into `config.wandb_tags`, giving each condition
+one flat list value shared by all seeds. Keep it to that single generated value;
+additional tags would make the complete config list a different group.
+
+The IntrMotiv runtime registers these fields as metadata-only arguments; they
+do not participate in model or environment behavior. A changed StudySpec must
+still be revalidated and reviewed before submission.
+
+
+## 1.10.1 scalar-history export
+
+`collect-online --export-histories` saves every selected scalar event and input
+file provenance during the existing scan. `--loader-backend process` permits an
+execution-only override recorded in analysis metadata without changing the
+training StudySpec. Use these for learning curves and additional windows without
+repeated multi-gigabyte TensorBoard reads. Study definitions remain unchanged.
+
+## 1.10.0 corridor geometry
+
+Adds verified geometry archives, accessible-area episode coverage helpers,
+traversability-aware field components, isolated DMLab runfiles, and wall overlays.
+Existing study/NPZ schemas remain v1; geometry fields are optional additions.
+The 27-run screen and nine-run qualification are `corridor_geometry.study.json`
+and `corridor_geometry_preflight.study.json`. Deployment and qualification
+status: `06_experiments/corridor_geometry_20260919.md`. Do not infer production
+qualification from a rendered plan or a successful unit test.
+
+## 1.9.0 standardized atlas figures — verified CPU2048 regeneration
+
+All online atlas figure recipes now live in `spatial.py`: all-unit normalized
+field pages, colored independent-segment occupancy/trajectory overviews,
+four deterministic segment examples, and directed prospective-outcome matrices.
+The CPU2048 adapter calls these recipes instead of duplicating plotting logic.
+Style identifier: `segmented-atlas/v1`. See the canonical guide for encodings.
+38 tests pass both locally and in the isolated NEMO2 copy (atlas, target
+declarations, and canonical workflow). All 24 CPU2048 entries were regenerated
+at the original 25M comparison, with F16/F64 visual checks and stable figure
+URLs. The scientific tables are unchanged. Shared training code remains
+untouched; do not infer shared-checkout deployment from the analysis version.
+
+For isolated test staging, include both `graph_stabilized_recruitment.study.json`
+and `ca3_memory_novelty_goal.study.json` plus the legacy manifest adapter. An
+initial remote test run failed only because the second fixture was absent;
+the unchanged 38-test suite passed after copying it. The authentication pause
+was resolved by the user's manual OTP login before automated access resumed.
+
+## September 15 canonical source consolidation
+
+September 17 patch: spatial collection now honors all declared telemetry targets,
+including 150M/300M. Previously it intersected them with historical 5M–100M
+defaults, rejecting actual late snapshots and undercounting expected artifacts.
+Regression: `hpc_runs.test_spatial_target_declarations`. The shared training
+checkout is unchanged; use the isolated CPU2048 analysis copy pending deployment.
+
+Workflow 1.8.1 is now in the canonical NEMO2 `SF_hipposlam` checkout on
+`codex/nemo-consolidation-20260915`. Integrated NEMO runtime/workflow/world-model
+verification passed 573 tests with 10 CUDA skips; desktop passed 583 tests.
+Earlier deployment notes below are historical. See the root `infra.md` entry
+and the runtime's `docs/intrmotiv_source_consolidation.md` for retirement records.
+
+## 1.8.1 checkpoint target discovery
+
+Checkpoint discovery now passes the StudySpec's telemetry and intervention
+targets to the existing NEMO2 selector. The old selector defaulted to historical
+5M/25M/50M/75M/100M targets, causing nonstandard preflights and the 150M/300M
+production targets to fail `render-telemetry`. The selector retains its original
+default for legacy callers. Synchronize both `intrmotiv_study/telemetry.py` and
+`evaluation/build_place_field_sweep.py`; focused tests cover custom and late
+horizon targets. Deployed to the isolated `SF_hipposlam_controller_compatibility_20260912`
+checkout: 35 focused canonical/target/audit tests pass remotely. The original
+shared checkout remains at 1.7.1. The real one-row 327,680-frame manifest rendered
+successfully; ordinary Slurm evaluator job 8057320 completed its rollout and
+produced validated DG, worker and pre-threshold maps across six episodes.
+
 ## Deployment status
+
+Version 1.8.0 is staged locally: optional `analysis.loader_backend: "process"`
+uses spawned workers for TensorBoard parsing; the default remains `"thread"`.
+Both backends preserve row order and shared-window semantics, and the CLI
+reports each completed run. All 43 focused tests pass locally, including
+real-event process/thread equivalence and error propagation. Not yet deployed
+or benchmarked on NEMO2; synchronize and rerun tests there before use.
+
+Version 1.7.1 fixes exact run discovery for the standard nested launcher layout
+`RUN_/00_RUN`: an empty outer container is excluded when its declared experiment
+is nested inside. Ancestors with their own config, summary, or checkpoint payload
+and distinct duplicate directories still fail as ambiguous. This is an
+analysis/discovery-only fix; training code and study fingerprints are unchanged.
+
+Synchronized and tested on NEMO2 on 2026-09-11: 41 tests passed locally and
+remotely (canonical, common-window, repeat-8, and DG-capacity suites). Separately,
+the DG-capacity study's analysis tag paths and grouping were corrected after
+checking actual TensorBoard tags. Its revised fingerprint is recorded in the
+interim report; submission audit confirms the original training commands.
+
+Version 1.7.0 adds `collect-online --latest-common`: it loads each run once,
+uses the latest step covered by every declared run and metric, and applies
+`analysis.terminal_width` to that common endpoint. This mode disables scalar
+reservoir sampling and fails on missing histories or empty/nonfinite window
+means. Existing explicit-window and per-run-terminal modes remain available.
+The fixed-reward repeat-8 study is the reference application; its StudySpec and
+fingerprint are unchanged. See the canonical guide for the repeatable command.
+Synchronized to NEMO2 on 2026-09-11; all 35 canonical, common-window, and
+repeat-8 tests passed both locally and on NEMO2.
+
+
+Version 1.6.0 accepts sorted, unique intervention checkpoint targets and
+requires exactly one row per selected condition, seed, and target. This supports
+the DG-capacity study's 75M and 300M intervention panels (54 rows). Single-target
+studies retain their existing row contract. Local canonical/study suite: 30 tests
+passed; NEMO2 synchronization verification is recorded in the DG-capacity launch
+record.
 
 Version 1.5.0 adds optional `telemetry.intervention.where` selection by validated
 RunSpec context. Selected runs receive the intervention checkpoint in the
@@ -93,3 +237,44 @@ changes, then synchronize and test the NEMO2 runtime copy.
   `analysis.max_workers` and defaulting to four workers.
 - Added `audit-submission` for exact matrix, command, job-ID, and workspace-path
   validation against real Sample Factory `jobs.tsv` files.
+
+## Full-system controller qualification
+
+The active clean R5 qualification uses the isolated source
+`/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam_controller_stable_head_20260912`
+with workflow 1.8.1. Study: `hpc_runs/studies/full_system_controller_preflight_r5.study.json`;
+SHA `b68edd0bcb84fd25d2779013e17511c2a97dfb0624741f0a56e48343a6d0d4d9`.
+Its 379 runtime and 5 controller-audit tests pass remotely; canonical print-only
+and submitted audits pass. Both PPO preflights completed and passed DG, frozen
+trunk and spatial telemetry gates. R4 is debugging evidence only after optimizer
+ownership drift was found. The optional collated-input performance candidate
+was not deployed. All six exact GPU reload checks passed in job 8057366; the four DDQN runs
+resumed as 8057362–8057365 and have advanced beyond their saved checkpoints.
+Follow the current experiment record for the final 2M production gate; do not
+reuse historical R4 launch helpers.
+
+## Approved decoder-only waypoint revision
+
+The user replaced goal-write waypoint F64 with goal-independent worker memory
+and the existing target-ID FiLM decoder. See
+`04_implementation/decoder_only_worker_goals_20260912.md`. This supersedes the
+waypoint architecture in the earlier controller qualification section.
+Three new 2M preflights use `full_system_controller_decoder_preflight.study.json`
+(SHA `581955c17e808cffb2a038bbbdaa21da70eb13d6ea9aab6b264124fb5bca5159`),
+jobs 8057437–8057439, isolated `SF_hipposlam_controller_decoder_only_20260912`
+source. Fifty-one focused runtime/workflow tests and submission audits pass.
+The direct R5 cells are unchanged and retained through
+`full_system_controller_direct_qualification.study.json` (SHA
+`fa9df8f17b3bcc1acad2f03458e20621e5ec3274f6afb9f9f32a7f9d26539b85`).
+Require both three-cell qualifications before the revised 18-run production
+matrix. Do not launch the superseded goal-write matrix.
+
+Use the ordinary SF launcher `--submit` after print-only generation.
+`resume_slurm_submission.py` operates on pending rows and skips rows still marked
+`generated`; it is not the first-submission entry point for a print-only manifest.
+
+Decoder-only checkpoint qualification: new waypoint PPO completed 2,048,000
+frames with fixed trunk, learned DG/decoder and finite 1M/2M snapshots. Both
+DDQN arms stopped at 327,680 with identical 1,023 main updates; HER added
+13,077 positions. They resumed as 8057450/8057451. All three exact GPU reloads
+passed in 8057452. See the experiment record for the remaining full 2M gates.

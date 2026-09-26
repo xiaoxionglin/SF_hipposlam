@@ -147,6 +147,27 @@ def build_place_field_manifests(
     return rows, trajectory_rows
 
 
+def select_standard_place_field_rows(study: StudySpec, rows: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
+    """Exclude checkpoints present only to support intervention evaluation.
+
+    The checkpoint inventory is the shared source for both evaluators. This
+    selector preserves the standard five-target trajectory seed plus terminal
+    checkpoints for declared terminal seeds, without scheduling an additional
+    field rollout merely because an intervention needs an earlier checkpoint.
+    """
+    telemetry = study.telemetry
+    target_frames = telemetry["target_frames"]
+    trajectory_seed = int(telemetry.get("trajectory_seed", 99))
+    terminal_seeds = set(telemetry.get("terminal_seeds", [8, 123]))
+    selected = []
+    for row in rows:
+        seed = int(row["seed"])
+        target = int(row["target_frames"])
+        if seed == trajectory_seed or (seed in terminal_seeds and target == target_frames[-1]):
+            selected.append(dict(row))
+    return selected
+
+
 def selected_intervention_runs(study: StudySpec) -> list[RunSpec]:
     intervention = study.telemetry.get("intervention")
     if intervention is None:
@@ -170,7 +191,7 @@ def build_intervention_manifest(
     study: StudySpec,
     rows: Iterable[Mapping[str, str]],
 ) -> list[dict[str, str]]:
-    """Select the declared intervention checkpoint once for every study run.
+    """Select every declared intervention checkpoint once per selected study run.
 
     The intervention manifest deliberately reuses the checkpoint inventory and
     row contract of the standard place-field manifest.  This prevents an
@@ -187,21 +208,22 @@ def build_intervention_manifest(
     target_frames = intervention.get("target_frames")
     if (
         not isinstance(target_frames, list)
-        or len(target_frames) != 1
-        or not isinstance(target_frames[0], int)
-        or target_frames[0] <= 0
+        or not target_frames
+        or any(type(value) is not int or value <= 0 for value in target_frames)
+        or sorted(set(target_frames)) != target_frames
     ):
-        raise SpecError("telemetry.intervention.target_frames must contain one positive integer")
-    target = str(target_frames[0])
-    expected = {(run.condition, str(run.seed)) for run in selected_intervention_runs(study)}
+        raise SpecError("telemetry.intervention.target_frames must contain sorted unique positive integers")
+    expected = {
+        (run.condition, str(run.seed), str(target))
+        for run in selected_intervention_runs(study)
+        for target in target_frames
+    }
     selected = [
-        dict(row)
-        for row in rows
-        if row.get("target_frames") == target and (row.get("condition"), row.get("seed")) in expected
+        dict(row) for row in rows if (row.get("condition"), row.get("seed"), row.get("target_frames")) in expected
     ]
-    observed = [(row.get("condition"), row.get("seed")) for row in selected]
+    observed = [(row.get("condition"), row.get("seed"), row.get("target_frames")) for row in selected]
     if len(observed) != len(set(observed)):
-        raise SpecError("intervention manifest contains duplicate condition/seed rows")
+        raise SpecError("intervention manifest contains duplicate condition/seed/target rows")
     if set(observed) != expected:
         missing = sorted(expected - set(observed))
         unexpected = sorted(set(observed) - expected)
@@ -222,11 +244,15 @@ def discover_nemo_checkpoints(study: StudySpec, batch_root: Path) -> list[Checkp
     except ImportError as error:
         raise RuntimeError("render-telemetry must run from the NEMO2 SF_hipposlam checkout") from error
 
+    targets = sorted(
+        set(study.telemetry["target_frames"])
+        | set((study.telemetry.get("intervention") or {}).get("target_frames", []))
+    )
     inventory: list[CheckpointRecord] = []
     run_directories = discover_run_directories(study, batch_root)
     for run in study.expand_runs():
         run_dir = run_directories[run.name]
-        for target, checkpoint in select_checkpoints(run_dir):
+        for target, checkpoint in select_checkpoints(run_dir, target_frames=targets):
             inventory.append(
                 CheckpointRecord(
                     run_name=run.name,

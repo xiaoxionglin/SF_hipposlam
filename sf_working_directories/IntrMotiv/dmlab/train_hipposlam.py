@@ -113,6 +113,48 @@ def maybe_overwrite_rnn_size(cfg):
     cfg.wandb_step_metric_namespaces = ("intrmotiv",)
     cfg.head_l1_size = int(cfg.Hippo_n_feature)
 
+    readout_mode = getattr(cfg, "ca3_state_readout_mode", "off")
+    goal_mode = getattr(cfg, "ca3_worker_goal_mode", "target_id")
+    anchor_mode = getattr(cfg, "ca3_graph_anchor_mode", "off")
+    if readout_mode != "off":
+        if getattr(cfg, "core_name", "BypassSS") != "BypassSS":
+            raise ValueError("CA3 predictive readout requires core_name=BypassSS")
+        if int(cfg.ca3_state_readout_dim) <= 0 or int(cfg.ca3_state_readout_horizon) <= 0:
+            raise ValueError("CA3 readout dimension and horizon must be positive")
+        if int(cfg.ca3_state_readout_horizon) >= int(cfg.recurrence):
+            raise ValueError("CA3 prediction horizon must be smaller than recurrence")
+        if not 0.0 < float(cfg.ca3_state_readout_lr_scale) <= 1.0:
+            raise ValueError("CA3 readout LR scale must be in (0, 1]")
+        if float(cfg.ca3_state_readout_var_coeff) < 0 or float(cfg.ca3_state_readout_cov_coeff) < 0:
+            raise ValueError("CA3 readout variance/covariance coefficients must be nonnegative")
+    if goal_mode != "target_id" and readout_mode != "worker":
+        raise ValueError("Continuous CA3 goals require ca3_state_readout_mode=worker")
+    if goal_mode != "target_id" and getattr(cfg, "controller_replay_state", "reconstruct") != "stored":
+        raise ValueError("Continuous-goal HER requires stored canonical CA3 endpoints")
+    if anchor_mode != "off":
+        if readout_mode == "off":
+            raise ValueError("Contextual anchors require the predictive CA3 readout")
+        if not (
+            getattr(cfg, "hrl_controllable_graph", False)
+            and getattr(cfg, "hrl_graph_memory", "episode") == "policy_buffer"
+            and getattr(cfg, "hrl_target_timing", "delayed") == "immediate"
+        ):
+            raise ValueError("Contextual anchors require immediate policy-buffer HRL")
+        if getattr(cfg, "controller_learning", "ppo") != "ddqn":
+            raise ValueError("Contextual anchor maintenance currently requires the stored-DDQN learner")
+        if int(cfg.ca3_context_calibration_min_pairs) > int(cfg.ca3_context_calibration_capacity):
+            raise ValueError("Calibration min pairs cannot exceed its bounded capacity")
+        if not 0.0 <= float(cfg.ca3_context_calibration_quantile) <= 1.0:
+            raise ValueError("Calibration quantile must be in [0, 1]")
+        if not 0.0 < float(cfg.ca3_graph_anchor_ema_alpha) <= 1.0:
+            raise ValueError("EMA anchor alpha must be in (0, 1]")
+        if int(cfg.ca3_graph_anchor_ema_min_confirmations) < 1:
+            raise ValueError("EMA anchors require at least one confirmation")
+        if float(cfg.ca3_graph_anchor_ema_margin) < 0:
+            raise ValueError("EMA anchor margin must be nonnegative")
+    if getattr(cfg, "ca3_graph_contextual_hits", False) and anchor_mode == "off":
+        raise ValueError("Contextual graph hits require contextual anchors")
+
     manager_mode = getattr(cfg, "hrl_manager_mode", "visit_direct")
     topological = manager_mode != "visit_direct"
     graph_recruitment = bool(getattr(cfg, "dg_orthogonal_recruitment", False)) and (
@@ -207,8 +249,8 @@ def maybe_overwrite_rnn_size(cfg):
         raise ValueError("Motion policy input requires action path integration")
     if getattr(cfg, "hrl_landmark_geometry", "none") != "none" and not topological:
         raise ValueError("Landmark geometry requires a topological frontier manager")
-    if getattr(cfg, "hrl_edge_exploration", False) and manager_mode != "control_graph":
-        raise ValueError("Connectivity-aware edge exploration requires hrl_manager_mode=control_graph")
+    if getattr(cfg, "hrl_edge_exploration", False) and manager_mode not in ("control_graph", "frontier_waypoint"):
+        raise ValueError("Edge exploration requires a waypoint or control_graph manager")
     goal_conditioning = getattr(cfg, "hrl_goal_conditioning", "legacy")
     intrinsic_goal = getattr(cfg, "intrinsic_goal_mode", "none") != "none"
     memory_inhibition = getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
@@ -227,8 +269,50 @@ def maybe_overwrite_rnn_size(cfg):
             raise ValueError("Intrinsic goals require additive/FiLM target identity and a positive horizon")
         if getattr(cfg, "decoder_reward_gate", "none") != "none":
             raise ValueError("Goal cells use their own arrival reward")
+    fixed_task_conditioning = bool(getattr(cfg, "fixed_task_conditioning", False))
+    transfer_path = getattr(cfg, "transfer_model_path", None)
+    transfer_scope = getattr(cfg, "transfer_scope", "none")
+    if bool(transfer_path) != (transfer_scope != "none"):
+        raise ValueError("transfer_model_path and a non-none transfer_scope must be supplied together")
+    if transfer_scope == "task_general" and (
+        not bool(getattr(cfg, "dmlab_navigation_action_set", False))
+        or bool(getattr(cfg, "dmlab_reduced_action_set", False))
+        or bool(getattr(cfg, "dmlab_extended_action_set", False))
+    ):
+        raise ValueError("task_general transfer requires the ordered navigation-eight action interface")
+    # A fresh frozen DG is a representation control. Its random projection
+    # stays fixed; optional one-batch moment calibration precedes frozen use.
+    if getattr(cfg, "transfer_calibrate_frozen_dg", False) and not (
+        transfer_scope == "none" and getattr(cfg, "transfer_freeze_dg", False)
+    ):
+        raise ValueError("Frozen DG calibration requires a fresh frozen DG")
+    if getattr(cfg, "transfer_freeze_worker", False) and transfer_scope != "policy":
+        raise ValueError("transfer_freeze_worker requires transferred policy weights")
+    if getattr(cfg, "transfer_graph", False) and (
+        transfer_scope != "policy" or not getattr(cfg, "hrl_controllable_graph", False)
+    ):
+        raise ValueError("transfer_graph requires policy transfer and an HRL graph")
+    if getattr(cfg, "fixed_task_goal_mixture", False) and not fixed_task_conditioning:
+        raise ValueError("fixed_task_goal_mixture requires fixed_task_conditioning")
+    if getattr(cfg, "env", "") == "openfield_map2_cued_reward5":
+        if int(getattr(cfg, "reward_instruction_count", 0)) != 5 or not cfg.with_number_instruction:
+            raise ValueError("The five-site reward level requires five number-instruction channels")
+    if getattr(cfg, "hrl_direct_target_selection", "frontier") == "reward_value":
+        if (
+            not getattr(cfg, "hrl_controllable_graph", False)
+            or getattr(cfg, "hrl_graph_memory", "episode") != "policy_buffer"
+            or manager_mode != "frontier_waypoint"
+            or not getattr(cfg, "hrl_edge_exploration", False)
+            or getattr(cfg, "advantage_reward_source", None) != "external"
+            or getattr(cfg, "with_vtrace", False)
+        ):
+            raise ValueError("Reward goal selection requires external-return waypoint PPO with a policy graph")
+    if fixed_task_conditioning and (getattr(cfg, "hrl_controllable_graph", False) or intrinsic_goal):
+        raise ValueError("Fixed task conditioning requires graph-free, non-intrinsic training")
+    if fixed_task_conditioning and goal_conditioning != "target_id_film":
+        raise ValueError("Fixed task conditioning requires hrl_goal_conditioning=target_id_film")
     if goal_conditioning in ("target_trace", "target_id_film"):
-        if not getattr(cfg, "hrl_controllable_graph", False) and not intrinsic_goal:
+        if not getattr(cfg, "hrl_controllable_graph", False) and not intrinsic_goal and not fixed_task_conditioning:
             raise ValueError("Custom goal conditioning requires controllable-graph HRL")
         if getattr(cfg, "hrl_target_timing", "delayed") != "immediate":
             raise ValueError("Custom goal conditioning requires immediate behavior targets")
@@ -296,6 +380,19 @@ def maybe_overwrite_rnn_size(cfg):
             # conditioning this stores target id, four geometry values, and
             # mode id; otherwise it stores only target id.
             rnn_size += 1 + GEOMETRY_POLICY_SIZE + 1 if getattr(cfg, "hrl_behavior_mode_condition", False) else 1
+        if getattr(cfg, "dg_goal_input", "none") == "write":
+            if (
+                cfg.core_name != "BypassSS"
+                or not (getattr(cfg, "hrl_controllable_graph", False) or fixed_task_conditioning)
+                or getattr(cfg, "hrl_target_timing", "delayed") != "immediate"
+                or getattr(cfg, "hrl_graph_memory", "episode") != "policy_buffer"
+                or getattr(cfg, "dg_context_feedback", "none") != "none"
+                or getattr(cfg, "ppo_dg_gradient", "stop") not in ("stop", "joint")
+            ):
+                raise ValueError(
+                    "DG goal writes require immediate policy-buffer BypassSS, no context feedback, and task conditioning"
+                )
+            rnn_size += hippo_n_feature * (R + L - 1)
         cfg.cli_args["rnn_size"] = rnn_size
         cfg.rnn_size = rnn_size
 
@@ -317,6 +414,30 @@ def maybe_overwrite_rnn_size(cfg):
         cfg.rnn_persistent_state_size = 0
     if intrinsic_goal:
         cfg.rnn_persistent_state_size = 1
+    if getattr(cfg, "controller_learning", "ppo") != "ppo":
+        from .controller_transport import validate_controller_config
+
+        validate_controller_config(cfg)
+        n = int(cfg.Hippo_n_feature)
+        context_size = hrl_option_state_size(n) + topological_state_size(n) + 1
+        cfg.extra_policy_output_shapes += (
+            ("controller_fresh_version", [1]),
+            ("controller_context", [context_size]),
+            ("controller_condition", [n]),
+            ("controller_anchor_generation", [1]),
+            ("controller_input_state", [int(cfg.rnn_size)]),
+            ("controller_memory_stats", [3]),
+        )
+        if getattr(cfg, "controller_replay_state", "reconstruct") == "stored":
+            cfg.extra_policy_output_shapes += (("controller_worker_state", [int(cfg.rnn_size) - context_size]),)
+        if cfg.controller_cache_visual:
+            if cfg.encoder_conv_architecture != "layer2_resnet18":
+                raise ValueError("Exact visual cache dimensions require layer2_resnet18")
+            # Layer2 has 128 channels; the original stem/layer2/pool use
+            # four padded stride-two reductions. Actual encoder width is
+            # also checked when using the cached features.
+            visual_size = 128 * ((int(cfg.res_h) + 15) // 16) * ((int(cfg.res_w) + 15) // 16)
+            cfg.extra_policy_output_shapes += (("controller_visual", [visual_size]),)
 
 
 def parse_dmlab_args(argv=None, evaluation=False):
