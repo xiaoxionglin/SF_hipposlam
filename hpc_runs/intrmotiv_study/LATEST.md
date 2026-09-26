@@ -3,7 +3,7 @@
 - Implementation: `1.14.0` (planned-frame milestones, spatial target validation, verified evaluation grids)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
-- NEMO2 verified 1.13.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/default_audit_verified/hpc_runs/intrmotiv_study/` (1.14.0 qualification pending)
+- NEMO2 verified 1.14.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/global_defaults_v114/hpc_runs/intrmotiv_study/`
 - NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
@@ -26,8 +26,11 @@ allocated workspace. Version 1.14 StudySpecs that enable online spatial
 telemetry must declare their snapshot targets, and the validator checks that
 these match the runtime setting, including its automatic cadence. The
 offline place-field evaluator now derives its grid and bounds from verified
-geometry: 19-by-19 for the corridor and 9-by-9 for the landmark map. A native
-NEMO2 landmark preflight remains the release gate for that evaluator change.
+geometry: 19-by-19 for the corridor and 9-by-9 for the landmark map. NEMO2
+preflight job `8218673` completed with exit code zero and wrote a 9-by-9 NPZ
+with bounds `[100, 1000, 100, 1000]`, matched geometry and pre-threshold
+arrays, and a valid summary. The 12-row 10k-decision plan passed print-only
+validation but was not submitted.
 
 ## 1.13.0 depth-default compatibility
 
