@@ -1,5 +1,6 @@
 import sys
 from multiprocessing.context import BaseContext
+from pathlib import Path
 from typing import Optional
 
 from tensorboardX import SummaryWriter
@@ -446,6 +447,13 @@ def parse_dmlab_args(argv=None, evaluation=False):
     add_dmlab_env_args(parser)
     hipposlam_override_defaults(parser)
     cfg = parse_full_cfg(parser, argv)
+    # Keep a cache beside run artifacts rather than writing into the source
+    # checkout (which is on the small home filesystem on NEMO2).
+    if "dmlab_level_cache_path" not in cfg.cli_args:
+        cfg.dmlab_level_cache_path = str(Path(cfg.train_dir).expanduser().resolve() / "runtime" / "dmlab_cache")
+    # A deliberately requested time schedule keeps its historical meaning.
+    if "checkpoint_frame_targets" not in cfg.cli_args and cfg.save_milestones_sec > 0:
+        cfg.checkpoint_frame_targets = ""
     maybe_overwrite_rnn_size(cfg)
     return cfg
 

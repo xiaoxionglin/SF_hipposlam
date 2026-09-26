@@ -33,7 +33,7 @@ def parse_args():
     parser.add_argument("--max-num-frames", type=int, default=50000)
     parser.add_argument("--coverage-episodes", type=int, default=0)
     parser.add_argument("--random-coverage", action="store_true")
-    parser.add_argument("--grain", type=int, default=19)
+    parser.add_argument("--grain", type=int, default=None, help="Grid resolution; defaults to verified map geometry")
     parser.add_argument("--checkpoint-rank", type=int, default=1, help="0=newest, 1=second-newest, etc.")
     parser.add_argument(
         "--checkpoint",
@@ -57,6 +57,26 @@ def parse_args():
         help="Force one landmark command during a common observation-panel replay",
     )
     return parser.parse_args()
+
+
+def evaluation_grid(cfg, requested_grain=None):
+    """Match the evaluator grid to verified map cells when available."""
+    from hpc_runs.intrmotiv_study.geometry import geometry_from_config, geometry_payload
+
+    record = geometry_from_config(cfg)
+    if record is None:
+        grain = 19 if requested_grain is None else requested_grain
+        if grain <= 0:
+            raise ValueError("grain must be positive")
+        return grain, (XBOUND, YBOUND), {}
+    mask = np.asarray(record["accessible_mask"])
+    if mask.ndim != 2 or mask.shape[0] != mask.shape[1]:
+        raise ValueError("the place-field evaluator requires a square geometry grid")
+    grain = int(mask.shape[0])
+    if requested_grain is not None and requested_grain != grain:
+        raise ValueError(f"grain {requested_grain} disagrees with verified map grid {grain}")
+    x_min, x_max, y_min, y_max = record["bounds"]
+    return grain, ((x_min, x_max), (y_min, y_max)), geometry_payload(record)
 
 
 def run_label(run_dir: pathlib.Path) -> str:
@@ -222,7 +242,9 @@ def optional_graph_arrays(actor_critic) -> dict[str, np.ndarray]:
     return arrays
 
 
-def contextual_alias_diagnostics(pose: pd.DataFrame, activity: np.ndarray, grain: int) -> dict[str, np.ndarray]:
+def contextual_alias_diagnostics(
+    pose: pd.DataFrame, activity: np.ndarray, grain: int, bounds=None
+) -> dict[str, np.ndarray]:
     """Measure spatial fragmentation of prediction-recognized active goals.
 
     Coordinates are consumed only here, after the frozen rollout. They never
@@ -239,10 +261,8 @@ def contextual_alias_diagnostics(pose: pd.DataFrame, activity: np.ndarray, grain
     component_count = np.zeros(activity.shape[1], dtype=np.int16)
     recognized_count = recognized.sum(axis=0, dtype=np.int64)
     off_primary_fraction = np.zeros(activity.shape[1], dtype=np.float32)
-    bins = (
-        np.linspace(*XBOUND, grain + 1),
-        np.linspace(*YBOUND, grain + 1),
-    )
+    bounds = bounds or (XBOUND, YBOUND)
+    bins = tuple(np.linspace(*axis, grain + 1) for axis in bounds)
     x_bin = np.digitize(pose["x"].to_numpy(), bins[0]) - 1
     y_bin = np.digitize(pose["y"].to_numpy(), bins[1]) - 1
     in_bounds = (x_bin >= 0) & (x_bin < grain) & (y_bin >= 0) & (y_bin < grain)
@@ -480,11 +500,9 @@ def rollout_dg(
     return cfg, checkpoint, pose, dg, pre_threshold_logits, arrays
 
 
-def _occupancy_corrected_maps(pose: pd.DataFrame, values: np.ndarray, grain: int):
-    bins = (
-        np.linspace(*XBOUND, grain + 1),
-        np.linspace(*YBOUND, grain + 1),
-    )
+def _occupancy_corrected_maps(pose: pd.DataFrame, values: np.ndarray, grain: int, bounds=None):
+    bounds = bounds or (XBOUND, YBOUND)
+    bins = tuple(np.linspace(*axis, grain + 1) for axis in bounds)
     occupancy = np.histogramdd((pose["x"], pose["y"]), bins=bins, density=False)[0]
     fields = np.zeros((grain, grain, values.shape[1]), dtype=np.float64)
     for i in range(values.shape[1]):
@@ -495,18 +513,20 @@ def _occupancy_corrected_maps(pose: pd.DataFrame, values: np.ndarray, grain: int
     return occupancy, rate_maps
 
 
-def compute_place_fields(pose: pd.DataFrame, dg: np.ndarray, grain: int):
-    occupancy, rate_maps = _occupancy_corrected_maps(pose, dg, grain)
+def compute_place_fields(pose: pd.DataFrame, dg: np.ndarray, grain: int, bounds=None):
+    occupancy, rate_maps = _occupancy_corrected_maps(pose, dg, grain, bounds)
     si = np.array([spatial_information(rate_maps[:, :, i], occupancy) for i in range(dg.shape[1])])
     active_fraction = (dg > 0).mean(axis=0)
     return occupancy, rate_maps, si, active_fraction
 
 
-def spatial_details_for_artifact(pose, activity, grain):
+def spatial_details_for_artifact(pose, activity, grain, bounds=None):
     """Adapt workflow [y,x] arrays to the evaluator's stable [x,y] contract."""
-    from hpc_runs.intrmotiv_study.spatial_contract import calculate_place_field_details
+    from hpc_runs.intrmotiv_study.spatial_contract import SpatialBounds, calculate_place_field_details
 
-    details = calculate_place_field_details(pose[["x", "y", "rot_y"]].to_numpy(), activity, grain=grain)
+    bounds = bounds or (XBOUND, YBOUND)
+    spatial_bounds = SpatialBounds(*bounds[0], *bounds[1])
+    details = calculate_place_field_details(pose[["x", "y", "rot_y"]].to_numpy(), activity, spatial_bounds, grain)
     for key in ("occupancy", "rate_maps", "smoothed_rate_maps"):
         details[key] = details[key].swapaxes(0, 1)
     details["field_component_labels"] = details["field_component_labels"].swapaxes(1, 2)
@@ -514,19 +534,20 @@ def spatial_details_for_artifact(pose, activity, grain):
     return details
 
 
-def compute_pre_threshold_maps(pose: pd.DataFrame, logits: np.ndarray, grain: int):
+def compute_pre_threshold_maps(pose: pd.DataFrame, logits: np.ndarray, grain: int, bounds=None):
     """Return occupancy-corrected continuous-logit maps for field diagnosis."""
-    occupancy, rate_maps = _occupancy_corrected_maps(pose, logits, grain)
+    occupancy, rate_maps = _occupancy_corrected_maps(pose, logits, grain, bounds)
     return occupancy, rate_maps, logits.mean(axis=0), logits.std(axis=0)
 
 
-def plot_run_grid(rate_maps, occupancy, si, active_fraction, title, out_path):
+def plot_run_grid(rate_maps, occupancy, si, active_fraction, title, out_path, bounds=None):
     import matplotlib as mpl
     import matplotlib.pyplot as plt
 
     mpl.rcParams["pdf.fonttype"] = 42
     mpl.rcParams["font.size"] = 14
 
+    bounds = bounds or (XBOUND, YBOUND)
     n_units = rate_maps.shape[-1]
     n_cols = min(8, max(4, int(math.ceil(math.sqrt(n_units)))))
     n_rows = int(math.ceil(n_units / n_cols))
@@ -542,7 +563,7 @@ def plot_run_grid(rate_maps, occupancy, si, active_fraction, title, out_path):
             continue
         data = rate_maps[:, :, i].T.copy()
         data[occ_mask] = np.nan
-        im = ax.imshow(data, origin="lower", extent=[*XBOUND, *YBOUND], cmap="viridis", vmin=0, vmax=vmax)
+        im = ax.imshow(data, origin="lower", extent=[*bounds[0], *bounds[1]], cmap="viridis", vmin=0, vmax=vmax)
         ax.set_title(f"DG {i}  SI={si[i]:.2f}  act={active_fraction[i]:.3f}", fontsize=11)
     cbar = fig.colorbar(im, ax=axes[:n_units], fraction=0.025, pad=0.01)
     cbar.set_label("mean DG activation")
@@ -551,7 +572,7 @@ def plot_run_grid(rate_maps, occupancy, si, active_fraction, title, out_path):
     plt.close(fig)
 
 
-def plot_pre_threshold_logit_grid(rate_maps, occupancy, mean_logits, std_logits, title, out_path):
+def plot_pre_threshold_logit_grid(rate_maps, occupancy, mean_logits, std_logits, title, out_path, bounds=None):
     """Plot continuous DG logits on a symmetric scale; gray cells were unvisited."""
     import matplotlib as mpl
     import matplotlib.pyplot as plt
@@ -559,6 +580,7 @@ def plot_pre_threshold_logit_grid(rate_maps, occupancy, mean_logits, std_logits,
     mpl.rcParams["pdf.fonttype"] = 42
     mpl.rcParams["font.size"] = 14
 
+    bounds = bounds or (XBOUND, YBOUND)
     n_units = rate_maps.shape[-1]
     n_cols = min(8, max(4, int(math.ceil(math.sqrt(n_units)))))
     n_rows = int(math.ceil(n_units / n_cols))
@@ -574,7 +596,7 @@ def plot_pre_threshold_logit_grid(rate_maps, occupancy, mean_logits, std_logits,
             continue
         data = rate_maps[:, :, i].T.copy()
         data[~occupied] = np.nan
-        im = ax.imshow(data, origin="lower", extent=[*XBOUND, *YBOUND], cmap="coolwarm", vmin=-vmax, vmax=vmax)
+        im = ax.imshow(data, origin="lower", extent=[*bounds[0], *bounds[1]], cmap="coolwarm", vmin=-vmax, vmax=vmax)
         ax.set_title(f"DG {i}  mean={mean_logits[i]:.2f}  std={std_logits[i]:.2f}", fontsize=11)
     cbar = fig.colorbar(im, ax=axes[:n_units], fraction=0.025, pad=0.01)
     cbar.set_label("mean pre-threshold DG logit")
@@ -631,8 +653,11 @@ def main():
             replay_panel=args.replay_observation_panel,
             panel_goal=args.panel_goal,
         )
-        occupancy, rate_maps, si, active_fraction = compute_place_fields(pose, dg, args.grain)
+        grain, bounds, geometry = evaluation_grid(cfg, args.grain)
+        occupancy, rate_maps, si, active_fraction = compute_place_fields(pose, dg, grain, bounds)
         artifact = {
+            "grain": grain,
+            "bounds": np.asarray([*bounds[0], *bounds[1]]),
             "occupancy": occupancy,
             "rate_maps": rate_maps,
             "spatial_information": si,
@@ -656,7 +681,7 @@ def main():
             )
         if "worker_dg_activity" in graph_arrays:
             worker = graph_arrays["worker_dg_activity"]
-            _, worker_maps, worker_si, worker_fraction = compute_place_fields(pose, worker, args.grain)
+            _, worker_maps, worker_si, worker_fraction = compute_place_fields(pose, worker, grain, bounds)
             artifact.update(
                 worker_rate_maps=worker_maps,
                 worker_spatial_information=worker_si,
@@ -665,12 +690,12 @@ def main():
             artifact.update(
                 {
                     "worker_" + key: value
-                    for key, value in spatial_details_for_artifact(pose, worker, args.grain).items()
+                    for key, value in spatial_details_for_artifact(pose, worker, grain, bounds).items()
                 }
             )
         if "contextual_goal_activity" in graph_arrays:
             contextual = graph_arrays["contextual_goal_activity"]
-            alias = contextual_alias_diagnostics(pose, contextual, args.grain)
+            alias = contextual_alias_diagnostics(pose, contextual, grain, bounds)
             artifact.update(alias)
             eligible = alias["contextual_alias_recognized_count"] > 0
             alias_summary = {
@@ -692,13 +717,13 @@ def main():
         pre_threshold_summary = {}
         if pre_threshold_logits is not None:
             _, pre_threshold_maps, pre_threshold_mean, pre_threshold_std = compute_pre_threshold_maps(
-                pose, pre_threshold_logits, args.grain
+                pose, pre_threshold_logits, grain, bounds
             )
             pre_threshold_above_fraction = (pre_threshold_logits > float(cfg.DG_BN_intercept)).mean(axis=0)
             raw_dg = np.maximum(pre_threshold_logits - float(cfg.DG_BN_intercept), 0)
-            _, raw_maps, raw_si, raw_fraction = compute_place_fields(pose, raw_dg, args.grain)
+            _, raw_maps, raw_si, raw_fraction = compute_place_fields(pose, raw_dg, grain, bounds)
             for prefix, activity in (("raw_dg", raw_dg), ("post_inhibition", dg)):
-                details = spatial_details_for_artifact(pose, activity, args.grain)
+                details = spatial_details_for_artifact(pose, activity, grain, bounds)
                 artifact.update({prefix + "_" + key: value for key, value in details.items()})
             artifact.update(
                 raw_dg_rate_maps=raw_maps,
@@ -719,13 +744,8 @@ def main():
         (run_out / "behavior_diagnostics.json").write_text(
             json.dumps(behavior_diagnostics(pose, dg, refractory=int(cfg.Hippo_R)), indent=2) + "\n"
         )
-        from hpc_runs.intrmotiv_study.geometry import (
-            geometry_from_config,
-            geometry_payload,
-            traversable_field_components,
-        )
+        from hpc_runs.intrmotiv_study.geometry import traversable_field_components
 
-        geometry = geometry_payload(geometry_from_config(cfg))
         if geometry:
             geometry.update(
                 traversable_field_components(
@@ -761,7 +781,7 @@ def main():
             f"theta={cfg.DG_BN_intercept}, checkpoint={pathlib.Path(checkpoint).name}"
         )
         if not args.no_plots:
-            plot_run_grid(rate_maps, occupancy, si, active_fraction, title, run_out / "dg_place_fields.png")
+            plot_run_grid(rate_maps, occupancy, si, active_fraction, title, run_out / "dg_place_fields.png", bounds)
             if pre_threshold_logits is not None:
                 plot_pre_threshold_logit_grid(
                     pre_threshold_maps,
@@ -770,6 +790,7 @@ def main():
                     pre_threshold_std,
                     title,
                     run_out / "dg_pre_threshold_logits.png",
+                    bounds,
                 )
         summary_rows.append(
             {

@@ -836,8 +836,19 @@ class BaseDistanceRecorder(BaseLearner):
             self._save_impl("initial", "", 1)
         return result
 
+    def save_milestone(self):
+        super().save_milestone()
+        if str(getattr(self.cfg, "checkpoint_frame_targets", "")).lower() != "auto":
+            return
+        directory = Path(self.checkpoint_dir(self.cfg, self.policy_id)) / "milestones"
+        files = [Path(path) for path in self.get_checkpoints(str(directory)) if Path(path).suffix == ".pth"]
+        for path in files[:-8]:
+            path.unlink()
+
     def _save_crossed_frame_targets(self, previous_frames):
-        targets = [int(x) for x in getattr(self.cfg, "checkpoint_frame_targets", "").split(",") if x.strip()]
+        from sf_working_directories.IntrMotiv.dmlab.checkpoint_schedule import checkpoint_targets
+
+        targets = checkpoint_targets(self.cfg)
         if any(previous_frames < target <= self.env_steps for target in targets):
             self.save_milestone()
 

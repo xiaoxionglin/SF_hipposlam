@@ -123,6 +123,8 @@ def test_fresh_inverse_default_preserves_legacy_saved_configs(tmp_path):
     ]
     fresh = parse_dmlab_args(argv)
     assert fresh.depth_sensor_inverse is True
+    assert fresh.checkpoint_frame_targets == "auto"
+    assert fresh.dmlab_level_cache_path == str(tmp_path / "runtime" / "dmlab_cache")
     assert DepthEncoder(fresh).depth_mode == "capped_inverse"
 
     # A pre-switch run has no depth_sensor_inverse field in config.json.
@@ -130,7 +132,11 @@ def test_fresh_inverse_default_preserves_legacy_saved_configs(tmp_path):
         json.dump({"depth_sensor": True}, stream)
     resumed = load_from_checkpoint(fresh)
     assert resumed.depth_sensor_inverse is None
+    assert resumed.checkpoint_frame_targets == ""
     assert DepthEncoder(resumed).depth_mode == "legacy"
+
+    timed = parse_dmlab_args([*argv, "--save_milestones_sec=1800"])
+    assert timed.checkpoint_frame_targets == ""
 
     explicit = parse_dmlab_args([*argv, "--depth_sensor_inverse=True"])
     assert load_from_checkpoint(explicit).depth_sensor_inverse is True

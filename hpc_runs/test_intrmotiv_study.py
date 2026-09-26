@@ -90,7 +90,7 @@ class StudySpecTests(unittest.TestCase):
         self.assertIn("--seed=8", runs[0].args)
         self.assertEqual(self.study.raw["schema"], SCHEMA_ID)
         self.assertEqual(self.study.declared_workflow_version, "1.0.0")
-        self.assertEqual(WORKFLOW_VERSION, "1.13.0")
+        self.assertEqual(WORKFLOW_VERSION, "1.14.0")
         self.assertEqual(len(self.study.fingerprint), 64)
 
     def test_machine_readable_schema_is_valid_json(self):
@@ -112,6 +112,28 @@ class StudySpecTests(unittest.TestCase):
         new_mapping["training"]["common_args"].append("--depth_sensor_inverse=True")
         explicit = StudySpec.from_mapping(new_mapping)
         assert explicit.expand_runs()[0].args.count("--depth_sensor_inverse=True") == 1
+
+    def test_legacy_milestones_and_new_spatial_targets(self):
+        raw = json.loads(SPEC_PATH.read_text())
+        old = StudySpec.from_mapping(raw)
+        assert "--checkpoint_frame_targets=" in old.expand_runs()[0].args
+
+        raw["workflow_version"] = "1.14.0"
+        new = StudySpec.from_mapping(raw)
+        assert not any(arg.startswith("--checkpoint_frame_targets=") for arg in new.expand_runs()[0].args)
+
+        raw = json.loads(SPEC_PATH.with_name("ca3_predictive_active_goals_production.study.json").read_text())
+        raw["workflow_version"] = "1.14.0"
+        raw["training"]["common_args"] = [
+            arg for arg in raw["training"]["common_args"] if not arg.startswith("--online_spatial_snapshot_targets=")
+        ]
+        raw["training"]["common_args"].append("--online_spatial_snapshot_targets=1,2")
+        raw["telemetry"]["online_spatial_target_frames"] = [1, 3]
+        with self.assertRaisesRegex(SpecError, "disagree with telemetry metadata"):
+            StudySpec.from_mapping(raw)
+        raw["telemetry"].pop("online_spatial_target_frames")
+        with self.assertRaisesRegex(SpecError, "without declared snapshot targets"):
+            StudySpec.from_mapping(raw)
 
     def test_discovery_accepts_launcher_separator_suffix(self):
         with tempfile.TemporaryDirectory() as directory:

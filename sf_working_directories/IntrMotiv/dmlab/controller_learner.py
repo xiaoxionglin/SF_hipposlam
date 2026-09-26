@@ -126,13 +126,14 @@ class ControllerLearner(DistanceLearnerReward):
             self._evaluation_checkpoint = False
         directory = Path(self.checkpoint_dir(self.cfg, self.policy_id)) / "milestones"
         files = [Path(path) for path in self.get_checkpoints(str(directory)) if Path(path).suffix == ".pth"]
-        keep = max(1, int(self.cfg.keep_checkpoints))
+        automatic = str(getattr(self.cfg, "checkpoint_frame_targets", "")).lower() == "auto"
+        keep = 8 if automatic else max(1, int(self.cfg.keep_checkpoints))
         # Count pinned frame targets toward retention. Otherwise five analysis
         # targets plus keep=8 silently leaves thirteen milestones per run.
         present_pins = {path.name for path in files if path.name in self.frame_milestones}
         unpinned = [path for path in files if path.name not in present_pins]
-        extra = max(1, keep - len(present_pins))
-        retained = present_pins | {path.name for path in unpinned[-extra:]}
+        extra = 0 if automatic else max(1, keep - len(present_pins))
+        retained = present_pins | ({path.name for path in unpinned[-extra:]} if extra else set())
         for path in files:
             if path.name not in retained:
                 path.unlink()
@@ -147,7 +148,9 @@ class ControllerLearner(DistanceLearnerReward):
             self._evaluation_checkpoint = False
 
     def _save_completed_frame_targets(self, previous_frames):
-        targets = [int(x) for x in self.cfg.checkpoint_frame_targets.split(",") if x.strip()]
+        from sf_working_directories.IntrMotiv.dmlab.checkpoint_schedule import checkpoint_targets
+
+        targets = checkpoint_targets(self.cfg)
         if any(previous_frames < target <= self.env_steps for target in targets):
             self.frame_milestones.add(f"checkpoint_{self.train_step:09d}_{self.env_steps}.pth")
         super()._save_crossed_frame_targets(previous_frames)

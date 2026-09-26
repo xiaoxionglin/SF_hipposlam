@@ -15,6 +15,7 @@ from itertools import product
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from .spatial_contract import automatic_snapshot_targets
 from .version import SCHEMA_ID, WORKFLOW_VERSION
 
 Scalar = str | int | float | bool
@@ -352,10 +353,44 @@ class StudySpec:
                         and not any(arg.startswith("--depth_sensor_inverse=") for arg in args)
                     ):
                         args += ("--depth_sensor_inverse=False",)
+                    # Old study hashes and run semantics remain fixed when the
+                    # fresh-run milestone default advances to eight frame points.
+                    if _semver(self.declared_workflow_version, "workflow_version") < (1, 14, 0) and not any(
+                        arg.startswith("--checkpoint_frame_targets=") for arg in args
+                    ):
+                        args += ("--checkpoint_frame_targets=",)
                     flags = [arg.split("=", 1)[0] for arg in args]
                     duplicate_flags = sorted({flag for flag in flags if flags.count(flag) > 1})
                     if duplicate_flags:
                         raise SpecError(f"run {run_name!r} " f"defines duplicate flags {duplicate_flags!r}")
+                    if _semver(self.declared_workflow_version, "workflow_version") >= (1, 14, 0):
+                        settings = dict(arg.split("=", 1) for arg in args if "=" in arg)
+                        declared_targets = self.telemetry.get("online_spatial_target_frames")
+                        runtime_targets = settings.get("--online_spatial_snapshot_targets")
+                        if (
+                            settings.get("--online_spatial_telemetry", "False").lower() == "true"
+                            and declared_targets is None
+                        ):
+                            raise SpecError(
+                                f"run {run_name!r} enables online spatial telemetry without declared snapshot targets"
+                            )
+                        if declared_targets is not None:
+                            try:
+                                if runtime_targets in (None, "auto"):
+                                    interval = int(
+                                        settings.get("--online_spatial_snapshot_interval_frames", 25_000_000)
+                                    )
+                                    maximum = int(settings.get("--online_spatial_snapshot_max_frames", 100_000_000))
+                                    parsed_targets = automatic_snapshot_targets(interval, maximum)
+                                else:
+                                    parsed_targets = tuple(int(value) for value in runtime_targets.split(","))
+                                expected_targets = tuple(int(value) for value in declared_targets)
+                            except (TypeError, ValueError) as error:
+                                raise SpecError("online spatial targets must be integer frames") from error
+                            if parsed_targets != expected_targets:
+                                raise SpecError(
+                                    f"run {run_name!r} online spatial snapshot targets disagree with telemetry metadata"
+                                )
                     runs.append(
                         RunSpec(
                             name=run_name,

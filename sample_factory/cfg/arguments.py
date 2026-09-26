@@ -250,6 +250,8 @@ def load_from_checkpoint(cfg: Config) -> AttrDict:
     # parser's inverse-depth default applies only to fresh experiments.
     if "depth_sensor_inverse" in vars(cfg) and "depth_sensor_inverse" not in loaded_cfg:
         loaded_cfg["depth_sensor_inverse"] = None
+    if "checkpoint_frame_targets" in vars(cfg) and "checkpoint_frame_targets" not in loaded_cfg:
+        loaded_cfg["checkpoint_frame_targets"] = ""
 
     # override the parameters in config file with values passed from command line
     for key, value in cfg.cli_args.items():

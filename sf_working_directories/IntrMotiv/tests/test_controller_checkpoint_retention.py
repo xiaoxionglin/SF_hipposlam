@@ -4,8 +4,37 @@ from unittest.mock import patch
 
 import pytest
 
+from sf_working_directories.IntrMotiv.dmlab.checkpoint_schedule import checkpoint_targets
 from sf_working_directories.IntrMotiv.dmlab.controller_learner import ControllerLearner
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
+
+
+@pytest.mark.parametrize("frames", [8, 80, 100_000_000])
+def test_auto_milestones_cover_planned_run_in_eight_steps(frames):
+    targets = checkpoint_targets(SimpleNamespace(checkpoint_frame_targets="auto", train_for_env_steps=frames))
+    assert len(targets) == 8
+    assert targets[-1] == frames
+    assert (
+        max(b - a for a, b in zip((0, *targets[:-1]), targets))
+        - min(b - a for a, b in zip((0, *targets[:-1]), targets))
+        <= 1
+    )
+
+
+def test_auto_milestones_are_pinned_without_periodic_extras(tmp_path):
+    learner = object.__new__(ControllerLearner)
+    learner.cfg = SimpleNamespace(keep_checkpoints=2, checkpoint_frame_targets="auto")
+    learner.policy_id = 0
+    learner.checkpoint_dir = lambda *args: str(tmp_path)
+    directory = tmp_path / "milestones"
+    directory.mkdir()
+    names = [f"checkpoint_{i:09d}_{i*100}.pth" for i in range(1, 13)]
+    for name in names:
+        (directory / name).write_text("evaluation artifact")
+    learner.frame_milestones = set(names[::2][:8])
+    with patch.object(DistanceLearnerReward, "save_milestone"):
+        learner.save_milestone()
+    assert {path.name for path in directory.iterdir()} == learner.frame_milestones
 
 
 def test_periodic_retention_pins_canonical_checkpoints_and_keeps_latest(tmp_path):

@@ -13,6 +13,7 @@ from hpc_runs.intrmotiv_study.spatial_contract import (
     OnlineSpatialWindow,
     SpatialBounds,
     SpatialContractError,
+    automatic_snapshot_targets,
     calculate_graph_diagnostics,
     calculate_place_field_details,
     calculate_spatial_metrics,
@@ -39,7 +40,6 @@ GRAPH_KEYS = {
     "graph_reliable_global_efficiency": "online_spatial_graph_reliable_global_efficiency",
     "graph_grounded_controllability": "online_spatial_graph_grounded_controllability",
 }
-DEFAULT_SNAPSHOT_TARGETS = (5_000_000, 25_000_000, 50_000_000, 75_000_000, 100_000_000)
 TRAJECTORY_KEYS = {
     "mean_physical_step_distance": "online_spatial_trajectory_mean_physical_step_distance",
     "stationary_step_fraction": "online_spatial_trajectory_stationary_step_fraction",
@@ -114,12 +114,7 @@ class TrainingSpatialTelemetry:
             raise SpatialContractError("online spatial maximum segment jump distance must be finite and positive")
         target_setting = str(getattr(cfg, "online_spatial_snapshot_targets", "auto") or "auto").strip()
         if target_setting.lower() == "auto":
-            if self.snapshot_interval == 25_000_000 and self.snapshot_max == 100_000_000:
-                self.snapshot_targets = DEFAULT_SNAPSHOT_TARGETS
-            else:
-                self.snapshot_targets = tuple(
-                    range(self.snapshot_interval, self.snapshot_max + 1, self.snapshot_interval)
-                )
+            self.snapshot_targets = automatic_snapshot_targets(self.snapshot_interval, self.snapshot_max)
         else:
             try:
                 self.snapshot_targets = tuple(int(value.strip()) for value in target_setting.split(","))

@@ -1,12 +1,33 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.13.0` (new-run inverse depth with legacy StudySpec compatibility)
+- Implementation: `1.14.0` (planned-frame milestones, spatial target validation, verified evaluation grids)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
-- NEMO2 verified 1.13.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/default_audit_verified/hpc_runs/intrmotiv_study/`
+- NEMO2 verified 1.13.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/default_audit_verified/hpc_runs/intrmotiv_study/` (1.14.0 qualification pending)
 - NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.14.0 planned milestones and telemetry consistency
+
+Fresh IntrMotiv runs default to eight evaluation milestones at roughly equal
+intervals of `train_for_env_steps`. The last target is the planned horizon.
+Use `--checkpoint_frame_targets=` to disable frame milestones or provide a
+comma-separated schedule. An explicit positive `--save_milestones_sec` retains
+the historical time-based schedule when no frame targets are specified. Saved
+configs and StudySpecs declaring workflow 1.13 or earlier retain their old
+milestone behavior without changing their fingerprints. The controller keeps
+at most eight automatic evaluation milestones and omits replay from them;
+rolling restart checkpoints keep replay.
+
+New runs place the DMLab level cache under `train_dir/runtime/dmlab_cache`
+unless an explicit path is supplied. On NEMO2, `train_dir` must be in an
+allocated workspace. Version 1.14 StudySpecs that enable online spatial
+telemetry must declare their snapshot targets, and the validator checks that
+these match the runtime setting, including its automatic cadence. The
+offline place-field evaluator now derives its grid and bounds from verified
+geometry: 19-by-19 for the corridor and 9-by-9 for the landmark map. A native
+NEMO2 landmark preflight remains the release gate for that evaluator change.
 
 ## 1.13.0 depth-default compatibility
 

@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 from .spatial_contract import (
+    DEFAULT_SNAPSHOT_TARGETS,
     SNAPSHOT_SCHEMA,
     SPATIAL_DETAIL_ARRAYS,
     SpatialBounds,
@@ -51,7 +52,7 @@ SPATIAL_METRICS = (
     "cue_color_site_visit_fraction",
     "cue_color_peak_match_count",
 )
-DEFAULT_TARGETS = (5_000_000, 25_000_000, 50_000_000, 75_000_000, 100_000_000)
+DEFAULT_TARGETS = DEFAULT_SNAPSHOT_TARGETS
 GRAPH_SCALAR_KEYS = (
     "graph_reliable_edge_count",
     "graph_reliable_edge_density",

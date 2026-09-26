@@ -13,6 +13,18 @@ import numpy as np
 SNAPSHOT_SCHEMA = "intrmotiv/online-spatial/v1"
 DEFAULT_GRAIN = 19
 DEFAULT_BOUNDS = (100.0, 2000.0, 100.0, 2000.0)
+DEFAULT_SNAPSHOT_TARGETS = (5_000_000, 25_000_000, 50_000_000, 75_000_000, 100_000_000)
+
+
+def automatic_snapshot_targets(interval: int, maximum: int) -> tuple[int, ...]:
+    """Shared runtime and StudySpec interpretation of the automatic cadence."""
+    if (interval, maximum) == (25_000_000, 100_000_000):
+        return DEFAULT_SNAPSHOT_TARGETS
+    if interval <= 0 or maximum < interval or maximum % interval:
+        raise ValueError("snapshot maximum must be a positive multiple of its interval")
+    return tuple(range(interval, maximum + 1, interval))
+
+
 FIELD_THRESHOLD_FRACTIONS = (0.30, 0.50, 0.70)
 FIELD_MIN_ACTIVE_OBSERVATIONS = 20
 FIELD_MIN_ACTIVE_BINS = 3

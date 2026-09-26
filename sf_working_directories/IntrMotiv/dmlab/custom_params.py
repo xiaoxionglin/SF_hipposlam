@@ -624,8 +624,8 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--checkpoint_frame_targets",
         type=str,
-        default="",
-        help="Comma-separated frame targets retained as permanent milestones",
+        default="auto",
+        help="Auto: eight evenly spaced evaluation milestones over train_for_env_steps; empty disables, or give comma-separated targets",
     )
     p.add_argument(
         "--save_initial_checkpoint",
