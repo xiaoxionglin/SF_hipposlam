@@ -22,8 +22,24 @@ def test_periodic_retention_pins_canonical_checkpoints_and_keeps_latest(tmp_path
     with patch.object(DistanceLearnerReward, "save_milestone") as save:
         learner.save_milestone()
         save.assert_called_once()
-    assert sorted(p.name for p in directory.iterdir()) == [names[0], names[2], names[4], names[5]]
+    assert sorted(p.name for p in directory.iterdir()) == [names[0], names[2], names[5]]
     assert all(p.read_text() == "full replay checkpoint fixture" for p in directory.iterdir())
+
+
+def test_five_frame_targets_fit_inside_eight_milestones(tmp_path):
+    learner = object.__new__(ControllerLearner)
+    learner.cfg = SimpleNamespace(keep_checkpoints=8)
+    learner.policy_id = 0
+    learner.checkpoint_dir = lambda *args: str(tmp_path)
+    directory = tmp_path / "milestones"
+    directory.mkdir()
+    names = [f"checkpoint_{i:09d}_{i*100}.pth" for i in range(20)]
+    for name in names:
+        (directory / name).write_text("evaluation artifact")
+    learner.frame_milestones = set(names[::4]) | {"checkpoint_missing.pth"}
+    with patch.object(DistanceLearnerReward, "save_milestone"):
+        learner.save_milestone()
+    assert {path.name for path in directory.iterdir()} == set(names[::4]) | set(names[-3:])
 
 
 def test_canonical_frame_is_pinned_before_parent_save_and_retained_in_state():

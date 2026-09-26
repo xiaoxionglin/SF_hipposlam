@@ -343,6 +343,15 @@ class StudySpec:
                     args = tuple(_render(template, context, "training argument") for template in arg_templates)
                     if not all(arg.startswith("--") for arg in args):
                         raise SpecError("every rendered training argument must begin with '--'")
+                    # Before 1.13, an omitted switch meant pass-through depth.
+                    # Make that historical meaning explicit when rendering with
+                    # a runtime whose fresh-run default is now inverse depth.
+                    if (
+                        _semver(self.declared_workflow_version, "workflow_version") < (1, 13, 0)
+                        and "--depth_sensor=True" in args
+                        and not any(arg.startswith("--depth_sensor_inverse=") for arg in args)
+                    ):
+                        args += ("--depth_sensor_inverse=False",)
                     flags = [arg.split("=", 1)[0] for arg in args]
                     duplicate_flags = sorted({flag for flag in flags if flags.count(flag) > 1})
                     if duplicate_flags:

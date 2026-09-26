@@ -1,6 +1,7 @@
 """Depth bypass response and sampling contract, without loading visual weights."""
 
 import argparse
+import json
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -8,9 +9,12 @@ import numpy as np
 import pytest
 import torch
 
+from sample_factory.cfg.arguments import load_from_checkpoint
 from sample_factory.utils.normalize import ObservationNormalizer
+from sample_factory.utils.utils import cfg_file
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DepthEncoder
 from sf_working_directories.IntrMotiv.dmlab.custom_params import add_hipposlam_env_args
+from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import parse_dmlab_args
 
 
 def test_capped_inverse_depth_response():
@@ -99,11 +103,37 @@ def test_cli_defaults_and_inverse_toggle():
     parser = argparse.ArgumentParser()
     add_hipposlam_env_args(parser)
     defaults = parser.parse_args([])
-    assert defaults.depth_sensor_inverse is None
+    assert defaults.depth_sensor_inverse is True
+    assert defaults.online_spatial_workspace_root == "/work/classic/fr_xl1014-corridor-geometry"
+    assert defaults.online_spatial_output_root == ""
     assert not hasattr(defaults, "depth_sensor_mode")
     assert not hasattr(defaults, "depth_sensor_gain")
     assert parser.parse_args(["--depth_sensor_inverse=True"]).depth_sensor_inverse is True
     assert parser.parse_args(["--depth_sensor_inverse=False"]).depth_sensor_inverse is False
+
+
+def test_fresh_inverse_default_preserves_legacy_saved_configs(tmp_path):
+    argv = [
+        "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+        "--experiment=depth_default_migration",
+        f"--train_dir={tmp_path}",
+        "--depth_sensor=True",
+        "--normalize_input=False",
+        "--encoder_conv_architecture=layer2_resnet18",
+    ]
+    fresh = parse_dmlab_args(argv)
+    assert fresh.depth_sensor_inverse is True
+    assert DepthEncoder(fresh).depth_mode == "capped_inverse"
+
+    # A pre-switch run has no depth_sensor_inverse field in config.json.
+    with open(cfg_file(fresh), "w") as stream:
+        json.dump({"depth_sensor": True}, stream)
+    resumed = load_from_checkpoint(fresh)
+    assert resumed.depth_sensor_inverse is None
+    assert DepthEncoder(resumed).depth_mode == "legacy"
+
+    explicit = parse_dmlab_args([*argv, "--depth_sensor_inverse=True"])
+    assert load_from_checkpoint(explicit).depth_sensor_inverse is True
 
 
 @pytest.mark.parametrize("inverse,expected", [(None, 1.5), (True, 5.0), (False, 2.0)])

@@ -120,9 +120,9 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")
     p.add_argument(
         "--depth_sensor_inverse",
-        default=None,
+        default=True,
         type=str2bool,
-        help="Use capped inverse depth 10/max(raw depth code,1); defaults to legacy pass-through",
+        help="Use capped inverse depth 10/max(raw depth code,1); new runs default to inverse depth",
     )
     p.add_argument(
         "--dmlab_reduced_action_set", default=False, type=str2bool, help="reduced action set to facilitate learning"
@@ -471,15 +471,15 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--online_spatial_workspace_root",
-        default="/work/classic/fr_xl1014-train",
+        default="/work/classic/fr_xl1014-corridor-geometry",
         type=str,
         help="Required containing workspace for all online spatial artifacts.",
     )
     p.add_argument(
         "--online_spatial_output_root",
-        default=("/work/classic/fr_xl1014-train/IntrMotiv/SF_hipposlam/" "train_dir/analysis/online_spatial"),
+        default="",
         type=str,
-        help="Workspace analysis root for batch/run/policy spatial snapshots.",
+        help="Workspace analysis root for batch/run/policy spatial snapshots; empty uses train_dir/analysis/online_spatial.",
     )
     p.add_argument("--hrl_pbt_max_silent_fraction", default=0.5, type=float)
     p.add_argument("--encoder_population_usage_loss", default=False, type=str2bool)

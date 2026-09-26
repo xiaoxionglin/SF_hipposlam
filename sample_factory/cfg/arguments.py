@@ -245,6 +245,12 @@ def load_from_checkpoint(cfg: Config) -> AttrDict:
         log.warning("Loading existing experiment configuration from %s", cfg_filename)
         loaded_cfg = AttrDict(json_params)
 
+    # Earlier IntrMotiv configs did not have this switch. Preserve their
+    # historical depth response when a newer executable resumes them; the
+    # parser's inverse-depth default applies only to fresh experiments.
+    if "depth_sensor_inverse" in vars(cfg) and "depth_sensor_inverse" not in loaded_cfg:
+        loaded_cfg["depth_sensor_inverse"] = None
+
     # override the parameters in config file with values passed from command line
     for key, value in cfg.cli_args.items():
         if key in loaded_cfg and loaded_cfg[key] != value:
@@ -289,6 +295,9 @@ def checkpoint_override_defaults(cfg: Config, parser) -> AttrDict:
         json_params = json.load(json_file)
         log.warning("Loading existing experiment configuration from %s", cfg_filename)
         loaded_cfg = AttrDict(json_params)
+
+    if "--depth_sensor_inverse" in parser._option_string_actions and "depth_sensor_inverse" not in loaded_cfg:
+        loaded_cfg["depth_sensor_inverse"] = None
 
     parser.set_defaults(**loaded_cfg)
 

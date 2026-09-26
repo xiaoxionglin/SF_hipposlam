@@ -12,8 +12,32 @@ z-relation follow-up (`2da7c742`), predictive active goals (`a28ffee4`),
 task-general transfer (`b279cc94`), cued reward transfer and calibrated frozen
 DG controls (`20fbcbe0`), and uncommitted corridor, landmark, and replay-retention
 fixes. The canonical vault study package is synchronized at version 1.12.0.
-Existing experimental modes remain opt-in and checkpoint/configuration defaults
-are preserved. The evaluator now defaults to the active corridor workspace.
+Existing experimental modes remain opt-in. The evaluator defaults to the active
+corridor workspace.
+
+## September 26 default audit
+
+For fresh IntrMotiv runs with depth enabled, capped inverse depth is now the
+default. An explicit `--depth_sensor_inverse=False` selects pass-through.
+Saved configurations from before this switch retain pass-through, including
+when the field was absent; explicit command-line overrides still win. The
+`--depth_sensor` switch itself remains off by default.
+Workflow 1.13 renders an explicit pass-through flag for older studies that
+enabled depth without choosing a transform. Their study files and SHA-256
+fingerprints remain unchanged; a new 1.13 study inherits inverse depth.
+
+Controller milestone and best checkpoints omit replay; the rolling restart
+checkpoint retains it. Pinned frame targets now count toward the milestone
+retention cap, with one recent unpinned artifact retained when pins fill the
+cap. The base Sample Factory time-milestone default is disabled, although
+historical StudySpecs that explicitly set 1,800 seconds keep that schedule.
+Their saved SHA-256 fingerprints remain unchanged; new studies should omit the
+periodic setting when fixed frame targets are sufficient.
+
+The default online-spatial workspace is the active corridor allocation, and
+its output root derives from `train_dir`. Historical saved paths and explicit
+study overrides remain available. The global-default inventory is maintained
+in the vault's `04_implementation/global_defaults_audit_20260926.md`.
 
 Overlapping changes are reconciled in the shared batched manager, rather than
 restoring the obsolete scalar planner. Both manager paths use the same

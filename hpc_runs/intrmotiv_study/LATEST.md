@@ -1,11 +1,20 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.12.0` (landmark geometry and cue-aware spatial telemetry)
+- Implementation: `1.13.0` (new-run inverse depth with legacy StudySpec compatibility)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 runtime copy: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/hpc_runs/intrmotiv_study/`
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.13.0 depth-default compatibility
+
+Fresh IntrMotiv runs with depth enabled now use inverse depth by default. A
+study declaring workflow version 1.12 or earlier and requesting depth without
+an explicit inverse switch renders `--depth_sensor_inverse=False`; its old
+scientific condition remains pass-through. A version 1.13 study omitting the
+switch uses the fresh-run inverse default. Old study files retain their SHA-256.
+Saved experiment configurations also retain their historical depth response.
 
 ## 1.12.0 landmark geometry and cue-aware telemetry
 

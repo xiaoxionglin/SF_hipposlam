@@ -127,7 +127,12 @@ class ControllerLearner(DistanceLearnerReward):
         directory = Path(self.checkpoint_dir(self.cfg, self.policy_id)) / "milestones"
         files = [Path(path) for path in self.get_checkpoints(str(directory)) if Path(path).suffix == ".pth"]
         keep = max(1, int(self.cfg.keep_checkpoints))
-        retained = {path.name for path in files[-keep:]} | self.frame_milestones
+        # Count pinned frame targets toward retention. Otherwise five analysis
+        # targets plus keep=8 silently leaves thirteen milestones per run.
+        present_pins = {path.name for path in files if path.name in self.frame_milestones}
+        unpinned = [path for path in files if path.name not in present_pins]
+        extra = max(1, keep - len(present_pins))
+        retained = present_pins | {path.name for path in unpinned[-extra:]}
         for path in files:
             if path.name not in retained:
                 path.unlink()

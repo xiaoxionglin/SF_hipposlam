@@ -32,6 +32,7 @@ from hpc_runs.intrmotiv_study.spatial_contract import (
     spatial_rate_maps,
     write_spatial_snapshot_atomic,
 )
+from hpc_runs.intrmotiv_study.spec import StudySpec
 from hpc_runs.intrmotiv_study.submission import audit_submission
 from hpc_runs.intrmotiv_study.telemetry import (
     MANIFEST_COLUMNS,
@@ -89,7 +90,7 @@ class StudySpecTests(unittest.TestCase):
         self.assertIn("--seed=8", runs[0].args)
         self.assertEqual(self.study.raw["schema"], SCHEMA_ID)
         self.assertEqual(self.study.declared_workflow_version, "1.0.0")
-        self.assertEqual(WORKFLOW_VERSION, "1.12.0")
+        self.assertEqual(WORKFLOW_VERSION, "1.13.0")
         self.assertEqual(len(self.study.fingerprint), 64)
 
     def test_machine_readable_schema_is_valid_json(self):
@@ -97,6 +98,20 @@ class StudySpecTests(unittest.TestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(schema["$id"], SCHEMA_ID)
         self.assertIn("training", schema["properties"])
+
+    def test_legacy_study_depth_remains_legacy_with_new_runtime_default(self):
+        path = SPEC_PATH.with_name("ca3_predictive_active_goals_production.study.json")
+        old = load_study(path)
+        assert "--depth_sensor_inverse=False" in old.expand_runs()[0].args
+
+        new_mapping = json.loads(path.read_text())
+        new_mapping["workflow_version"] = "1.13.0"
+        new = StudySpec.from_mapping(new_mapping)
+        assert not any(arg.startswith("--depth_sensor_inverse=") for arg in new.expand_runs()[0].args)
+
+        new_mapping["training"]["common_args"].append("--depth_sensor_inverse=True")
+        explicit = StudySpec.from_mapping(new_mapping)
+        assert explicit.expand_runs()[0].args.count("--depth_sensor_inverse=True") == 1
 
     def test_discovery_accepts_launcher_separator_suffix(self):
         with tempfile.TemporaryDirectory() as directory:
