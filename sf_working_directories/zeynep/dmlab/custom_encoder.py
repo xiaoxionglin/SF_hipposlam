@@ -621,7 +621,7 @@ class HipposlamEncoder(Encoder):
         if self.oracle_context and self.DG_context_mod == "concat":
             self.encoder_out_size += self.instructions_lstm_units
 
-        needs_context = self.oracle_context and (self.DG_context_mod != "None" or self.Decoder_context_mod != "None")
+        needs_context = self.oracle_context and (self.DG_context_mod == "multiply" or self.DG_context_mod == "sigmoid" or self.Decoder_context_mod != "None")
         if needs_context:
             self.instruction_embed_layer = nn.Linear(self.instructions_lstm_units, cfg.Hippo_n_feature)
         ###################################################################################################
@@ -687,6 +687,7 @@ class HipposlamEncoder(Encoder):
 
         self.high_level = False
         if "HighLevel" in cfg.core_name:
+            log.warning("HighLevel core is enabled")
             self.high_level = True
             self.reward_input = False
 
@@ -718,7 +719,7 @@ class HipposlamEncoder(Encoder):
             tmp_out_size += 1 
 
         if self.high_level:
-            tmp_out_size += 2 # to pass outcome_event and prev_reward to the high-level core
+            tmp_out_size += 3 # to pass outcome_event and prev_reward and chosen_arm to the high-level core
             if self.oracle_context: # pass inst_block to the high-level core
                 tmp_out_size += 1
             log.info(f"HighLevel core: dim {tmp_out_size} (including outcome_event and prev_reward)")
@@ -816,11 +817,12 @@ class HipposlamEncoder(Encoder):
                 # ===== Regime selection =====
         if DG_mod != "None" and Dec_mod == "None":
                 # 1. DG-only context: instructions modulate DG, do NOT go to decoder/bypass
-            embedded_instr = self.instruction_embed_layer(last_outputs)
                 # No concat of instructions into x here: context only via embedded_instr
             if DG_mod == "multiply":
+                embedded_instr = self.instruction_embed_layer(last_outputs)
                 tmp_out = self.DG_projection(x, context=embedded_instr)
             elif DG_mod == "sigmoid":
+                embedded_instr = self.instruction_embed_layer(last_outputs)
                 embedded_instr = torch.sigmoid(embedded_instr)
                 tmp_out = self.DG_projection(x) * embedded_instr
             elif DG_mod == "concat":
@@ -848,11 +850,11 @@ class HipposlamEncoder(Encoder):
             
         elif DG_mod != "None" and Dec_mod != "None":
                 # 3. DG + Decoder context: instructions modulate DG AND are visible to decoder
-            embedded_instr = self.instruction_embed_layer(last_outputs)
-            
             if DG_mod == "multiply":
+                embedded_instr = self.instruction_embed_layer(last_outputs)
                 tmp_out = self.DG_projection(x, context=embedded_instr)
             elif DG_mod == "sigmoid":
+                embedded_instr = self.instruction_embed_layer(last_outputs)
                 embedded_instr = torch.sigmoid(embedded_instr)
                 tmp_out = self.DG_projection(x) * embedded_instr
             elif DG_mod == "concat":
@@ -897,13 +899,14 @@ class HipposlamEncoder(Encoder):
             tmp_out = torch.cat((tmp_out, reward_feat), dim=1)
 
         if self.high_level:
+            chosen_arm = obs_dict.get("chosen_arm").to(device=tmp_out.device, dtype=tmp_out.dtype)
             outcome_event = obs_dict.get("outcome_event").to(device=tmp_out.device, dtype=tmp_out.dtype)
             prev_trial_reward = obs_dict.get("prev_trial_reward").to(device=tmp_out.device, dtype=tmp_out.dtype)
             if self.oracle_context:
                 inst_block = obs_dict.get("inst_block").to(device=tmp_out.device, dtype=tmp_out.dtype)
-                tmp_out = torch.cat((tmp_out, inst_block, outcome_event, prev_trial_reward), dim=1)
+                tmp_out = torch.cat((tmp_out, inst_block, chosen_arm, outcome_event, prev_trial_reward), dim=1)
             else:
-                tmp_out = torch.cat((tmp_out, outcome_event, prev_trial_reward), dim=1)
+                tmp_out = torch.cat((tmp_out, chosen_arm, outcome_event, prev_trial_reward), dim=1)
 
         return tmp_out
 

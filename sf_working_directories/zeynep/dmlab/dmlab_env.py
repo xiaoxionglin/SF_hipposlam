@@ -163,6 +163,7 @@ def make_dmlab_env_impl(
         with_number_instruction=cfg.with_number_instruction,
         with_pos_obs=cfg.with_pos_obs,
         reward_input=cfg.reward_input,
+        high_level=("HighLevel" in cfg.core_name),
     )
 
     if env_config and "env_id" in env_config:

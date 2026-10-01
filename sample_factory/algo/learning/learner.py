@@ -958,6 +958,14 @@ class DefaultLearner(BaseLearner):
             old_values = mb["values"]
             value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
 
+        ## ADDED 01.10.26 Q-loss
+        core = getattr(self.actor_critic, 'core', getattr(self.actor_critic, 'actor_core', None))
+        if core is not None and hasattr(core, 'last_q_loss'):
+            q_loss = core.last_q_loss
+        else:
+            q_loss = torch.tensor(0.0, device=self.device)
+        ######
+
         loss_summaries = dict(
             ratio=ratio,
             clip_ratio_low=clip_ratio_low,
@@ -970,7 +978,7 @@ class DefaultLearner(BaseLearner):
         )
         del outputs
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, q_loss, loss_summaries
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -1034,26 +1042,31 @@ class DefaultLearner(BaseLearner):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        q_loss,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
-                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
+                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss + q_loss 
                     critic_loss = value_loss
                     loss: Tensor = actor_loss + critic_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
+                    ## ADDED 01.10 TO LOG, comment out later ##
+                    log.info("Batch %d | Total Loss: %.4f | Q-Loss: %.4f", batch_num, to_scalar(loss), to_scalar(q_loss))
+
                     high_loss = 30.0
                     if torch.abs(loss) > high_loss:
                         log.warning(
-                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
+                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f q_l:%.4f (recommended to adjust the --reward_scale parameter)",
                             to_scalar(loss),
                             to_scalar(policy_loss),
                             to_scalar(value_loss),
                             to_scalar(exploration_loss),
                             to_scalar(kl_loss),
+                            to_scalar(q_loss)
                         )
 
                         # perhaps something weird is happening, we definitely want summaries from this step

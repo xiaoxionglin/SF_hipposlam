@@ -303,6 +303,7 @@ class DmlabGymEnv_custom(gym.Env):
         with_number_instruction=True,
         with_pos_obs=False,
         reward_input = False,
+        high_level = False
     ):
 
         # self.depth_sensor = depth_sensor
@@ -352,7 +353,7 @@ class DmlabGymEnv_custom(gym.Env):
             'highrew_hit', 'highrew_miss', 'lowrew_hit', 'lowrew_miss',
             'highrew_hit_total', 'highrew_miss_total',
             'lowrew_hit_total', 'lowrew_miss_total',
-            'flexibility', 'inst_block', 'outcome_event', 'prev_trial_reward'
+            'flexibility', 'inst_block'
         ]
 
         self.reward_input = reward_input
@@ -387,10 +388,10 @@ class DmlabGymEnv_custom(gym.Env):
             config.update(extra_cfg)
         config = {k: str(v) for k, v in config.items()}
 
-        self.high_level=False
-        if extra_cfg is not None and "HighLevel" in config.get("core_name", ""):
-            self.high_level=True
-            log.debug("HighLevel mode is enabled for this environment!")
+        self.high_level=high_level
+        if self.high_level:
+            log.warning("HighLevel mode is enabled for this environment!")
+            observation_format += ['outcome_event', 'prev_trial_reward', 'chosen_arm']
 
         self.render_mode: Optional[str] = render_mode
 
@@ -464,24 +465,32 @@ class DmlabGymEnv_custom(gym.Env):
                 dtype=np.float32,
             )
 
-        self.observation_space.spaces["outcome_event"] = gym.spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(1,),
-            dtype=np.float32,
-        )
-        self.observation_space.spaces["prev_trial_reward"] = gym.spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(1,),
-            dtype=np.float32,
-        )
-        self.observation_space.spaces["inst_block"] = gym.spaces.Box(
-            low=0,
-            high=2,
-            shape=(1,),
-            dtype=np.int32,
-        )
+        if self.high_level:
+            self.observation_space.spaces["outcome_event"] = gym.spaces.Box(
+                low=0.0,
+                high=1.0,
+                shape=(1,),
+                dtype=np.float32,
+            )
+            self.observation_space.spaces["prev_trial_reward"] = gym.spaces.Box(
+                low=0.0,
+                high=1.0,
+                shape=(1,),
+                dtype=np.float32,
+            )
+            # self.observation_space.spaces["inst_block"] = gym.spaces.Box(
+            #     low=0,
+            #     high=2,
+            #     shape=(1,),
+            #     dtype=np.int32,
+            # )
+
+            self.observation_space.spaces["chosen_arm"] = gym.spaces.Box(
+                low=0,
+                high=2,
+                shape=(1,),
+                dtype=np.int32,
+            ) # 1 means RIGHT 2 means LEFT 0 means NONE
         ###########
         
         # if self.depth_sensor:
@@ -530,14 +539,18 @@ class DmlabGymEnv_custom(gym.Env):
             ).reshape(1) 
 
         # Required for HL-RNN to know when a trial has ended and what the outcome was from obs dictionary:
-        outcome_event = env_obs_dict.pop("outcome_event", [0.0])
-        env_obs_dict["outcome_event"] = np.asarray(outcome_event, dtype=np.float32).reshape(1)
+        if self.high_level:
+            chosen_arm = env_obs_dict.pop("chosen_arm", [0])
+            env_obs_dict["chosen_arm"] = np.asarray(chosen_arm, dtype=np.int32).reshape(1)
 
-        prev_trial_reward = env_obs_dict.pop("prev_trial_reward", [0.0])
-        env_obs_dict["prev_trial_reward"] = np.asarray(prev_trial_reward, dtype=np.float32).reshape(1)
+            outcome_event = env_obs_dict.pop("outcome_event", [0.0])
+            env_obs_dict["outcome_event"] = np.asarray(outcome_event, dtype=np.float32).reshape(1)
 
-        inst_block = env_obs_dict.pop("inst_block", [0])
-        env_obs_dict["inst_block"] = np.asarray(inst_block, dtype=np.int32).reshape(1)
+            prev_trial_reward = env_obs_dict.pop("prev_trial_reward", [0.0])
+            env_obs_dict["prev_trial_reward"] = np.asarray(prev_trial_reward, dtype=np.float32).reshape(1)
+
+            inst_block = env_obs_dict.pop("inst_block", [0])
+            env_obs_dict["inst_block"] = np.asarray(inst_block, dtype=np.int32).reshape(1)
         ##########################################
 
         if instr is not None:

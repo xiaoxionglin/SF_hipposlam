@@ -1,5 +1,6 @@
 from typing import Dict
 from sample_factory.model.actor_critic import default_make_actor_critic_func, ActorCritic
+import torch
 
 def add_custom_summaries(actor_critic: ActorCritic) -> ActorCritic:
     """Dynamically extends the summaries method to pull custom stats from the Core."""
@@ -28,9 +29,55 @@ def add_custom_summaries(actor_critic: ActorCritic) -> ActorCritic:
     actor_critic.summaries = custom_summaries
     return actor_critic
 
+def HighLevel_Qloss(actor_critic: ActorCritic) -> ActorCritic:
+    """Dynamically extends the forward method to include Q-learning loss from the high-level RNN."""
+    original_forward = actor_critic.forward
+    original_summaries = actor_critic.summaries
+    
+    def custom_forward(*args, **kwargs):
+        # 1. Call the original forward function
+        # This returns the TensorDict containing actions, values, and new_rnn_states
+        result_dict = original_forward(*args, **kwargs)
+        
+        # 2. Locate the core
+        core = getattr(actor_critic, 'core', getattr(actor_critic, 'actor_core', None))
+        
+        # 3. Extract the Q-loss if it exists
+        if core is not None and hasattr(core, 'last_q_loss'):
+            result_dict['q_loss'] = core.last_q_loss
+        else:
+            # Fallback for inference pass to prevent crashes
+            # (Grabs the device from the 'values' tensor safely)
+            device = result_dict['values'].device if 'values' in result_dict else torch.device('cpu')
+            result_dict['q_loss'] = torch.tensor(0.0, device=device)
+        
+        return result_dict
+    
+    def summaries_with_q_loss() -> Dict:
+        s = original_summaries()
+        core = getattr(actor_critic, 'core', getattr(actor_critic, 'actor_core', None))
+
+        if core is not None:
+            # Add Q-loss to the summaries
+            if hasattr(core, 'last_q_loss') and core.last_q_loss is not None:
+                s['hl/q_loss'] = core.last_q_loss.item() # Use .item() for logging!
+                
+            if hasattr(core, 'last_log_dict') and core.last_log_dict is not None:
+                for key, value in core.last_log_dict.items():
+                    if isinstance(value, torch.Tensor):
+                        s[f'hl/{key}'] = value.float().mean().item()
+                    else:
+                        s[f'hl/{key}'] = value
+        return s
+    
+    # Override the forward method
+    actor_critic.forward = custom_forward
+    actor_critic.summaries = summaries_with_q_loss
+    return actor_critic
+
+
 def make_hipposlam_actor_critic(cfg, obs_space, action_space) -> ActorCritic:
     # Use Sample Factory's default creation logic
     actor_critic = default_make_actor_critic_func(cfg, obs_space, action_space)
-    
-    # Wrap it to expose our custom stats
-    return add_custom_summaries(actor_critic)
+    return HighLevel_Qloss(actor_critic)
+    #return add_custom_summaries(actor_critic)  

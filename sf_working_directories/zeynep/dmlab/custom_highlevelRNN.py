@@ -19,19 +19,20 @@ class QHead(nn.Module):
     def forward(self, h: Tensor) -> Tensor:
         """h: (B, d_H)  →  q: (B, K)"""
         q      = self.head(h) # current estimate of expected reward for each mode | THIS IS LEARNED BY THE NETWORK
-        return q
+        return q # output raw expected rewards.
 
 
 # sample_mode  —  §9, §18 step 4
 
-def sample_mode(scores: Tensor, tau: float = 1.0) -> Tuple[Tensor, Tensor]:
+def sample_mode(scores: Tensor, tau: float = 1.0) -> Tuple[Tensor, Tensor]: #scale the raw values by temperature tau to control exploration vs exploitation
     """
     scores: (B, K)
     → z_onehot: (B, K)   one-hot e(z_k)
     → z_index:  (B,)     integer index  — §17 current_z_index
     """
-    K = log_pi.size(-1)
+    K = scores.size(-1)
     log_pi = F.log_softmax(scores / tau, dim=-1) # convert raw Q-values to log-probabilities (distribution) for sampling 
+
     if torch.is_grad_enabled():
         z_index = torch.distributions.Categorical(logits=log_pi).sample() # from distribution, sample a discrete mode index z_k
     else:
@@ -48,6 +49,8 @@ def compute_log_dict(
     h_high_new:   Tensor,   # (B, d_H)
     reward_prev:  Tensor,   # (B,)
     tau:          float,
+    chosen_arm:   Tensor = None, # (B,) optional, for logging
+    K=4
 ) -> Dict[str, Tensor]:
     """
     Recommended logging quantities (computed at decision points only).
@@ -64,19 +67,22 @@ def compute_log_dict(
     top2       = scores.topk(k=2, dim=-1).values            # (B, 2)
     q_gap      = top2[:, 0] - top2[:, 1]                   # (B,)  gap top1 - top2
 
-    return {
-        # §22 high-level process
-        "hl/z_index":         z_index,           # sampled z_k
-        "hl/scores":          scores,             # all Q vector
-        "hl/entropy":         entropy,            # selection entropy
-        "hl/h":               h_high_new,         # hidden state h_k
-        "hl/reward_prev":     reward_prev,        # trial reward r_k
-        # §22 Q-head specific
-        "hl/q_selected":      q_selected,         # Q of chosen mode
-        "hl/q_gap":           q_gap,              # gap between top two Q-values
-        # §22 mode probabilities (for context adaptation plots)
-        "hl/mode_probs":      pi,                 # π_H(z | h_k) for all z
-    }
+    log_dict = {"z_index": z_index, "scores": scores, "entropy": entropy, "h": h_high_new, "reward_prev": reward_prev,
+                "q_selected": q_selected, "q_gap": q_gap, "mode_probs": pi}
+
+    went_right = (chosen_arm == 1.0) if chosen_arm is not None else None
+    went_left  = (chosen_arm == 2.0) if chosen_arm is not None else None
+
+    for k in range(K):
+        went_mode_k = (z_index == k)
+        if went_mode_k.sum() > 0:
+            prob_R = went_right[went_mode_k].float().mean()
+            prob_L = went_left[went_mode_k].float().mean()
+
+            log_dict[f"prob_R_mode{k}"] = prob_R
+            log_dict[f"prob_L_mode{k}"] = prob_L
+
+    return log_dict
 
 
 # HighLevelContextRNN  —  §16, §18
@@ -102,22 +108,26 @@ class HighLevelContextRNN_Stage1(nn.Module):
         
         h_high_new = torch.where(
             outcome_mask[:, None],
-            h_candidate,
-            h_high,
+            h_candidate, # update only at outcome events (at trigger)
+            h_high,      # keep previous hidden state otherwise
         )
 
         # MODE SELECTION
+        # e.g. [0,0,1,0] -> mode 2 is selected. With randomization that "1" mode is selected randomly
         if inst_block is not None:
             # If inst_block is provided, we can use it to select a mode deterministically
+            # For example, if inst_block is 1, we select mode 0; if it's 2, we select mode 1, and so on.
             oracle_idx = torch.clamp(inst_block - 1, 0, 1)  # Ensure the index is within bounds
             z_candidate = F.one_hot(oracle_idx, num_classes=self.K).float()
         else:
             # Otherwise, we can randomly select a mode for testing purposes
+            # This case Z has no correlation with where the actual reward is. Low-level policy considers z as "noise". 
             B = z_prev.size(0)
             random_indices = torch.randint(0, self.K, (B,), device=z_prev.device)
             z_candidate = F.one_hot(random_indices, num_classes=self.K).float()
 
         # 3. Latch the new mode only at outcome events
+        # Keep z_prev unless it is at trigger (outcome event) then update to z_candidate
         z_new = torch.where(
             outcome_mask[:, None],
             z_candidate,
@@ -125,7 +135,6 @@ class HighLevelContextRNN_Stage1(nn.Module):
         )
 
         # Passing the mode to decoder is handeled in the wrapper
-
         return h_high_new, z_new
 
 
@@ -140,7 +149,7 @@ class HighLevelContextRNN_QLearning(nn.Module):
     input_dim = K+1  (z_prev one-hot + reward scalar)  §16
     """
 
-    def __init__(self, low_level_model, K: int = 4, d_H: int = 16, tau: float = 1.0):
+    def __init__(self, K: int = 4, d_H: int = 16, tau: float = 1.0):
         super().__init__()
         self.K   = K
         self.d_H = d_H
@@ -150,39 +159,13 @@ class HighLevelContextRNN_QLearning(nn.Module):
                                       hidden_size=d_H,
                                       nonlinearity='tanh')
         
-        self.choice_head = QHead(d_H=d_H, K=K) # convert hidden state to Q-values and log-probabilities for sampling a new mode
-
-        self.low_level_model = low_level_model  # reference to the existing low-level controller (decoder) that will receive the sampled mode z_new
+        self.q_head = QHead(d_H=d_H, K=K) # convert hidden state to Q-values and log-probabilities for sampling a new mode
 
     def forward(
-        self,
-        obs:             Dict[str, Tensor],
-        recurrent_state: Dict[str, Tensor],
-    ) -> Tuple[Tensor, Tensor, Dict[str, Tensor]]:
-        """
-        obs keys required:
-            "outcome_event"      (B,)   bool — 1 when trial just ended # add this new instantenous observation when its back to center
-            "prev_trial_reward"  (B,)   scalar reward of the previous trial # the current reward_input is instantenous, we need one that is maintained across the trial, so we use the previous trial's reward to update the high-level state
-
-        recurrent_state keys:
-            "high_level_h"  (B, d_H)   slow hidden state
-            "current_z"     (B, K)     latched mode one-hot
-
-        Returns
-        -------
-        z_new       (B, K)  held mode for this frame  →  goes to decoder
-        q_values    (B, K)  all Q-values              →  used for loss
-        new_state   dict    updated recurrent state
-        """
-
-        h_high = recurrent_state["high_level_h"]   # (B, d_H)
-        z_prev = recurrent_state["current_z"]       # (B, K)
-
-        outcome_mask = obs["outcome_event"].bool()           # (B,)
-        reward_prev  = obs["prev_trial_reward"]  # (B, 1)
+        self, outcome_mask, prev_trial_reward, h_high, z_prev, chosen_arm):
 
         # 1. Candidate high-level state update  —  §18 step 1
-        rnn_in      = torch.cat([z_prev, reward_prev[:,None]], dim=-1)  # (B, K+1)
+        rnn_in      = torch.cat([z_prev, prev_trial_reward[:,None]], dim=-1)  # (B, K+1)
         h_candidate = self.rnn_cell(rnn_in, h_high)             # (B, d_H)
 
         # 2. Tick only at outcome events  —  §18 step 2
@@ -193,7 +176,7 @@ class HighLevelContextRNN_QLearning(nn.Module):
         )                                                        # (B, d_H)
 
         # 3. Produce high-level scores from updated context state  —  §18 step 3
-        q_scores = self.choice_head(h_high_new)         # (B, K) each
+        q_scores = self.q_head(h_high_new)         # (B, K) each
 
         # 4. Sample a new mode only at decision events  —  §18 step 4
         z_candidate, z_candidate_index = sample_mode(q_scores)                       # (B, K)
@@ -205,7 +188,7 @@ class HighLevelContextRNN_QLearning(nn.Module):
         )                                                        # (B, K)
 
         # §17: persist z_index for logging and loss computation
-        z_index_prev = recurrent_state["current_z_index"]     # (B,)
+        z_index_prev = z_prev.argmax(dim=-1)     # (B,)
         z_index_new  = torch.where(
             outcome_mask,
             z_candidate_index,
@@ -214,7 +197,6 @@ class HighLevelContextRNN_QLearning(nn.Module):
         
         # 5. z_new goes to existing low-level controller  —  §18 step 5
         # (caller passes z_new into the decoder)
-        low_level_out = self.low_level_model(obs, z_new)
 
         new_state = {
             "high_level_h": h_high_new,
@@ -224,14 +206,14 @@ class HighLevelContextRNN_QLearning(nn.Module):
 
         # §22: logging quantities (only meaningful at decision points)
         log_dict = compute_log_dict(
-            q_scores, z_index_new, h_high_new, reward_prev, self.tau
+            q_scores, z_index_new, h_high_new, prev_trial_reward, self.tau, chosen_arm, K=self.K
         )
 
-        return low_level_out, q_scores, new_state, log_dict
+        return h_high_new, z_new, q_scores, new_state, log_dict
 
 
 # Q loss  —  §10 Option C, §19
-
+# compare these raw expected rewards (Q) to actual obtained rewards
 def q_loss(
     scores:        Tensor,   # (T, B, K)
     z_indices:     Tensor,   # (T, B)

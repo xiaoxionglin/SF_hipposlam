@@ -10,8 +10,8 @@ _params = ParamGrid(
         #("number_instruction_coef", [9, 200]),
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
-        ("DG_context_mod", ["concat", "multiply", "sigmoid"]),
-        ("Decoder_context_mod", ["enter", "FiLM", "additive"])
+        ("DG_context_mod", ["concat", "multiply", "sigmoid", "None"]),
+        ("Decoder_context_mod", ["None"]), # verify rnn_size
         #("seed", [2222]),
     ]
 )
@@ -51,8 +51,8 @@ _params = ParamGrid(
 
 
 
-vstr = "stage0_INSTR_ablation"
-prj = "ENC_DECymaze_norew_instr"
+vstr = "INSTR_encoderonly_ablation"
+prj = "ymaze_stage0_oracle"
 
 cli = (
     "--env=ymaze_instr "
@@ -110,13 +110,13 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    "--number_instruction_coef=200 " ## increase if needed
+    "--number_instruction_coef=1 " ## increase if needed, default is 1
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1148 " # (16 * (64 + 8-1)) + (10 depth) + 2
+    "--rnn_size=1146 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 " 
     #"--ppo_clip_ratio=0.25 " 

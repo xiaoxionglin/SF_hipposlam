@@ -57,7 +57,7 @@ _params = ParamGrid(
 #)
 
 prj = "ymaze_HighLevelRNN"
-vstr = "oracleZ_HighLevelRNN"
+vstr = "Q_AddMDec_logloss_HighLevelRNN"
 
 cli = (
     "--env=ymaze_instr_hl "
@@ -115,13 +115,13 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    #"--number_instruction_coef=9 "
+    "--number_instruction_coef=200 "
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1166 " # 1146 is with only depth. add hl_K and hl_d_H to get 1166
+    "--rnn_size=1166 " # 1146 is with only depth. add hl_K and hl_d_H to get 1166 (add 2 extra for oracle context bypass)
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 "
     # "--ppo_clip_ratio=0.25 "
@@ -131,7 +131,7 @@ cli = (
     # "--decoder_type=sr_transformer "
     "--reward_input=False " # add + 1 to rnn size
     "--DG_context_mod=None "
-    "--oracle_context=True " # set to true if stage1 HL_RNN will use oracle to fix z
+    "--oracle_context=False " # set to true if stage1 HL_RNN will use oracle to fix z
     "--Decoder_context_mod=additive " 
     "--hl_K=4 "
     "--hl_d_H=16 "

@@ -70,7 +70,7 @@ class MlpDecoderFiLMJit(Decoder):
             # Identity init — gamma=1, beta=0 so FiLM starts as passthrough
             # (film_residual_init from configuration_notes.md)
             nn.init.zeros_(self.film_gamma.weight)
-            nn.init.ones_(self.film_gamma.bias)    # gamma starts at 1
+            nn.init.ones_(self.film_gamma.bias)    # gamma starts at 1 
             nn.init.zeros_(self.film_beta.weight)
             nn.init.zeros_(self.film_beta.bias)    # beta starts at 0
 
@@ -87,7 +87,7 @@ class MlpDecoderFiLMJit(Decoder):
         h = self.mlp(x)
     
         if self.context_dim > 0 and context is not None:
-            gamma = self.film_gamma(context)
+            gamma = self.film_gamma(context) # it functions as a gate to amplify or silence the input based on the context/mode.
             beta = self.film_beta(context)
             h = gamma * h + beta
             
@@ -120,11 +120,14 @@ class MlpDecoderAdditiveJit(Decoder):
 
         if context_dim > 0:
             # Project the 2D oracle context into the CA3 feature space before MLP
-            self.context_proj = nn.Linear(context_dim, decoder_input_size, bias=False)
+            self.context_proj = nn.Linear(context_dim, decoder_input_size, bias=False) # this is the shift vector to look up which mode to use for the additive injection.
             
             # Orthogonal initialization to ensure the different oracle contexts 
             # push the network in distinctly different directions at the start of training.
             nn.init.orthogonal_(self.context_proj.weight)
+
+            ##LOG PER MODE THE PROBABİLİTY OF CHOOSING EITHER ARM
+            ### IF THIS ORTHOGONALIZATION IS NOT ENOUGH, ADD A LOSS TERM TO THE FINAL LOSS (in learner): the less orthogonal the more loss
 
     def forward(self, core_output, context=None):
         # Extract bypass context from the concatenated core_output
@@ -145,14 +148,15 @@ class MlpDecoderAdditiveJit(Decoder):
         return self.decoder_out_size
 
 def make_hipposlam_decoder(cfg: Config, core_input_size: int) -> Decoder:
+    if cfg.core_name == "BypassSS_HighLevelRNN":
+        context_size = 4 # when using high-level RNN, K = 4 modes
+    else:
+        context_size = 2# for 2D oracle context to only low-level CA3 core
+    input_size = core_input_size - context_size # send depth features to MLP like original did. Context instead does additive modulation
+    
     if getattr(cfg, "Decoder_context_mod") == "FiLM":
-        context_size = 2
-        input_size = core_input_size - context_size # send depth features to MLP like original did. Context instead does FiLM modulation
         return MlpDecoderFiLMJit(cfg, input_size, context_dim=context_size)
     elif getattr(cfg, "Decoder_context_mod") == "additive":
-        #context_size = 2 # for 2D oracle context to only low-level CA3 core
-        context_size = 4 # when using high-level RNN, K = 4 modes
-        input_size = core_input_size - context_size # send depth features to MLP like original did. Context instead does additive modulation
         return MlpDecoderAdditiveJit(cfg, input_size, context_dim=context_size)
     else:
         return MlpDecoderJit(cfg, core_input_size)

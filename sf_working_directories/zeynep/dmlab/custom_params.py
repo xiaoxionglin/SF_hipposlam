@@ -72,14 +72,14 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     ##      Oracle context modulation parameters (DG & Decoder)      ##
     p.add_argument("--DG_context_mod", default="None", type=str, choices=["None", "concat", "multiply", "sigmoid"], help="Whether to use context modulation in the DG layer.")
     p.add_argument("--Decoder_context_mod", default="None", type=str, choices=["None", "enter", "FiLM", "additive"], help="Whether to use context modulation in the decoder layer.")
-    p.add_argument("--reward_input", default=False, type=bool, help="Whether to use the reward input as an additional input to the encoder.")
-    p.add_argument("--oracle_context", default=False, type=bool, help="Whether to enable instruction-driven oracle context in the encoder.")
+    p.add_argument("--reward_input", default=False, type=str2bool, help="Whether to use the reward input as an additional input to the encoder.")
+    p.add_argument("--oracle_context", default=False, type=str2bool, help="Whether to enable instruction-driven oracle context in the encoder.")
     ##       Context Inference Module        ## 
     p.add_argument("--context_hidden_size", default=6, type=int, help="Hidden size of the context RNN.") 
     p.add_argument("--decoder_context_dim", default=6, type=int, help="Dimension of the context vector used in the decoder.") 
     p.add_argument("--dg_strength", default=0.1, type=float, help="Strength of the context modulation in the DG layer.")
     p.add_argument("--context_decay", default=0.95, type=float, help="Decay factor for the context RNN's value state.")
-    p.add_argument("--learn_decay", default=True, type=bool, help="Whether to learn the decay factor for the context RNN's value state via backpropagation.")
+    p.add_argument("--learn_decay", default=True, type=str2bool, help="Whether to learn the decay factor for the context RNN's value state via backpropagation.")
     ##      High Level RNN parameters      ##
     p.add_argument("--hl_K", default=4, type=int, help="Number of modes for the high-level RNN.")
     p.add_argument("--hl_d_H", default=16, type=int, help="Dimension of the high-level RNN's hidden state.")

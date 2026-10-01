@@ -27,7 +27,7 @@ from sf_working_directories.zeynep.dmlab.dmlab_env import (
 from sf_working_directories.zeynep.dmlab.dmlab_level_cache import DmlabLevelCaches, make_dmlab_caches
 
 # from sf_working_directories.default.dmlab.custom_learner import make_hipposlam_learner
-# from sf_working_directories.zeynep.dmlab.custom_actor_critic import make_hipposlam_actor_critic
+from sf_working_directories.zeynep.dmlab.custom_actor_critic import make_hipposlam_actor_critic
 
 from sf_working_directories.zeynep.dmlab.dmlab_params import add_dmlab_env_args, dmlab_override_defaults
 
@@ -46,13 +46,15 @@ def register_dmlab_envs(level_caches: Optional[DmlabLevelCaches] = None):
         register_env(env.name, env_factory.make_env)
 
 
-def register_dmlab_components(level_caches: Optional[DmlabLevelCaches] = None):
+
+def register_dmlab_components(level_caches: Optional[DmlabLevelCaches] = None, cfg: Config = None):
     register_dmlab_envs(level_caches)
     global_model_factory().register_encoder_factory(make_hipposlam_encoder)
     global_model_factory().register_model_core_factory(make_hipposlam_core)
     global_model_factory().register_decoder_factory(make_hipposlam_decoder)
 
-    # global_model_factory().register_actor_critic_factory(make_hipposlam_actor_critic)
+    if cfg.core_name == "BypassSS_HighLevelRNN":
+        global_model_factory().register_actor_critic_factory(make_hipposlam_actor_critic)
 
     # global_learner_factory().register_learner_factory(make_hipposlam_learner)
 
@@ -113,7 +115,7 @@ def main():
     register_msg_handlers(cfg, runner)
 
     level_caches = initialize_level_cache(cfg, get_mp_ctx(cfg.serial_mode))
-    register_dmlab_components(level_caches)
+    register_dmlab_components(level_caches, cfg) ## ADDED CFG
 
     status = runner.init()
     if status == ExperimentStatus.SUCCESS:
