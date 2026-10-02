@@ -46,6 +46,7 @@ def test_layer2_lstm_baseline_keeps_inputs_and_trains_projection_and_lstm(tmp_pa
     monkeypatch.setattr(custom_encoder.models, "resnet18", local_resnet18)
     cfg = _baseline_cfg(tmp_path, mode)
     assert cfg.rnn_size == cfg.cli_args["rnn_size"] == 256
+    assert cfg.rnn_persistent_state_size == 0
     assert (cfg.encoder_conv_architecture, cfg.DG_name, cfg.core_name, cfg.rnn_type) == (
         "layer2_resnet18",
         "batchnorm_relu",

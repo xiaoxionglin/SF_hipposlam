@@ -224,6 +224,7 @@ def maybe_overwrite_rnn_size(cfg):
     # Sample Factory's LSTM size is a trainable hidden width, whereas the
     # BypassSS value below is a serialized CA3 state layout. Never conflate them.
     if getattr(cfg, "layer2_lstm_baseline", "off") != "off":
+        cfg.rnn_persistent_state_size = 0
         return
 
     readout_mode = getattr(cfg, "ca3_state_readout_mode", "off")
