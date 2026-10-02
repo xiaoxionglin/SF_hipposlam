@@ -1,0 +1,110 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.14.0",
+  "study_id": "layer2_lstm_sparsity_qualification_20261002",
+  "description": "Paired workspace-only training and checkpoint qualification for sparse versus dense projected layer-2 ResNet LSTM on the same five-cue external-reward task.",
+  "expected_runs": 2,
+  "metadata": {
+    "baseline_code_commit": "e8506c9b69457f5385937eb0ea6bdf3994f75906",
+    "reward_stream": "external",
+    "comparison": "post_batchnorm_sparsification_only",
+    "qualification_frames": 4096
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "layer2_lstm_sparsity_qualification_20261002",
+    "workspace_root": "/work/classic/fr_xl1014-corridor-geometry",
+    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/layer2_lstm_qualification_20261002/train_dir",
+    "run_name_template": "L2LSTM_{sparsification_label}_S{seed}",
+    "condition_name_template": "L2LSTM_{sparsification_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_cued_reward5",
+      "--algo=APPO",
+      "--device=cpu",
+      "--dmlab_renderer=software",
+      "--dmlab_runfiles_path=/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/layer2_lstm_qualification_20261002/runtime/dmlab_runfiles",
+      "--dmlab_level_cache_path=/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/layer2_lstm_qualification_20261002/runtime/dmlab_cache",
+      "--dmlab_use_level_cache=False",
+      "--dmlab_navigation_action_set=True",
+      "--dmlab_reduced_action_set=False",
+      "--dmlab_extended_action_set=False",
+      "--env_frameskip=4",
+      "--depth_sensor=True",
+      "--depth_sensor_inverse=True",
+      "--normalize_input=False",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--reward_instruction_count=5",
+      "--Hippo_n_feature=64",
+      "--DG_BN_intercept=2.43",
+      "--rnn_size=256",
+      "--actor_critic_share_weights=True",
+      "--distance_learning=False",
+      "--rec_distances=False",
+      "--online_spatial_telemetry=False",
+      "--use_internal=False",
+      "--use_external=True",
+      "--advantage_reward_source=external",
+      "--iterative_update=False",
+      "--with_vtrace=False",
+      "--with_wandb=False",
+      "--num_policies=1",
+      "--num_workers=2",
+      "--num_envs_per_worker=2",
+      "--worker_num_splits=2",
+      "--rollout=16",
+      "--recurrence=16",
+      "--batch_size=64",
+      "--num_batches_per_epoch=1",
+      "--num_epochs=1",
+      "--learning_rate=0.0002",
+      "--train_for_env_steps=4096",
+      "--checkpoint_frame_targets=2048,4096",
+      "--save_initial_checkpoint=True",
+      "--save_every_sec=600",
+      "--keep_checkpoints=2"
+    ]
+  },
+  "bases": [
+    {
+      "name": "CUE5",
+      "label": "CUE5",
+      "metadata": {
+        "task": "openfield_map2_cued_reward5"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "name": "sparsification",
+      "levels": [
+        {
+          "value": "sparse",
+          "label": "SPARSE",
+          "args": ["--layer2_lstm_baseline=sparse"],
+          "metadata": {"projected_activation": "threshold_relu"}
+        },
+        {
+          "value": "dense",
+          "label": "DENSE",
+          "args": ["--layer2_lstm_baseline=dense"],
+          "metadata": {"projected_activation": "identity"}
+        }
+      ]
+    }
+  ],
+  "seeds": [99],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 2048,
+    "synchronized_steps": [2048, 4096],
+    "group_by": ["base", "sparsification"],
+    "contrast_group_by": ["base"],
+    "replicate_by": ["seed"],
+    "window_metrics": {},
+    "cumulative_metrics": {},
+    "contrasts": []
+  },
+  "telemetry": {}
+}
