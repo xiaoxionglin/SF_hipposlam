@@ -39,8 +39,7 @@ def certify(run_dir, checkpoint, output):
     from sample_factory.algo.utils.make_env import make_env_func_batched
     from sample_factory.algo.utils.model_sharing import ParameterServer
     from sample_factory.utils.attr_dict import AttrDict
-    from sf_working_directories.IntrMotiv.dmlab.controller_learner import ControllerLearner
-    from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
+    from sf_working_directories.IntrMotiv.dmlab.custom_learner import make_hipposlam_learner
     from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import register_dmlab_components
     from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
 
@@ -66,8 +65,7 @@ def certify(run_dir, checkpoint, output):
     versions = torch.zeros(1, dtype=torch.int32)
     server = ParameterServer(0, versions, False)
     mode = getattr(cfg, "controller_learning", "ppo")
-    cls = ControllerLearner if mode == "ddqn" else DistanceLearnerReward
-    learner = cls(cfg, info, versions, 0, server)
+    learner = make_hipposlam_learner(cfg, info, versions, 0, server)
     learner.init()
     saved = load_checkpoint_dict(immutable, torch.device("cpu"))
     assert_exact(saved["model"], learner.actor_critic.state_dict())
