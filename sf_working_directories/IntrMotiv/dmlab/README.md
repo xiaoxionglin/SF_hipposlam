@@ -37,3 +37,31 @@ that actually drive learning:
 The detailed learner metrics remain available under
 `train/reward_for_advantage_*`, `train/intrinsic_reward_*`, and
 `train/env_reward_*`.
+
+## Matched layer2 ResNet + LSTM baseline
+
+Use `--layer2_lstm_baseline=sparse` or `--layer2_lstm_baseline=dense` on an
+externally rewarded level. Both modes reuse IntrMotiv's frozen ImageNet ResNet-18
+through layer2, number-instruction encoding, capped inverse-depth path, DG-width
+linear projection with BatchNorm, decoder, action interface, and ordinary PPO.
+The first `Hippo_n_feature` projected values enter a standard LSTM. The depth
+and cue bypass goes directly to the decoder on each step, matching the BypassSS
+input routing. The switch selects `core_name=LstmDGBypass`, `rnn_type=lstm`,
+`encoder_conv_architecture=layer2_resnet18`, and joint PPO gradients. A legacy
+`--rnn_size=0` becomes a 256-unit LSTM; a positive explicit size is retained.
+
+`sparse` uses the existing thresholded ReLU DG output and `DG_BN_intercept`
+(default 2). `dense` returns the signed normalized linear projection before
+thresholding. Projection width, weights, and BatchNorm implementation are the
+same in both arms. The sparse/dense flag defaults to `off`, preserving older
+runs and checkpoints.
+
+The switch disables the default distance learner and DG-only online spatial
+telemetry when those options were not explicitly requested. It rejects explicit
+internal-reward, distance-learning, DG telemetry, CA3/HRL, and incompatible DG
+settings. For comparable runs, use the same externally rewarded level, RGBD and
+cue settings, PPO hyperparameters, seeds, frame budget, checkpoints, and
+evaluation protocol. Verify that the selected task supplies external reward;
+ordinary PPO has no learning signal from an all-zero reward stream. The switch
+does not reproduce IntrMotiv's DG-derived intrinsic reward or CA3 graph
+mechanisms.

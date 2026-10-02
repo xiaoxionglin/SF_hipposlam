@@ -269,12 +269,9 @@ class DGProjection_batchnorm_relu(nn.Module):
         out_features: int,
         intercept=2,
         batchnorm_semantics: str = "legacy_batch",
+        output_activation: str = "threshold_relu",
     ):
-        """
-        Enforces that each neuron's output (after softmax) is activated (set to 1)
-        only if its probability exceeds the running quantile (e.g., 98th percentile)
-        across previous batches.
-        """
+        """Normalize projected features, then optionally apply a sparse threshold."""
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -282,6 +279,9 @@ class DGProjection_batchnorm_relu(nn.Module):
         self.batchnorm1d = nn.BatchNorm1d(out_features, affine=False, momentum=0.1)
         self.activation = nn.ReLU()
         self.intercept = intercept
+        if output_activation not in ("threshold_relu", "identity"):
+            raise ValueError(f"Unknown DG output activation: {output_activation}")
+        self.output_activation = output_activation
         if batchnorm_semantics not in (
             "legacy_batch",
             "running_consistent",
@@ -512,7 +512,10 @@ class DGProjection_batchnorm_relu(nn.Module):
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.activation(self.preactivation(x) - self.intercept)
+        normalized = self.preactivation(x)
+        if self.output_activation == "identity":
+            return normalized
+        return self.activation(normalized - self.intercept)
 
 
 class DGProjection_batchnorm_relu_fixed(nn.Module):
@@ -967,6 +970,9 @@ class HipposlamEncoder(Encoder):
                 cfg.Hippo_n_feature,
                 intercept=intercept,
                 batchnorm_semantics=getattr(cfg, "dg_batchnorm_semantics", "legacy_batch"),
+                output_activation=(
+                    "identity" if getattr(cfg, "layer2_lstm_baseline", "off") == "dense" else "threshold_relu"
+                ),
             )
             self.DG_projection.freeze_running_stats = bool(getattr(cfg, "transfer_freeze_dg", False))
             self.DG_projection.calibrate_frozen_on_first_batch = bool(
@@ -1018,7 +1024,7 @@ class HipposlamEncoder(Encoder):
                 bypass_features = self.depth_encoder.get_out_size() + self.instructions_lstm_units
 
         self.bypass = False
-        if cfg.core_name.startswith("Bypass"):  # "Gate":
+        if cfg.core_name.startswith("Bypass") or getattr(cfg, "layer2_lstm_baseline", "off") != "off":
             self.bypass = True
             tmp_out_size += bypass_features
             log.info(f"using bypass, dim {bypass_features}")

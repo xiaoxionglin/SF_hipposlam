@@ -96,6 +96,113 @@ def initialize_level_cache(cfg: Config, mp_ctx: BaseContext) -> Optional[DmlabLe
     return caches
 
 
+def configure_layer2_lstm_baseline(cfg):
+    """Select a matched sparse/dense DG projection before model sizing.
+
+    Both arms keep the fixed visual trunk, map cue, depth bypass, and projection
+    width. The sole representation difference is the DG output activation.
+    """
+    mode = getattr(cfg, "layer2_lstm_baseline", "off")
+    if mode == "off":
+        return
+    if mode not in ("sparse", "dense"):
+        raise ValueError(f"Unknown layer2_lstm_baseline={mode}")
+
+    # These legacy defaults belong to IntrMotiv's auxiliary learner and DG
+    # telemetry. Disable them for a fresh baseline, but reject explicit use.
+    for name in ("distance_learning", "online_spatial_telemetry"):
+        if name in cfg.cli_args and bool(getattr(cfg, name)):
+            raise ValueError(f"layer2_lstm_baseline requires {name}=False")
+        setattr(cfg, name, False)
+
+    required = {
+        "distance_learning": False,
+        "rec_distances": False,
+        "use_internal": False,
+        "use_external": True,
+        "double_value": False,
+        "online_spatial_telemetry": False,
+        "hrl_controllable_graph": False,
+        "fixed_task_conditioning": False,
+        "dg_orthogonal_recruitment": False,
+        "hrl_action_path_integration": False,
+        "hrl_motion_policy_input": False,
+        "hrl_behavior_mode_condition": False,
+        "controller_her": False,
+        "transfer_freeze_dg": False,
+        "transfer_freeze_worker": False,
+        "iterative_update": False,
+        "actor_critic_share_weights": True,
+    }
+    for name, expected in required.items():
+        if bool(getattr(cfg, name, expected)) != expected:
+            raise ValueError(f"layer2_lstm_baseline requires {name}={expected}")
+    inactive = {
+        "intrinsic_goal_mode": "none",
+        "dg_ca3_reentry_inhibition": "none",
+        "dg_context_feedback": "none",
+        "dg_goal_input": "none",
+        "decoder_reward_gate": "none",
+        "dg_transition_prediction": "none",
+        "ca3_state_readout_mode": "off",
+        "ca3_graph_anchor_mode": "off",
+        "hrl_goal_conditioning": "legacy",
+        "hrl_exploration_policy": "shared",
+        "hrl_manager_mode": "visit_direct",
+        "hrl_landmark_geometry": "none",
+        "controller_learning": "ppo",
+        "transfer_scope": "none",
+    }
+    for name, expected in inactive.items():
+        if getattr(cfg, name, expected) != expected:
+            raise ValueError(f"layer2_lstm_baseline requires {name}={expected}")
+    if getattr(cfg, "advantage_reward_source", None) not in (None, "external"):
+        raise ValueError("layer2_lstm_baseline requires advantage_reward_source=external")
+    if getattr(cfg, "DG_name", None) not in (None, "batchnorm_relu"):
+        raise ValueError("layer2_lstm_baseline requires DG_name=batchnorm_relu")
+    for name in ("DG_lr", "DG_temperature", "DG_batch_q", "DG_softmax"):
+        if getattr(cfg, name, None):
+            raise ValueError(f"layer2_lstm_baseline requires {name} to be unset")
+    if getattr(cfg, "dg_batchnorm_semantics", "legacy_batch") != "legacy_batch":
+        raise ValueError("layer2_lstm_baseline requires dg_batchnorm_semantics=legacy_batch with DefaultLearner")
+    if mode == "sparse" and float(getattr(cfg, "DG_BN_intercept", 2.0)) <= 0:
+        raise ValueError("sparse layer2_lstm_baseline requires a positive DG_BN_intercept")
+
+    # Architecture-specific settings may be inherited from a CA3 study. The
+    # baseline switch owns these values; all task and rollout settings remain.
+    cfg.encoder_conv_architecture = "layer2_resnet18"
+    cfg.encoder_name = None
+    cfg.DG_name = "batchnorm_relu"
+    cfg.core_name = "LstmDGBypass"
+    cfg.use_rnn = True
+    cfg.rnn_type = "lstm"
+    cfg.ppo_dg_gradient = "joint"
+    cfg.extra_encoder_losses = False
+    cfg.advantage_reward_source = "external"
+    requested_size = int(getattr(cfg, "rnn_size", 256))
+    if requested_size == 0:
+        requested_size = 256
+    if requested_size < 1:
+        raise ValueError("layer2_lstm_baseline requires positive rnn_size (or 0 for 256)")
+    cfg.rnn_size = requested_size
+    cfg.cli_args["rnn_size"] = requested_size
+    for name in (
+        "encoder_conv_architecture",
+        "encoder_name",
+        "DG_name",
+        "core_name",
+        "use_rnn",
+        "rnn_type",
+        "ppo_dg_gradient",
+        "extra_encoder_losses",
+        "advantage_reward_source",
+        "distance_learning",
+        "online_spatial_telemetry",
+    ):
+        if name in cfg.cli_args:
+            cfg.cli_args[name] = getattr(cfg, name)
+
+
 def maybe_overwrite_rnn_size(cfg):
     if getattr(cfg, "extra_decoder_loss", False):
         raise ValueError(
@@ -113,6 +220,11 @@ def maybe_overwrite_rnn_size(cfg):
     )
     cfg.wandb_step_metric_namespaces = ("intrmotiv",)
     cfg.head_l1_size = int(cfg.Hippo_n_feature)
+
+    # Sample Factory's LSTM size is a trainable hidden width, whereas the
+    # BypassSS value below is a serialized CA3 state layout. Never conflate them.
+    if getattr(cfg, "layer2_lstm_baseline", "off") != "off":
+        return
 
     readout_mode = getattr(cfg, "ca3_state_readout_mode", "off")
     goal_mode = getattr(cfg, "ca3_worker_goal_mode", "target_id")
@@ -454,6 +566,7 @@ def parse_dmlab_args(argv=None, evaluation=False):
     # A deliberately requested time schedule keeps its historical meaning.
     if "checkpoint_frame_targets" not in cfg.cli_args and cfg.save_milestones_sec > 0:
         cfg.checkpoint_frame_targets = ""
+    configure_layer2_lstm_baseline(cfg)
     maybe_overwrite_rnn_size(cfg)
     return cfg
 

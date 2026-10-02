@@ -69,6 +69,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="simple sequence, simply shrinking feature dimensions and expanding features to include their history",
     )
     p.add_argument("--encoder_name", default=None, type=str, help="actually using dmlab encoders")
+    p.add_argument(
+        "--layer2_lstm_baseline",
+        default="off",
+        choices=("off", "sparse", "dense"),
+        help="Opt-in frozen layer2 ResNet + LSTM external-reward PPO baseline; compare thresholded DG with a signed dense projection.",
+    )
     p.add_argument("--encoder_load_path", default=None, type=str, help="if loading encoder, the path")
     p.add_argument(
         "--transfer_model_path", default=None, type=str, help="checkpoint used only to initialize transfer weights"
@@ -162,7 +168,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--rec_distances",
         default=None,
-        type=bool,
+        type=str2bool,
         help="Record the distance between the propagation of each individual sequence",
     )
     p.add_argument(

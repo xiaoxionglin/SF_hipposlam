@@ -2179,7 +2179,51 @@ class ModelHipposlam(ModelCore):
         return x, new_rnn_states
 
 
+class LstmDGWithBypassCore(ModelCore):
+    """Replace CA3 with an LSTM while keeping the controller bypass direct.
+
+    The first ``Hippo_n_feature`` encoder values enter Sample Factory's LSTM.
+    Remaining depth and cue values reach the decoder in the current step, as
+    they do in BypassSS. Only the LSTM hidden/cell state is recurrent.
+    """
+
+    def __init__(self, cfg: Config, input_size: int):
+        super().__init__(cfg)
+        self.dg_size = int(cfg.Hippo_n_feature)
+        if input_size < self.dg_size:
+            raise ValueError("LSTM baseline encoder is narrower than its DG projection")
+        self.bypass_size = input_size - self.dg_size
+        self.dg_core = ModelCoreRNN(cfg, self.dg_size)
+        self.core_output_size = self.dg_core.get_out_size()
+
+    def forward(self, head_output, rnn_states):
+        if isinstance(head_output, PackedSequence):
+            dg_input = PackedSequence(
+                head_output.data[:, : self.dg_size],
+                head_output.batch_sizes,
+                head_output.sorted_indices,
+                head_output.unsorted_indices,
+            )
+            dg_output, new_state = self.dg_core(dg_input, rnn_states)
+            output = PackedSequence(
+                torch.cat((dg_output.data, head_output.data[:, self.dg_size :]), dim=-1),
+                head_output.batch_sizes,
+                head_output.sorted_indices,
+                head_output.unsorted_indices,
+            )
+            return output, new_state
+        dg_output, new_state = self.dg_core(head_output[:, : self.dg_size], rnn_states)
+        return torch.cat((dg_output, head_output[:, self.dg_size :]), dim=-1), new_state
+
+    def get_out_size(self) -> int:
+        return self.core_output_size + self.bypass_size
+
+
 def make_hipposlam_core(cfg: Config, core_input_size: int) -> ModelCore:
+    if cfg.core_name == "LstmDGBypass":
+        if getattr(cfg, "layer2_lstm_baseline", "off") == "off":
+            raise ValueError("LstmDGBypass is selected by layer2_lstm_baseline")
+        return LstmDGWithBypassCore(cfg, core_input_size)
     if cfg.core_name:
         if cfg.core_name == "simple_sequence":
             core = SimpleSequenceCore(cfg, core_input_size)
