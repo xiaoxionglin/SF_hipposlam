@@ -83,6 +83,8 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     ##      High Level RNN parameters      ##
     p.add_argument("--hl_K", default=4, type=int, help="Number of modes for the high-level RNN.")
     p.add_argument("--hl_d_H", default=16, type=int, help="Dimension of the high-level RNN's hidden state.")
+    p.add_argument("--hl_is_policy", default=True, type=str2bool, help="Whether the high-level RNN uses policy logits instead of Q-values.")
+    p.add_argument("--context_injection_coef", default=1.0, type=float, help="Coefficient for scaling the context vector before injection into the decoder.")
     ###################  
 
     p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")

@@ -64,14 +64,14 @@ class MlpDecoderFiLMJit(Decoder):
         self.decoder_out_size = calc_num_elements(self.mlp, (decoder_input_size,))
 
         if context_dim > 0:
-            self.film_gamma = nn.Linear(context_dim, self.decoder_out_size) #previously was input_size, could be why it didnt work
+            self.film_gamma = nn.Linear(context_dim, self.decoder_out_size) #decoder_out_size is equal to 128 
             self.film_beta = nn.Linear(context_dim, self.decoder_out_size)
 
             # Identity init — gamma=1, beta=0 so FiLM starts as passthrough
             # (film_residual_init from configuration_notes.md)
-            nn.init.zeros_(self.film_gamma.weight)
+            nn.init.orthogonal_(self.film_gamma.weight)
             nn.init.ones_(self.film_gamma.bias)    # gamma starts at 1 
-            nn.init.zeros_(self.film_beta.weight)
+            nn.init.orthogonal_(self.film_beta.weight)
             nn.init.zeros_(self.film_beta.bias)    # beta starts at 0
 
 
@@ -108,6 +108,7 @@ class MlpDecoderAdditiveJit(Decoder):
         self.processed_core_size = decoder_input_size
         self.core_input_size = decoder_input_size + context_dim
         self.context_dim = context_dim
+        self.injection_coef = cfg.get("context_injection_coef", 1.0)  # default to 1.0 if not specified
 
         decoder_layers: List[int] = cfg.decoder_mlp_layers
         activation = nonlinearity(cfg)
@@ -126,7 +127,6 @@ class MlpDecoderAdditiveJit(Decoder):
             # push the network in distinctly different directions at the start of training.
             nn.init.orthogonal_(self.context_proj.weight)
 
-            ##LOG PER MODE THE PROBABİLİTY OF CHOOSING EITHER ARM
             ### IF THIS ORTHOGONALIZATION IS NOT ENOUGH, ADD A LOSS TERM TO THE FINAL LOSS (in learner): the less orthogonal the more loss
 
     def forward(self, core_output, context=None):
@@ -140,7 +140,8 @@ class MlpDecoderAdditiveJit(Decoder):
         if self.context_dim > 0 and context is not None:
             # Additive injection: shifts the CA3 features by a learned direction 
             # before they are processed by the MLP.
-            x = x + self.context_proj(context)
+            scaled_context = context * self.injection_coef
+            x = x + self.context_proj(scaled_context)
 
         return self.mlp(x)
     

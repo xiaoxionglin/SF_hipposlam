@@ -12,8 +12,16 @@ _params = ParamGrid(
         #("learning_rate", [0.00002, 0.0001]),
         #("seed", [2222]),
         #("DG_context_mod", ["concat", "sigmoid", "multiply"]),
+        ("Decoder_context_mod", ["additive", "FiLM"]),
+        ("context_injection_coef", [9, 200]),
     ]
 )
+
+# 01.10 - Bug fixed: q-loss addition to total loss function in learner
+# 02.10 - Bug fixed: chosen_arm pulse removed, now chosen_arm is persistent until trial ends, might be
+# the reason why HL-RNN is not learning to persist the mode (z) until trial ends. Now, the chosen_arm is persistent until trial ends, and the outcome_event_pulse is used to tick the HL-RNN only at outcome events.
+# 02.10 - Policy gradient loss is now added to the total loss function in the learner, so that the HL-RNN can learn to output a policy (z) that maximizes the expected reward. The Q-loss is still used for the value function update, but it is not used for the policy update.
+# 02.10 - The first run with persistent rewards in environment was buggy so I reverted back the reward pulse in envrionment but the others keep persistent.
 
 # _params = ParamGrid(
 #     [
@@ -57,7 +65,7 @@ _params = ParamGrid(
 #)
 
 prj = "ymaze_HighLevelRNN"
-vstr = "Q_AddMDec_logloss_HighLevelRNN"
+vstr = "Q_grid_HighLevelRNN"
 
 cli = (
     "--env=ymaze_instr_hl "
@@ -132,9 +140,10 @@ cli = (
     "--reward_input=False " # add + 1 to rnn size
     "--DG_context_mod=None "
     "--oracle_context=False " # set to true if stage1 HL_RNN will use oracle to fix z
-    "--Decoder_context_mod=additive " 
+    #"--Decoder_context_mod=additive " 
     "--hl_K=4 "
     "--hl_d_H=16 "
+    "--hl_is_policy=True "
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
 )
 

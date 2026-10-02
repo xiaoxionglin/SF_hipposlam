@@ -958,14 +958,6 @@ class DefaultLearner(BaseLearner):
             old_values = mb["values"]
             value_loss = self._value_loss(values, old_values, targets, clip_value, valids, num_invalids)
 
-        ## ADDED 01.10.26 Q-loss
-        core = getattr(self.actor_critic, 'core', getattr(self.actor_critic, 'actor_core', None))
-        if core is not None and hasattr(core, 'last_q_loss'):
-            q_loss = core.last_q_loss
-        else:
-            q_loss = torch.tensor(0.0, device=self.device)
-        ######
-
         loss_summaries = dict(
             ratio=ratio,
             clip_ratio_low=clip_ratio_low,
@@ -978,7 +970,20 @@ class DefaultLearner(BaseLearner):
         )
         del outputs
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, q_loss, loss_summaries
+        ## ADDED 01.10.26 Q-loss
+        core = getattr(self.actor_critic, 'core', getattr(self.actor_critic, 'actor_core', None))
+        if core is not None and hasattr(core, 'last_hl_loss'):
+            hl_loss = core.last_hl_loss
+
+            hl_metrics = getattr(core, 'last_hl_metrics', {})
+            for key, value in hl_metrics.items():
+                loss_summaries[key] = value
+        else:
+            hl_loss = torch.tensor(0.0, device=self.device)
+        ######
+        
+
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, hl_loss, loss_summaries
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -1042,20 +1047,20 @@ class DefaultLearner(BaseLearner):
                         kl_old,
                         kl_loss,
                         value_loss,
-                        q_loss,
+                        hl_loss,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
-                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss + q_loss 
+                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss + hl_loss 
                     critic_loss = value_loss
                     loss: Tensor = actor_loss + critic_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
                     ## ADDED 01.10 TO LOG, comment out later ##
-                    log.info("Batch %d | Total Loss: %.4f | Q-Loss: %.4f", batch_num, to_scalar(loss), to_scalar(q_loss))
+                    log.info("Batch %d | Total Loss: %.4f | HL-Loss: %.4f", batch_num, to_scalar(loss), to_scalar(hl_loss))
 
                     high_loss = 30.0
                     if torch.abs(loss) > high_loss:
@@ -1066,7 +1071,7 @@ class DefaultLearner(BaseLearner):
                             to_scalar(value_loss),
                             to_scalar(exploration_loss),
                             to_scalar(kl_loss),
-                            to_scalar(q_loss)
+                            to_scalar(hl_loss)
                         )
 
                         # perhaps something weird is happening, we definitely want summaries from this step

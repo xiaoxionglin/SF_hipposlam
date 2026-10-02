@@ -7,84 +7,6 @@ import torch.nn.functional as F
 from torch import Tensor
 from typing import Tuple, Dict
 
-
-# QHead  —  §16, §9.2
-
-class QHead(nn.Module):
-    def __init__(self, d_H: int, K: int, tau: float = 1.0):
-        super().__init__()
-        self.tau  = tau
-        self.head = nn.Linear(d_H, K)
-
-    def forward(self, h: Tensor) -> Tensor:
-        """h: (B, d_H)  →  q: (B, K)"""
-        q      = self.head(h) # current estimate of expected reward for each mode | THIS IS LEARNED BY THE NETWORK
-        return q # output raw expected rewards.
-
-
-# sample_mode  —  §9, §18 step 4
-
-def sample_mode(scores: Tensor, tau: float = 1.0) -> Tuple[Tensor, Tensor]: #scale the raw values by temperature tau to control exploration vs exploitation
-    """
-    scores: (B, K)
-    → z_onehot: (B, K)   one-hot e(z_k)
-    → z_index:  (B,)     integer index  — §17 current_z_index
-    """
-    K = scores.size(-1)
-    log_pi = F.log_softmax(scores / tau, dim=-1) # convert raw Q-values to log-probabilities (distribution) for sampling 
-
-    if torch.is_grad_enabled():
-        z_index = torch.distributions.Categorical(logits=log_pi).sample() # from distribution, sample a discrete mode index z_k
-    else:
-        z_index = log_pi.argmax(dim=-1)
-    z_onehot = F.one_hot(z_index, num_classes=K).float() # return binary one-hot vector of the sampled mode index | RNN and DECODER RECIEVE IT
-    return z_onehot, z_index 
-
-
-# Logging helpers  —  §22
-
-def compute_log_dict(
-    scores:       Tensor,   # (B, K)  Q-values
-    z_index:      Tensor,   # (B,)    selected mode index
-    h_high_new:   Tensor,   # (B, d_H)
-    reward_prev:  Tensor,   # (B,)
-    tau:          float,
-    chosen_arm:   Tensor = None, # (B,) optional, for logging
-    K=4
-) -> Dict[str, Tensor]:
-    """
-    Recommended logging quantities (computed at decision points only).
-    High-level process:
-        z_k, scores/Q vector, selection entropy, h_k, r_k
-    Q-head specific:
-        all Q_H(h_k, z), selected-Q vs reward, gap between top two Q-values
-    """
-    pi      = F.softmax(scores / tau, dim=-1)               # (B, K)
-    entropy = -(pi * (pi + 1e-8).log()).sum(dim=-1)         # (B,)  selection entropy
-    q_selected = scores.gather(                              # (B,)
-        dim=-1, index=z_index.unsqueeze(-1)
-    ).squeeze(-1)
-    top2       = scores.topk(k=2, dim=-1).values            # (B, 2)
-    q_gap      = top2[:, 0] - top2[:, 1]                   # (B,)  gap top1 - top2
-
-    log_dict = {"z_index": z_index, "scores": scores, "entropy": entropy, "h": h_high_new, "reward_prev": reward_prev,
-                "q_selected": q_selected, "q_gap": q_gap, "mode_probs": pi}
-
-    went_right = (chosen_arm == 1.0) if chosen_arm is not None else None
-    went_left  = (chosen_arm == 2.0) if chosen_arm is not None else None
-
-    for k in range(K):
-        went_mode_k = (z_index == k)
-        if went_mode_k.sum() > 0:
-            prob_R = went_right[went_mode_k].float().mean()
-            prob_L = went_left[went_mode_k].float().mean()
-
-            log_dict[f"prob_R_mode{k}"] = prob_R
-            log_dict[f"prob_L_mode{k}"] = prob_L
-
-    return log_dict
-
-
 # HighLevelContextRNN  —  §16, §18
 
 class HighLevelContextRNN_Stage1(nn.Module):
@@ -136,6 +58,94 @@ class HighLevelContextRNN_Stage1(nn.Module):
 
         # Passing the mode to decoder is handeled in the wrapper
         return h_high_new, z_new
+
+
+# QHead  —  §16, §9.2
+
+class QHead(nn.Module):
+    def __init__(self, d_H: int, K: int, tau: float = 1.0):
+        super().__init__()
+        self.tau  = tau
+        self.head = nn.Linear(d_H, K)
+
+    def forward(self, h: Tensor) -> Tensor:
+        """h: (B, d_H)  →  q: (B, K)"""
+        q      = self.head(h) # current estimate of expected reward for each mode | THIS IS LEARNED BY THE NETWORK
+        return q # output raw expected rewards.
+
+
+# sample_mode  —  §9, §18 step 4
+
+def sample_mode(scores: Tensor, tau: float = 1.0) -> Tuple[Tensor, Tensor]: #scale the raw values by temperature tau to control exploration vs exploitation
+    """
+    scores: (B, K)
+    → z_onehot: (B, K)   one-hot e(z_k)
+    → z_index:  (B,)     integer index  — §17 current_z_index
+    """
+    K = scores.size(-1)
+    log_pi = F.log_softmax(scores / tau, dim=-1) # convert raw Q-values to log-probabilities (distribution) for sampling 
+
+    if torch.is_grad_enabled():
+        z_index = torch.distributions.Categorical(logits=log_pi).sample() # from distribution, sample a discrete mode index z_k
+    else:
+        z_index = log_pi.argmax(dim=-1)
+    z_onehot = F.one_hot(z_index, num_classes=K).float() # return binary one-hot vector of the sampled mode index | RNN and DECODER RECIEVE IT
+    return z_onehot, z_index 
+
+
+# Logging helpers  —  §22
+
+def compute_log_dict(
+    scores_or_logits:       Tensor,   # (B, K)  Q-values
+    z_index:      Tensor,   # (B,)    selected mode index
+    h_high_new:   Tensor,   # (B, d_H)
+    reward_prev:  Tensor,   # (B,)
+    tau:          float,
+    chosen_arm:   Tensor = None, # (B,) optional, for logging
+    K=4,
+    is_policy: bool = False #if False, it does Q-learning, if True, it does policy gradient
+) -> Dict[str, Tensor]:
+    """
+    Recommended logging quantities (computed at decision points only).
+    High-level process:
+        z_k, scores/Q vector, selection entropy, h_k, r_k
+    Q-head specific:
+        all Q_H(h_k, z), selected-Q vs reward, gap between top two Q-values
+    """
+    if is_policy:
+        pi = F.softmax(scores_or_logits, dim=-1)               # (B, K)
+    else:
+        pi = F.softmax(scores_or_logits / tau, dim=-1)               # (B, K)
+
+    entropy = -(pi * (pi + 1e-8).log()).sum(dim=-1)         # (B,)  selection entropy
+
+    selected = scores_or_logits.gather(                              # (B,)
+        dim=-1, index=z_index.unsqueeze(-1)
+    ).squeeze(-1)
+
+    top2       = scores_or_logits.topk(k=2, dim=-1).values            # (B, 2)
+    gap      = top2[:, 0] - top2[:, 1]                   # (B,)  gap top1 - top2
+
+    if is_policy:
+        log_dict = {"z_index": z_index, "logits": scores_or_logits, "entropy": entropy, "h": h_high_new, "reward_prev": reward_prev,
+                    "logit_selected": selected, "logit_gap": gap, "mode_probs": pi}
+    else:
+        log_dict = {"z_index": z_index, "scores": scores_or_logits, "entropy": entropy, "h": h_high_new, "reward_prev": reward_prev,
+                    "q_selected": selected, "q_gap": gap, "mode_probs": pi}
+
+    went_right = (chosen_arm == 1.0) if chosen_arm is not None else None
+    went_left  = (chosen_arm == 2.0) if chosen_arm is not None else None
+
+    for k in range(K):
+        went_mode_k = (z_index == k)
+        if went_mode_k.sum() > 0:
+            prob_R = went_right[went_mode_k].float().mean()
+            prob_L = went_left[went_mode_k].float().mean()
+
+            log_dict[f"prob_R_mode{k}"] = prob_R
+            log_dict[f"prob_L_mode{k}"] = prob_L
+
+    return log_dict
 
 
 class HighLevelContextRNN_QLearning(nn.Module):
@@ -229,3 +239,214 @@ def q_loss(
     error = (q_selected - rewards) ** 2
     mask  = decision_mask.float()
     return (error * mask).sum() / (mask.sum() + 1e-8)
+
+
+### SECOND OPTION ###
+
+# Policy Gradient — §9.1 and §10
+class HighLevelContextRNN_Policy(nn.Module):
+    def __init__(self, d_H: int, K: int, tau: float = 1.0):
+        super().__init__()
+        self.K  = K
+        self.d_H = d_H
+        self.tau = tau
+        
+        # Keep your exact same RNN cell from the Q-learning version
+        self.rnn_cell    = nn.RNNCell(input_size=K + 1,
+                                              hidden_size=d_H,
+                                              nonlinearity='tanh')
+        
+        # Replace QHead with the new PolicyHead
+        self.policy_head = PolicyHead(d_H=d_H, K=K)
+
+    def forward(self, outcome_mask, prev_trial_reward, h_high: Tensor, z_prev: Tensor, chosen_arm) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        """
+        1. Update state: h_k
+        2. Get logits:   l_k
+        3. Sample mode:  z_k
+        """
+        
+        # 1. Update the recurrent state exactly like you did before
+        rnn_in      = torch.cat([z_prev, prev_trial_reward[:,None]], dim=-1)  # (B, K+1)
+        h_candidate = self.rnn_cell(rnn_in, h_high)             # (B, d_H)
+        
+        # 2. Tick only at outcome events  —  §18 step 2
+        h_high_new = torch.where(outcome_mask[:, None], h_candidate, h_high,)               
+
+        # 2. Pass the new hidden state to the Policy Head to get logits
+        logits = self.policy_head(h_high_new)
+
+        # 3. Sample the mode using the new sample_mode function
+        z_candidate, z_candidate_index = sample_mode_policy(logits)
+
+        z_new = torch.where(
+            outcome_mask[:, None],
+            z_candidate,
+            z_prev,
+        )                                                        # (B, K)
+
+        z_index_prev = z_prev.argmax(dim=-1)     # (B,)
+        z_index_new  = torch.where(
+            outcome_mask,
+            z_candidate_index,
+            z_index_prev,
+        )
+
+        new_state = {
+            "high_level_h": h_high_new,
+            "current_z":    z_new,
+            "current_z_index": z_index_new,
+        }
+
+        log_dict = compute_log_dict(
+            logits, z_index_new, h_high_new, prev_trial_reward, self.tau, chosen_arm, K=self.K)
+
+        # Return 'logits' instead of 'scores' so Sample Factory saves them to the trajectory buffer!
+        return h_high_new, z_new, logits, new_state, log_dict
+
+# Policy-logit formulation  —  §9.1
+
+class PolicyHead(nn.Module):
+    def __init__(self, d_H: int, K: int):
+        super().__init__()
+        # l_k = W_pi * h_k + b_pi  —  §9.1
+        self.head = nn.Linear(d_H, K)
+
+    def forward(self, h: Tensor) -> Tensor:
+        """h: (B, d_H)  →  logits: (B, K)"""
+        logits = self.head(h) 
+        return logits
+
+# sample_mode  —  §9.1
+
+def sample_mode_policy(logits: Tensor) -> Tuple[Tensor, Tensor]:
+    """
+    logits: (B, K)  — denoted as l_k in §9.1
+    → z_onehot: (B, K)   one-hot e(z_k)
+    → z_index:  (B,)     integer index
+    
+    z_k ~ pi_H(.|h_k)  —  §9.1
+    """
+    K = logits.size(-1)
+    
+    if torch.is_grad_enabled():
+        # pi_H(z|h_k) = softmax(l_k)
+        dist = torch.distributions.Categorical(logits=logits)
+        # z_k ~ pi_H(.|h_k)
+        z_index = dist.sample()
+    else:
+        z_index = logits.argmax(dim=-1)
+        
+    z_onehot = F.one_hot(z_index, num_classes=K).float() 
+    return z_onehot, z_index
+
+
+def high_level_policy_loss(
+    logits: Tensor,        
+    z_indices: Tensor,     
+    rewards: Tensor,       
+    decision_mask: Tensor, 
+    entropy_coef: float = 0.05         
+) -> Tuple[Tensor, dict]:
+    """
+    L_H = -(R_k - b_k) * log(pi(z_k|h_k))
+    Returns: (total_loss, dict_of_metrics)
+    """
+    mask_float = decision_mask.float() # use the mask to multiply all non-decision points by zero, so they don't contribute to the loss
+    valid_transitions = mask_float.sum() + 1e-8 # to avoid division by zero in case there are no valid transitions
+    
+    log_pi_all = F.log_softmax(logits, dim=-1) # convert logits to log-probabilities
+    pi_all = torch.exp(log_pi_all) # convert logits to probabilities               
+    
+    log_pi_selected = log_pi_all.gather(dim=-1, index=z_indices.unsqueeze(-1)).squeeze(-1) # get the log-probabiltiy of the mode that was actually selected (z_k) for each batch element                                
+    entropy = -(pi_all * log_pi_all).sum(dim=-1) 
+    
+    # 1. The Baseline (b_k)
+    # Average rewards the HL RNN got in this batch. 
+    b_k = (rewards * mask_float).sum() / valid_transitions
+        
+    # 2. The Advantage (R_k - b_k)
+    # Difference between the actual reward and the baseline. This tells us how much better or worse the selected action was compared to the average.
+    advantages = rewards - b_k
+    advantages = advantages.detach() 
+    
+    # Losses
+    pg_loss = -(advantages * log_pi_selected)
+    total_loss = pg_loss - (entropy_coef * entropy)
+    
+    final_loss = (total_loss * mask_float).sum() / valid_transitions
+
+    # --- NEW: Create a dictionary of these specific Policy Gradient metrics ---
+    metrics = {
+        "hl/pg_baseline": b_k.item(),
+        "hl/pg_advantage": (advantages * mask_float).sum().item() / valid_transitions.item(),
+        "hl/pg_loss": (pg_loss * mask_float).sum().item() / valid_transitions.item()
+    }
+    
+    return final_loss, metrics
+
+### UNIFIED FOR Q-LEARNING AND POLICY GRADIENTS ###
+
+class HighLevelContextRNN_Learner(nn.Module):
+    """
+    Unified High-Level RNN that seamlessly handles BOTH Q-Learning and Policy Gradients
+    based on the 'is_policy' flag.
+    """
+    def __init__(self, K: int = 4, d_H: int = 16, tau: float = 1.0, is_policy: bool = False):
+        super().__init__()
+        self.K   = K
+        self.d_H = d_H
+        self.tau = tau
+        self.is_policy = is_policy
+
+        self.rnn_cell = nn.RNNCell(input_size=K + 1, hidden_size=d_H, nonlinearity='tanh')
+        
+        # This acts as BOTH the QHead and the PolicyHead
+        self.head = nn.Linear(d_H, K) 
+
+    def sample_mode(self, outputs: Tensor) -> Tuple[Tensor, Tensor]:
+        # Policy logits use raw outputs, Q-Learning uses temperature scaling
+        if self.is_policy:
+            log_pi = F.log_softmax(outputs, dim=-1)
+        else:
+            log_pi = F.log_softmax(outputs / self.tau, dim=-1)
+
+        if torch.is_grad_enabled():
+            z_index = torch.distributions.Categorical(logits=log_pi).sample()
+        else:
+            z_index = log_pi.argmax(dim=-1)
+            
+        z_onehot = F.one_hot(z_index, num_classes=self.K).float()
+        return z_onehot, z_index
+
+    def forward(self, outcome_mask, prev_trial_reward, h_high, z_prev, chosen_arm):
+        
+        # 1. Update State
+        rnn_in      = torch.cat([z_prev, prev_trial_reward[:,None]], dim=-1)
+        h_candidate = self.rnn_cell(rnn_in, h_high)             
+        h_high_new  = torch.where(outcome_mask[:, None], h_candidate, h_high)                                                        
+
+        # 2. Get Outputs (Q-Scores OR Logits)
+        outputs = self.head(h_high_new)         
+
+        # 3. Sample and Latch
+        z_candidate, z_candidate_index = self.sample_mode(outputs)                       
+
+        z_new = torch.where(outcome_mask[:, None], z_candidate, z_prev)                                                        
+        
+        z_index_prev = z_prev.argmax(dim=-1)
+        z_index_new  = torch.where(outcome_mask, z_candidate_index, z_index_prev)
+        
+        new_state = {
+            "high_level_h": h_high_new,
+            "current_z":    z_new,
+            "current_z_index": z_index_new,
+        }
+
+        # 4. Log
+        log_dict = compute_log_dict(
+            outputs, z_index_new, h_high_new, prev_trial_reward, 
+            self.tau, chosen_arm, K=self.K, is_policy=self.is_policy
+        )
+
+        return h_high_new, z_new, outputs, new_state, log_dict
