@@ -21,6 +21,13 @@ boundaries; the Q head does not read them during acting.
 4. The experiment's name said `Q_grid`, but `--hl_is_policy=True` selected its
    policy-gradient loss. This run now explicitly uses the intended Q regression.
 
+A negative `hl_loss` in that earlier policy run is possible without numerical
+error: the policy objective subtracts $0.05$ times the mode entropy. With four
+uniform modes and zero advantage, it is $-0.05\log 4 \approx -0.0693$. A finite
+Q-regression loss is a masked mean of squared errors and cannot be negative. If
+this experiment reports a negative high-level loss after switching to
+`--hl_is_policy=False`, check the effective launch arguments and run directory.
+
 ## Data and timing
 
 At a center outcome event, the old mode $z_{k-1}$ earned the latched reward
@@ -60,6 +67,14 @@ truncated-backpropagation window. No second PPO implementation is involved.
 | `custom_highlevelRNN.py` | Separate reward-state updates from mode sampling; sample or choose greedily using an explicit setting rather than autograd state. |
 | `custom_params.py` | Add `hl_history_len` and `hl_deterministic`. |
 | `exp_ymaze_HLRNN.py` | Set eight historical trials, update `rnn_size` from 1166 to 1342, and select Q regression. |
+
+The learner also passes its `valids` flag through the packed sequence. The
+high-level event mask now excludes invalid samples, matching the ordinary PPO
+losses. Computing the high-level loss inside the core is functional here: the
+learner reads `last_hl_loss` after the core forward pass, adds it to the total
+loss, and calls `backward()` on that total. The mutable attribute is a coupling
+to the current one-core-forward-per-minibatch flow; if that flow changes, return
+the auxiliary loss explicitly from the forward pass instead.
 
 For this configuration, eight records use $8(16+4+2)=176$ state elements.
 `hl_deterministic=False` is the training default. Set it to `True` only when

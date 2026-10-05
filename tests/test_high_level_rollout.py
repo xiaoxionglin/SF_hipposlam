@@ -8,7 +8,9 @@ import torch.nn.functional as F
 from sample_factory.algo.utils.shared_buffers import policy_output_shapes
 from sf_working_directories.zeynep.dmlab.custom_actor_critic import HighLevel_LossWrapper
 from sf_working_directories.zeynep.dmlab.custom_core import HighLevelRNNWrapperCore
-from sf_working_directories.zeynep.dmlab.custom_highlevelRNN import HighLevelContextRNN_Learner
+from sf_working_directories.zeynep.dmlab.custom_highlevelRNN import (
+    HighLevelContextRNN_Learner, high_level_policy_loss, q_loss,
+)
 
 
 def make_core():
@@ -89,7 +91,8 @@ def test_replay_uses_recorded_actor_mode_for_decoder():
 
     actor_z = F.one_hot(1 - state[:, -core.K:].argmax(dim=-1), core.K).float()
     history = state[:, core.history_start:core.history_start + core.history_size]
-    replay_input = torch.cat((frame(outcome=1, reward=1), history, actor_z), dim=-1)
+    replay_input = torch.cat((frame(outcome=1, reward=1), history, actor_z,
+                              torch.ones(1, 1)), dim=-1)
     packed = torch.nn.utils.rnn.pack_padded_sequence(replay_input.unsqueeze(0), [1])
     output, _ = core(packed, state)
     assert torch.equal(output.data[:, -core.K:], actor_z)
@@ -104,9 +107,34 @@ def test_replay_loss_reaches_prior_trial_update():
 
     history = state[:, core.history_start:core.history_start + core.history_size]
     actor_z = state[:, -core.K:]
-    replay_input = torch.cat((frame(outcome=1, reward=0), history, actor_z), dim=-1)
+    replay_input = torch.cat((frame(outcome=1, reward=0), history, actor_z,
+                              torch.ones(1, 1)), dim=-1)
     packed = torch.nn.utils.rnn.pack_padded_sequence(replay_input.unsqueeze(0), [1])
     core.zero_grad()
     core(packed, state)
     core.last_hl_loss.backward()
     assert core.hl_learner.rnn_cell.weight_ih.grad.abs().sum() > 0
+
+
+def test_invalid_transition_does_not_contribute_to_high_level_loss():
+    core = make_core()
+    state = torch.zeros(1, core.get_core_state_size())
+    with torch.no_grad():
+        _, state = core(frame(outcome=1), state)
+    history = state[:, core.history_start:core.history_start + core.history_size]
+    actor_z = state[:, -core.K:]
+    replay_input = torch.cat((frame(outcome=1, reward=1), history, actor_z,
+                              torch.zeros(1, 1)), dim=-1)
+    packed = torch.nn.utils.rnn.pack_padded_sequence(replay_input.unsqueeze(0), [1])
+    core(packed, state)
+    assert core.last_hl_loss.item() == 0.0
+
+
+def test_only_policy_objective_can_be_negative():
+    scores = torch.zeros(1, 1, 4)
+    chosen = torch.zeros(1, 1, dtype=torch.long)
+    rewards = torch.ones(1, 1)
+    mask = torch.ones(1, 1, dtype=torch.bool)
+    policy, _ = high_level_policy_loss(scores, chosen, rewards, mask)
+    assert policy.item() < 0  # Entropy bonus with zero advantage.
+    assert q_loss(scores, chosen, rewards, mask).item() >= 0

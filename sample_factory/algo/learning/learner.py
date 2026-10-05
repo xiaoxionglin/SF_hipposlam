@@ -575,7 +575,10 @@ class BaseLearner(Configurable):
                 # used only to train the high-level recurrent update.
                 core = self.actor_critic.core
                 history = mb.rnn_states[:, core.history_start:core.history_start + core.history_size]
-                head_outputs = torch.cat((head_outputs, history, mb.hl_z), dim=-1)
+                # Keep the high-level event loss on the same valid samples as PPO.
+                head_outputs = torch.cat(
+                    (head_outputs, history, mb.hl_z, valids[:, None].to(head_outputs.dtype)), dim=-1
+                )
             minibatch_size: int = head_outputs.size(0)
             outputs["minibatch_size"] = minibatch_size
             if return_outputs[0]:

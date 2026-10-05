@@ -710,9 +710,10 @@ class HighLevelRNNWrapperCore(ModelCore):
             T, B = head_output.shape[:2]
             # Learner._forward_pass appends the actor's selected mode to each
             # timestep. Never sample a new mode while replaying actor actions.
-            actor_z_seq = head_output[:, :, -self.K:]
-            actor_history_seq = head_output[:, :, -(self.K + self.history_size):-self.K]
-            head_output = head_output[:, :, :-(self.K + self.history_size)]
+            valid_seq = head_output[:, :, -1].bool()
+            actor_z_seq = head_output[:, :, -(self.K + 1):-1]
+            actor_history_seq = head_output[:, :, -(self.K + self.history_size + 1):-(self.K + 1)]
+            head_output = head_output[:, :, :-(self.K + self.history_size + 1)]
             
             h_high_t = h_high_prev
             z_t = z_prev
@@ -752,7 +753,7 @@ class HighLevelRNNWrapperCore(ModelCore):
                     outputs_seq.append(outputs_old)
                     z_indices_seq.append(z_t.argmax(dim=-1))
                     rewards_seq.append(prev_trial_reward_t)
-                    mask_seq.append(outcome_mask_t & (z_t.sum(dim=-1) > 0.5))
+                    mask_seq.append(outcome_mask_t & (z_t.sum(dim=-1) > 0.5) & valid_seq[t])
 
                     # 2. Update reward history, then use the actor's mode for
                     # the decoder and for the next event's reward assignment.
