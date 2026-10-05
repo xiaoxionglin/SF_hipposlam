@@ -11,8 +11,9 @@ _params = ParamGrid(
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
         ("DG_context_mod", ["concat", "multiply", "sigmoid", "None"]),
-        ("Decoder_context_mod", ["None"]), # verify rnn_size
+        ("Decoder_context_mod", ["FiLM", "additive"]), # verify rnn_size
         #("seed", [2222]),
+        ("context_injection_coef", [1, 200]),
     ]
 )
 
@@ -51,7 +52,7 @@ _params = ParamGrid(
 
 
 
-vstr = "INSTR_encoderonly_ablation"
+vstr = "INSTR_bypass_coeffAdd_orthoFilm_4frame_navigation"
 prj = "ymaze_stage0_oracle"
 
 cli = (
@@ -94,8 +95,9 @@ cli = (
     "--save_every_sec=120 "
     "--save_milestones_sec=5400 "
     "--decoder_mlp_layers 64 64 "
-    "--env_frameskip=8 "
-    "--dmlab_reduced_action_set=True "
+    "--env_frameskip=4 " # lowered from 8
+    #"--dmlab_reduced_action_set=True "
+    "--dmlab_navigation_action_set=True " # better turning
     "--core_name=BypassSS "
     "--rnn_type=gru "
     "--DG_name=batchnorm_relu "
@@ -110,13 +112,13 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    "--number_instruction_coef=1 " ## increase if needed, default is 1
+    "--number_instruction_coef=200 " ## increase if needed, default is 1
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1146 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER
+    "--rnn_size=1148 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 " 
     #"--ppo_clip_ratio=0.25 " 

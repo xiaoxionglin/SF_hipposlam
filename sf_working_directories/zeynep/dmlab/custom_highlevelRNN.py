@@ -411,7 +411,7 @@ class HighLevelContextRNN_Learner(nn.Module):
         else:
             log_pi = F.log_softmax(outputs / self.tau, dim=-1)
 
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled(): ##### CHECK HERE !!!!! 
             z_index = torch.distributions.Categorical(logits=log_pi).sample()
         else:
             z_index = log_pi.argmax(dim=-1)

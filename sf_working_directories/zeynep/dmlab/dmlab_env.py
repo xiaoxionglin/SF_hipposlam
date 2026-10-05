@@ -159,6 +159,7 @@ def make_dmlab_env_impl(
         spec.extra_cfg,
         render_mode,
         depth_sensor=depth_sensor,
+        navigation_action_set=cfg.dmlab_navigation_action_set,
         reduced_action_set=cfg.dmlab_reduced_action_set,
         with_number_instruction=cfg.with_number_instruction,
         with_pos_obs=cfg.with_pos_obs,

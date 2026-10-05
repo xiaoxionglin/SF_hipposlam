@@ -91,6 +91,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--dmlab_reduced_action_set", default=False, type=bool, help="reduced action set to facilitate learning"
     )
+    p.add_argument("--dmlab_navigation_action_set", default=False, type=str2bool, help="navigation action set to facilitate learning")
     p.add_argument(
         "--with_number_instruction", default=True, type=str2bool, help="instruction input is number, e.g. 1-3"
     )

@@ -107,8 +107,9 @@ cli = (
     "--save_every_sec=120 "
     "--save_milestones_sec=5400 "
     "--decoder_mlp_layers 64 64 "
-    "--env_frameskip=8 "
+    "--env_frameskip=8 " # lowered from 8
     "--dmlab_reduced_action_set=True "
+    #"--dmlab_navigation_action_set=True "
     "--core_name=BypassSS_HighLevelRNN " # default was set to ByPassSS or try BypassSS_HighLevelRNN
     "--rnn_type=gru "
     "--DG_name=batchnorm_relu "
