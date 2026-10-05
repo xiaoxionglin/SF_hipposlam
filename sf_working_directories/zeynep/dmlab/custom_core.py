@@ -799,6 +799,16 @@ class HighLevelRNNWrapperCore(ModelCore):
                     )
                     self.last_hl_metrics = {}
 
+                # These values come from actual valid trial outcomes, not the
+                # frame reward stream affected by Sample Factory reward_scale.
+                with torch.no_grad():
+                    valid_rewards = rewards_stacked[mask_stacked]
+                    self.last_hl_metrics.update({
+                        "hl/valid_outcomes": valid_rewards.numel(),
+                        "hl/trial_reward_mean": valid_rewards.mean().item() if valid_rewards.numel() else 0.0,
+                        "hl/trial_reward_abs_max": valid_rewards.abs().max().item() if valid_rewards.numel() else 0.0,
+                    })
+
                 self.last_hl_loss = total_loss
                 with torch.no_grad():
                     self.last_log_dict = compute_log_dict(

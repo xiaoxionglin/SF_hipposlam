@@ -63,7 +63,7 @@ truncated-backpropagation window. No second PPO implementation is involved.
 | `sample_factory/algo/utils/shared_buffers.py` | Allocate `hl_z` for the high-level core only. |
 | `custom_actor_critic.py` | Save the post-decision mode from `new_rnn_states` as `hl_z` alongside the actor's actions; use a reproducible greedy mode for value-only bootstrap calls. |
 | `sample_factory/algo/learning/learner.py` | Pass recorded `hl_z` and training-only trial records into the packed recurrent learner input. |
-| `custom_core.py` | Carry the bounded trial history, unroll it at outcome events, use recorded modes during replay, and reject an incorrect configured state size. |
+| `custom_core.py` | Carry the bounded trial history, unroll it at outcome events, use recorded modes during replay, reject an incorrect configured state size, and summarize valid outcome count and raw trial reward scale. |
 | `custom_highlevelRNN.py` | Separate reward-state updates from mode sampling; sample or choose greedily using an explicit setting rather than autograd state. |
 | `custom_params.py` | Add `hl_history_len` and `hl_deterministic`. |
 | `exp_ymaze_HLRNN.py` | Set eight historical trials, update `rnn_size` from 1166 to 1342, and select Q regression. |
@@ -164,5 +164,7 @@ events. This isolates the extra high-level computation; it is not an
 end-to-end environment throughput benchmark. For the real run, track valid
 outcome count per minibatch, the raw `prev_trial_reward` distribution, Q loss,
 mode selection entropy, and both sampled and greedy trial success against
-environment steps. Those measurements determine whether more data, a changed
+environment steps. The learner now exposes `hl/valid_outcomes`,
+`hl/trial_reward_mean`, and `hl/trial_reward_abs_max` in its sampled training
+summaries. These measurements determine whether more data, a changed
 temperature schedule, or a different reward normalization is warranted.
