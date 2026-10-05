@@ -96,5 +96,15 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
 def make_hipposlam_actor_critic(cfg, obs_space, action_space) -> ActorCritic:
     # Use Sample Factory's default creation logic
     actor_critic = default_make_actor_critic_func(cfg, obs_space, action_space)
+    if getattr(cfg, 'hl_diversity_reward_coef', 0.0) > 0.0:
+        if cfg.core_name != 'BypassSS_HighLevelRNN':
+            raise ValueError('High-level diversity reward requires BypassSS_HighLevelRNN')
+        from sf_working_directories.zeynep.dmlab.high_level_diversity import TrialEndModeClassifier
+
+        actor_critic.hl_diversity_classifier = TrialEndModeClassifier(
+            image_channels=obs_space['obs'].shape[0],
+            num_modes=cfg.hl_K,
+            include_chosen_arm=cfg.hl_diversity_include_chosen_arm,
+        )
     return HighLevel_LossWrapper(actor_critic)
     #return add_custom_summaries(actor_critic)

@@ -24,6 +24,8 @@ _params = ParamGrid(
 # 02.10 - The first run with persistent rewards in environment was buggy so I reverted back the reward pulse in envrionment but the others keep persistent.
 # 05.10 - This configuration now uses Q regression and eight completed-trial
 # records for high-level RNN training. See dmlab/HIGH_LEVEL_RNN_ROLLOUT_FIX.md.
+# The optional controller diversity reward is explained in
+# dmlab/HIGH_LEVEL_DIVERSITY_REWARD.md.
 
 # _params = ParamGrid(
 #     [
@@ -149,6 +151,7 @@ cli = (
     "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
     "--hl_history_len=8 "
     "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
+    "--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
 )
 
