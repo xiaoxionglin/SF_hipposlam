@@ -569,6 +569,13 @@ class BaseLearner(Configurable):
         # calculate policy head outside of recurrent loop
         with self.timing.add_time("forward_head"):
             head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
+            if getattr(self.cfg, "core_name", None) == "BypassSS_HighLevelRNN":
+                # The environment reward belongs to the option selected by
+                # the actor. The trial history spans rollout boundaries and is
+                # used only to train the high-level recurrent update.
+                core = self.actor_critic.core
+                history = mb.rnn_states[:, core.history_start:core.history_start + core.history_size]
+                head_outputs = torch.cat((head_outputs, history, mb.hl_z), dim=-1)
             minibatch_size: int = head_outputs.size(0)
             outputs["minibatch_size"] = minibatch_size
             if return_outputs[0]:
