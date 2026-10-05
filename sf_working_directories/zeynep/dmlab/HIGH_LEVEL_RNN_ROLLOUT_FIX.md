@@ -104,3 +104,65 @@ window short, inspect policy lag, and compare against a `hl_history_len=1`
 control. The Q loss still uses only the chosen mode and immediate completed
 trial reward. It does not implement multi-trial return or off-policy
 correction.
+
+## Training throughput and reward scale probe (2026-10-05)
+
+The launch uses 75 trials per environment episode, four policies, 32 total
+environments, `batch_size=2048`, `num_batches_per_epoch=2`, `num_epochs=1`,
+`rollout=recurrence=64`, learning rate $2\times 10^{-4}$, and gradient clipping
+at 1. Each completed trial gives one high-level supervised Q target. Assuming
+workers are evenly distributed, one policy collects from about eight
+environments. If a trial averages $F$ agent steps, a 2048-step minibatch has
+about $2048/F$ high-level targets; $F$ must be measured from a real run.
+Seventy-five trials cap the targets in **one episode**, not over training: the
+weights are shared across episodes and environments. The Q loss averages over
+outcome events, so sparse events do not automatically shrink its magnitude,
+but a minibatch with zero valid outcomes gives no high-level update.
+
+`--reward_scale=0.1` applies to Sample Factory's PPO reward stream. The Q
+target and RNN reward input come separately from the unscaled
+`prev_trial_reward` observation. The Python observation space declares that
+value in $[0,1]$, but only a real run can confirm what the Lua level emits.
+If it is $0/1$, the Q target scale is reasonable; if it is much larger, the
+high-level squared loss and shared gradient clipping can dominate the PPO
+update. Log the actual outcome reward range before changing either scale.
+
+The current high-level sampling temperature is fixed at $\tau=1$. With one
+mode valued at 1 and three valued at 0, even a perfect Q head samples the best
+mode with probability $e^{1/\tau}/(e^{1/\tau}+3)\approx 0.475$ at $\tau=1$.
+If values are only 0.1 apart, that probability is about 0.269. Greedy
+evaluation is different. Lowering temperature early can also prevent rarely
+sampled modes from being discovered, so it needs a controlled exploration
+comparison rather than a silent default change.
+
+`tests/probe_high_level_training.py` is a reproducible standalone check of the
+actual high-level RNN cell, eight-event history reconstruction, Q loss, Adam
+learning rate, and gradient clipping. It models eight parallel 75-trial
+environments per policy and one optimizer update after each four trials per
+environment. It excludes DeepMind Lab, frame timing, PPO, the decoder, actor
+lag, and reward noise, so its episode count is **not** a prediction for Y-maze.
+Run from the repository root, for example:
+
+```bash
+PYTHONPATH=. python tests/probe_high_level_training.py --task=stationary --best-mode=2 --tau=1 --episodes=20
+PYTHONPATH=. python tests/probe_high_level_training.py --task=stationary --best-mode=2 --tau=0.25 --episodes=20
+PYTHONPATH=. python tests/probe_high_level_training.py --task=latent --tau=0.25 --episodes=300
+```
+
+With seed 7 and $0/1$ rewards, the stationary mode-2 task reached sampled
+success 0.14 after the first 75-trial cohort and 0.43 by cohort 20 at
+$\tau=1$, despite Q loss falling to 0.0025. At $\tau=0.25$, it reached 0.06
+after the first cohort and 0.96 by cohort 20. In the harder task with the
+rewarding mode switching between 0 and 1 each episode, sampled success was
+0.50 at cohort 100 and 0.94 at cohort 200 for $\tau=0.25$. These runs show
+that low Q loss alone does not establish useful sampled choices, and that one
+75-trial episode is too little evidence for a learning-speed judgment.
+
+On this CPU with one PyTorch thread, one 32-sample history reconstruction plus
+backward pass took about 0.21 ms with one event versus 0.73 ms with eight
+events. This isolates the extra high-level computation; it is not an
+end-to-end environment throughput benchmark. For the real run, track valid
+outcome count per minibatch, the raw `prev_trial_reward` distribution, Q loss,
+mode selection entropy, and both sampled and greedy trial success against
+environment steps. Those measurements determine whether more data, a changed
+temperature schedule, or a different reward normalization is warranted.
