@@ -42,6 +42,16 @@ def test_actor_sampling_does_not_depend_on_autograd():
         assert all(model.sample_mode(logits)[1].item() == 0 for _ in range(20))
 
 
+def test_sampling_temperature_reaches_high_level_model():
+    cfg = SimpleNamespace(
+        Hippo_n_feature=2, Hippo_R=1, Hippo_L=2,
+        hl_K=2, hl_d_H=3, hl_history_len=2, hl_tau=0.25,
+        hl_is_policy=False, hl_deterministic=False, oracle_context=False,
+    )
+    core = HighLevelRNNWrapperCore(cfg, input_size=9)
+    assert core.hl_learner.tau == 0.25
+
+
 def test_actor_mode_is_a_recorded_policy_output():
     cfg = SimpleNamespace(core_name="BypassSS_HighLevelRNN", hl_K=2, double_value=False)
     names = [name for name, _ in policy_output_shapes(cfg, 1, 2)]

@@ -611,8 +611,11 @@ class HighLevelRNNWrapperCore(ModelCore):
         self.high_level_rnn_stage1 = HighLevelContextRNN_Stage1(K=self.K, d_H=self.d_H)
         
         # Unified Learner RNN!
+        hl_tau = getattr(cfg, "hl_tau", 1.0)
+        if hl_tau <= 0:
+            raise ValueError("hl_tau must be positive")
         self.hl_learner = HighLevelContextRNN_Learner(
-            K=self.K, d_H=self.d_H, is_policy=self.is_policy,
+            K=self.K, d_H=self.d_H, tau=hl_tau, is_policy=self.is_policy,
             deterministic=getattr(cfg, "hl_deterministic", False),
         ) 
 

@@ -146,6 +146,7 @@ cli = (
     #"--Decoder_context_mod=additive " 
     "--hl_K=4 "
     "--hl_d_H=16 "
+    "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
     "--hl_history_len=8 "
     "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS

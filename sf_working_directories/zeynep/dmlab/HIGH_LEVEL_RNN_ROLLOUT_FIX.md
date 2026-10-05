@@ -65,8 +65,8 @@ truncated-backpropagation window. No second PPO implementation is involved.
 | `sample_factory/algo/learning/learner.py` | Pass recorded `hl_z` and training-only trial records into the packed recurrent learner input. |
 | `custom_core.py` | Carry the bounded trial history, unroll it at outcome events, use recorded modes during replay, reject an incorrect configured state size, and summarize valid outcome count and raw trial reward scale. |
 | `custom_highlevelRNN.py` | Separate reward-state updates from mode sampling; sample or choose greedily using an explicit setting rather than autograd state. |
-| `custom_params.py` | Add `hl_history_len` and `hl_deterministic`. |
-| `exp_ymaze_HLRNN.py` | Set eight historical trials, update `rnn_size` from 1166 to 1342, and select Q regression. |
+| `custom_params.py` | Add `hl_history_len`, `hl_deterministic`, and `hl_tau`. |
+| `exp_ymaze_HLRNN.py` | Set eight historical trials, update `rnn_size` from 1166 to 1342, select Q regression, and make the existing temperature of 1 explicit. |
 
 The learner also passes its `valids` flag through the packed sequence. The
 high-level event mask now excludes invalid samples, matching the ordinary PPO
@@ -86,9 +86,10 @@ using the high-level core must update their
 
 ## Validation and limits
 
-`tests/test_high_level_rollout.py` checks sampling under `no_grad`, history
-continuity across separate forward calls, a nonzero recurrent gradient through
-an earlier trial, and decoder replay under a recorded mode. These are unit
+`tests/test_high_level_rollout.py` checks sampling under `no_grad`, temperature
+configuration, history continuity across separate forward calls, a nonzero
+recurrent gradient through an earlier trial, and decoder replay under a
+recorded mode. These are unit
 checks. Run them with `python -m pytest -q tests/test_high_level_rollout.py`.
 An end-to-end DeepMind Lab run is still needed to inspect event timing,
 reward alignment, mode use, and learning curves. The configured level
@@ -127,7 +128,8 @@ If it is $0/1$, the Q target scale is reasonable; if it is much larger, the
 high-level squared loss and shared gradient clipping can dominate the PPO
 update. Log the actual outcome reward range before changing either scale.
 
-The current high-level sampling temperature is fixed at $\tau=1$. With one
+The current high-level sampling temperature is $\tau=1$. The new `--hl_tau`
+setting permits a controlled sweep without changing this default. With one
 mode valued at 1 and three valued at 0, even a perfect Q head samples the best
 mode with probability $e^{1/\tau}/(e^{1/\tau}+3)\approx 0.475$ at $\tau=1$.
 If values are only 0.1 apart, that probability is about 0.269. Greedy
