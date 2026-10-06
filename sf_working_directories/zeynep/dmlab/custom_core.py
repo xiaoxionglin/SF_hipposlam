@@ -13,7 +13,7 @@ from sf_working_directories.zeynep.dmlab.custom_weights_DGFeedback import genera
 #from sf_working_directories.zeynep.dmlab.custom_rnn_DGFeedback import CustomRNN
 from sf_working_directories.zeynep.dmlab.custom_rnn_boundedfeedback import CustomRNN
 from sf_working_directories.zeynep.dmlab.custom_contextRNN import ContextRNN # to wrap any core with context inference module
-from sf_working_directories.zeynep.dmlab.custom_highlevelRNN import HighLevelContextRNN_Stage1, HighLevelContextRNN_QLearning, q_loss, HighLevelContextRNN_Policy, high_level_policy_loss, HighLevelContextRNN_Learner 
+from sf_working_directories.zeynep.dmlab.custom_highlevelRNN import HighLevelContextRNN_Stage1, HighLevelContextRNN_QLearning, q_loss, HighLevelContextRNN_Policy, high_level_policy_loss, HighLevelContextRNN_Learner, compute_log_dict
 
 class FixedRNNSequenceCore(ModelCore):
     def __init__(self, cfg, input_size):
@@ -590,6 +590,11 @@ class HighLevelRNNWrapperCore(ModelCore):
         self.cfg = cfg
         self.K = getattr(cfg, "hl_K", 4)
         self.d_H = getattr(cfg, "hl_d_H", 16)
+        self.history_len = getattr(cfg, "hl_history_len", 8)
+        if self.history_len < 1:
+            raise ValueError("hl_history_len must be at least one completed trial")
+        self.event_width = self.d_H + self.K + 2  # pre-event h, chosen z, reward, valid flag
+        self.history_size = self.history_len * self.event_width
         self.oracle = getattr(cfg, "oracle_context", False)
         
         # NEW: Check if we are doing Policy Gradient or Q-Learning
@@ -601,22 +606,57 @@ class HighLevelRNNWrapperCore(ModelCore):
             
         self.base_core = SimpleSequenceWithBypassCore(cfg, input_size=base_input_size)
         self.base_state_size = self.base_core.total_output_size
+        self.history_start = self.base_state_size + self.d_H
         
         self.high_level_rnn_stage1 = HighLevelContextRNN_Stage1(K=self.K, d_H=self.d_H)
         
         # Unified Learner RNN!
+        hl_tau = getattr(cfg, "hl_tau", 1.0)
+        if hl_tau <= 0:
+            raise ValueError("hl_tau must be positive")
         self.hl_learner = HighLevelContextRNN_Learner(
-            K=self.K, d_H=self.d_H, is_policy=self.is_policy
+            K=self.K, d_H=self.d_H, tau=hl_tau, is_policy=self.is_policy,
+            deterministic=getattr(cfg, "hl_deterministic", False),
         ) 
 
-        self.total_state_size = self.base_state_size + self.d_H + self.K
+        self.total_state_size = self.base_state_size + self.d_H + self.history_size + self.K
         self.total_output_size = self.base_core.total_output_size + self.K
+        configured_size = getattr(cfg, "rnn_size", None)
+        if configured_size is not None and configured_size != self.total_state_size:
+            raise ValueError(
+                f"rnn_size={configured_size}, but high-level core requires {self.total_state_size} "
+                f"(base={self.base_state_size}, h={self.d_H}, "
+                f"{self.history_len} trial records={self.history_size}, mode={self.K})"
+            )
 
     def get_core_state_size(self):
         return self.total_state_size
         
     def get_out_size(self):
         return self.total_output_size
+
+    def append_event(self, history, h_before, z_before, reward, event_mask):
+        """Keep completed trials for learner unrolling; this is not a policy input."""
+        entry = torch.cat((h_before.detach(), z_before.detach(), reward[:, None],
+                           torch.ones_like(reward[:, None])), dim=-1)
+        shifted = torch.cat((history[:, self.event_width:], entry), dim=-1)
+        valid_outcome = event_mask & (z_before.sum(dim=-1) > 0.5)
+        return torch.where(valid_outcome[:, None], shifted, history)
+
+    def scores_from_history(self, history, fallback_h):
+        """Rebuild the decision state through past trial events under current weights."""
+        events = history.reshape(-1, self.history_len, self.event_width)
+        valid = events[:, :, -1] > 0.5
+        first = valid.int().argmax(dim=1)
+        batch = torch.arange(events.size(0), device=events.device)
+        h = torch.where(valid.any(dim=1, keepdim=True),
+                        events[batch, first, :self.d_H], fallback_h)
+        for k in range(self.history_len):
+            event = events[:, k]
+            z = event[:, self.d_H:self.d_H + self.K]
+            reward = event[:, self.d_H + self.K]
+            h = self.hl_learner.update_state(valid[:, k], reward, h, z)
+        return self.hl_learner.head(h)
 
     def forward(self, head_output, rnn_states):
         is_packed = isinstance(head_output, PackedSequence)
@@ -627,7 +667,8 @@ class HighLevelRNNWrapperCore(ModelCore):
 
         base_states = rnn_states[:, :self.base_state_size]
         h_high_prev = rnn_states[:, self.base_state_size : self.base_state_size + self.d_H]
-        z_prev = rnn_states[:, self.base_state_size + self.d_H : self.base_state_size + self.d_H + self.K]
+        history_prev = rnn_states[:, self.history_start:self.history_start + self.history_size]
+        z_prev = rnn_states[:, -self.K:]
 
         if not is_bptt:
             # === INFERENCE PASS ===
@@ -654,7 +695,9 @@ class HighLevelRNNWrapperCore(ModelCore):
             base_core_out, base_states_new = self.base_core(base_head_output, base_states)
 
             out_total = torch.cat([base_core_out, z_new], dim=-1)
-            new_rnn_states = torch.cat([base_states_new, h_high_new, z_new], dim=-1)
+            history_new = self.append_event(history_prev, h_high_prev, z_prev,
+                                            prev_trial_reward, outcome_mask)
+            new_rnn_states = torch.cat([base_states_new, h_high_new, history_new, z_new], dim=-1)
 
             self.last_hl_loss = torch.tensor(0.0, device=head_output.device)
             self.last_log_dict = None  
@@ -668,9 +711,16 @@ class HighLevelRNNWrapperCore(ModelCore):
         else:
             # === BPTT PASS ===
             T, B = head_output.shape[:2]
+            # Learner._forward_pass appends the actor's selected mode to each
+            # timestep. Never sample a new mode while replaying actor actions.
+            valid_seq = head_output[:, :, -1].bool()
+            actor_z_seq = head_output[:, :, -(self.K + 1):-1]
+            actor_history_seq = head_output[:, :, -(self.K + self.history_size + 1):-(self.K + 1)]
+            head_output = head_output[:, :, :-(self.K + self.history_size + 1)]
             
             h_high_t = h_high_prev
             z_t = z_prev
+            history_t = history_prev
             base_states_t = base_states
 
             out_total_list = []
@@ -698,17 +748,24 @@ class HighLevelRNNWrapperCore(ModelCore):
                     prev_trial_reward_t = head_output[t, :, -1]
 
                     # 1. Grab Outputs for OLD state 
-                    outputs_old = self.hl_learner.head(h_high_t)
+                    if outcome_mask_t.any():
+                        outputs_old = self.scores_from_history(actor_history_seq[t], h_high_t)
+                    else:
+                        outputs_old = head_output.new_zeros(B, self.K)
                     
                     outputs_seq.append(outputs_old)
                     z_indices_seq.append(z_t.argmax(dim=-1))
                     rewards_seq.append(prev_trial_reward_t)
-                    mask_seq.append(outcome_mask_t)
+                    mask_seq.append(outcome_mask_t & (z_t.sum(dim=-1) > 0.5) & valid_seq[t])
 
-                    # 2. Step High-Level RNN
-                    h_high_t, z_t, outputs_new, new_state_dict, log_dict_t = self.hl_learner(
-                        outcome_mask_t, prev_trial_reward_t, h_high_t, z_t, chosen_arm_t
+                    # 2. Update reward history, then use the actor's mode for
+                    # the decoder and for the next event's reward assignment.
+                    history_t = self.append_event(history_t, h_high_t, z_t,
+                                                  prev_trial_reward_t, outcome_mask_t)
+                    h_high_t = self.hl_learner.update_state(
+                        outcome_mask_t, prev_trial_reward_t, h_high_t, z_t
                     )
+                    z_t = actor_z_seq[t]
 
                 base_core_out_t, base_states_t = self.base_core(base_head_output_t, base_states_t)
 
@@ -716,7 +773,7 @@ class HighLevelRNNWrapperCore(ModelCore):
                 out_total_list.append(out_total_t)
 
             out_total_seq = torch.stack(out_total_list, dim=0)
-            new_rnn_states = torch.cat([base_states_t, h_high_t, z_t], dim=-1)
+            new_rnn_states = torch.cat([base_states_t, h_high_t, history_t, z_t], dim=-1)
 
             # Process Loss ONLY if NOT oracle!
             if not self.oracle:
@@ -745,8 +802,23 @@ class HighLevelRNNWrapperCore(ModelCore):
                     )
                     self.last_hl_metrics = {}
 
+                # These values come from actual valid trial outcomes, not the
+                # frame reward stream affected by Sample Factory reward_scale.
+                with torch.no_grad():
+                    valid_rewards = rewards_stacked[mask_stacked]
+                    self.last_hl_metrics.update({
+                        "hl/valid_outcomes": valid_rewards.numel(),
+                        "hl/trial_reward_mean": valid_rewards.mean().item() if valid_rewards.numel() else 0.0,
+                        "hl/trial_reward_abs_max": valid_rewards.abs().max().item() if valid_rewards.numel() else 0.0,
+                    })
+
                 self.last_hl_loss = total_loss
-                self.last_log_dict = log_dict_t 
+                with torch.no_grad():
+                    self.last_log_dict = compute_log_dict(
+                        self.hl_learner.head(h_high_t.detach()), z_t.argmax(dim=-1),
+                        h_high_t.detach(), prev_trial_reward_t, self.hl_learner.tau,
+                        chosen_arm_t, K=self.K, is_policy=self.is_policy,
+                    )
             else:
                 self.last_hl_loss = torch.tensor(0.0, device=head_output.device)
                 self.last_log_dict = None

@@ -22,6 +22,10 @@ _params = ParamGrid(
 # the reason why HL-RNN is not learning to persist the mode (z) until trial ends. Now, the chosen_arm is persistent until trial ends, and the outcome_event_pulse is used to tick the HL-RNN only at outcome events.
 # 02.10 - Policy gradient loss is now added to the total loss function in the learner, so that the HL-RNN can learn to output a policy (z) that maximizes the expected reward. The Q-loss is still used for the value function update, but it is not used for the policy update.
 # 02.10 - The first run with persistent rewards in environment was buggy so I reverted back the reward pulse in envrionment but the others keep persistent.
+# 05.10 - This configuration now uses Q regression and eight completed-trial
+# records for high-level RNN training. See dmlab/HIGH_LEVEL_RNN_ROLLOUT_FIX.md.
+# The optional controller diversity reward is explained in
+# dmlab/HIGH_LEVEL_DIVERSITY_REWARD.md.
 
 # _params = ParamGrid(
 #     [
@@ -130,7 +134,7 @@ cli = (
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1166 " # 1146 is with only depth. add hl_K and hl_d_H to get 1166 (add 2 extra for oracle context bypass)
+    "--rnn_size=1342 " # 1166 base + 8 trial records * (16 pre-event h + 4 mode + reward + valid)
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 "
     # "--ppo_clip_ratio=0.25 "
@@ -144,7 +148,10 @@ cli = (
     #"--Decoder_context_mod=additive " 
     "--hl_K=4 "
     "--hl_d_H=16 "
-    "--hl_is_policy=True "
+    "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
+    "--hl_history_len=8 "
+    "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
+    "--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
 )
 

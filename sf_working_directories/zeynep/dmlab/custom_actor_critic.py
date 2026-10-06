@@ -35,13 +35,26 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
     original_summaries = actor_critic.summaries
     
     def custom_forward(*args, **kwargs):
-        # 1. Call the original forward function
-        # This returns the TensorDict containing actions, values, and new_rnn_states
-        result_dict = original_forward(*args, **kwargs)
+        core = getattr(actor_critic, 'core', getattr(actor_critic, 'actor_core', None))
+        values_only = kwargs.get('values_only', args[2] if len(args) > 2 else False)
+        selector = getattr(core, 'hl_learner', None)
+        # Bootstrap values should be reproducible. Actor action collection
+        # still samples unless hl_deterministic was explicitly configured.
+        previous_deterministic = selector.deterministic if selector is not None else None
+        if selector is not None and values_only:
+            selector.deterministic = True
+        try:
+            result_dict = original_forward(*args, **kwargs)
+        finally:
+            if selector is not None:
+                selector.deterministic = previous_deterministic
+
+        if getattr(actor_critic.cfg, 'core_name', None) == 'BypassSS_HighLevelRNN':
+            # This is the mode actually used by the actor's decoder at this step.
+            # Sample Factory records it alongside actions for learner replay.
+            result_dict['hl_z'] = result_dict['new_rnn_states'][:, -actor_critic.cfg.hl_K:]
         
         # 2. Locate the core
-        core = getattr(actor_critic, 'core', getattr(actor_critic, 'actor_core', None))
-        
         # 3. Extract the Q-loss if it exists
         if core is not None and hasattr(core, 'last_hl_loss'):
             result_dict['hl_loss'] = core.last_hl_loss
@@ -83,5 +96,15 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
 def make_hipposlam_actor_critic(cfg, obs_space, action_space) -> ActorCritic:
     # Use Sample Factory's default creation logic
     actor_critic = default_make_actor_critic_func(cfg, obs_space, action_space)
+    if getattr(cfg, 'hl_diversity_reward_coef', 0.0) > 0.0:
+        if cfg.core_name != 'BypassSS_HighLevelRNN':
+            raise ValueError('High-level diversity reward requires BypassSS_HighLevelRNN')
+        from sf_working_directories.zeynep.dmlab.high_level_diversity import TrialEndModeClassifier
+
+        actor_critic.hl_diversity_classifier = TrialEndModeClassifier(
+            image_channels=obs_space['obs'].shape[0],
+            num_modes=cfg.hl_K,
+            include_chosen_arm=cfg.hl_diversity_include_chosen_arm,
+        )
     return HighLevel_LossWrapper(actor_critic)
-    #return add_custom_summaries(actor_critic)  
+    #return add_custom_summaries(actor_critic)

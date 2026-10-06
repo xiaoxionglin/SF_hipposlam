@@ -83,7 +83,19 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     ##      High Level RNN parameters      ##
     p.add_argument("--hl_K", default=4, type=int, help="Number of modes for the high-level RNN.")
     p.add_argument("--hl_d_H", default=16, type=int, help="Dimension of the high-level RNN's hidden state.")
+    p.add_argument("--hl_tau", default=1.0, type=float,
+                   help="Temperature for sampling high-level modes from Q scores; must be positive.")
+    p.add_argument("--hl_history_len", default=8, type=int,
+                   help="Completed trials retained only for high-level BPTT across frame rollouts.")
     p.add_argument("--hl_is_policy", default=True, type=str2bool, help="Whether the high-level RNN uses policy logits instead of Q-values.")
+    p.add_argument("--hl_deterministic", default=False, type=str2bool,
+                   help="Use greedy high-level choices; keep False for exploratory training rollouts.")
+    p.add_argument("--hl_diversity_reward_coef", default=0.0, type=float,
+                   help="Maximum trial-end mode predictability bonus; zero disables the classifier entirely.")
+    p.add_argument("--hl_diversity_classifier_loss_coef", default=0.1, type=float,
+                   help="Weight of the trial-end mode classifier loss when the diversity reward is enabled.")
+    p.add_argument("--hl_diversity_include_chosen_arm", default=False, type=str2bool,
+                   help="Also classify the reached arm when the trial-end visual observation is ambiguous.")
     p.add_argument("--context_injection_coef", default=1.0, type=float, help="Coefficient for scaling the context vector before injection into the decoder.")
     ###################  
 

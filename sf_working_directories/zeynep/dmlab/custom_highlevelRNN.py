@@ -76,7 +76,7 @@ class QHead(nn.Module):
 
 # sample_mode  —  §9, §18 step 4
 
-def sample_mode(scores: Tensor, tau: float = 1.0) -> Tuple[Tensor, Tensor]: #scale the raw values by temperature tau to control exploration vs exploitation
+def sample_mode(scores: Tensor, tau: float = 1.0, deterministic: bool = False) -> Tuple[Tensor, Tensor]: #scale the raw values by temperature tau to control exploration vs exploitation
     """
     scores: (B, K)
     → z_onehot: (B, K)   one-hot e(z_k)
@@ -85,10 +85,10 @@ def sample_mode(scores: Tensor, tau: float = 1.0) -> Tuple[Tensor, Tensor]: #sca
     K = scores.size(-1)
     log_pi = F.log_softmax(scores / tau, dim=-1) # convert raw Q-values to log-probabilities (distribution) for sampling 
 
-    if torch.is_grad_enabled():
-        z_index = torch.distributions.Categorical(logits=log_pi).sample() # from distribution, sample a discrete mode index z_k
-    else:
+    if deterministic:
         z_index = log_pi.argmax(dim=-1)
+    else:
+        z_index = torch.distributions.Categorical(logits=log_pi).sample() # actor exploration does not depend on autograd
     z_onehot = F.one_hot(z_index, num_classes=K).float() # return binary one-hot vector of the sampled mode index | RNN and DECODER RECIEVE IT
     return z_onehot, z_index 
 
@@ -319,7 +319,7 @@ class PolicyHead(nn.Module):
 
 # sample_mode  —  §9.1
 
-def sample_mode_policy(logits: Tensor) -> Tuple[Tensor, Tensor]:
+def sample_mode_policy(logits: Tensor, deterministic: bool = False) -> Tuple[Tensor, Tensor]:
     """
     logits: (B, K)  — denoted as l_k in §9.1
     → z_onehot: (B, K)   one-hot e(z_k)
@@ -329,13 +329,11 @@ def sample_mode_policy(logits: Tensor) -> Tuple[Tensor, Tensor]:
     """
     K = logits.size(-1)
     
-    if torch.is_grad_enabled():
-        # pi_H(z|h_k) = softmax(l_k)
-        dist = torch.distributions.Categorical(logits=logits)
-        # z_k ~ pi_H(.|h_k)
-        z_index = dist.sample()
-    else:
+    if deterministic:
         z_index = logits.argmax(dim=-1)
+    else:
+        # z_k ~ pi_H(.|h_k), including under torch.no_grad() on actors
+        z_index = torch.distributions.Categorical(logits=logits).sample()
         
     z_onehot = F.one_hot(z_index, num_classes=K).float() 
     return z_onehot, z_index
@@ -392,12 +390,14 @@ class HighLevelContextRNN_Learner(nn.Module):
     Unified High-Level RNN that seamlessly handles BOTH Q-Learning and Policy Gradients
     based on the 'is_policy' flag.
     """
-    def __init__(self, K: int = 4, d_H: int = 16, tau: float = 1.0, is_policy: bool = False):
+    def __init__(self, K: int = 4, d_H: int = 16, tau: float = 1.0, is_policy: bool = False,
+                 deterministic: bool = False):
         super().__init__()
         self.K   = K
         self.d_H = d_H
         self.tau = tau
         self.is_policy = is_policy
+        self.deterministic = deterministic
 
         self.rnn_cell = nn.RNNCell(input_size=K + 1, hidden_size=d_H, nonlinearity='tanh')
         
@@ -411,42 +411,45 @@ class HighLevelContextRNN_Learner(nn.Module):
         else:
             log_pi = F.log_softmax(outputs / self.tau, dim=-1)
 
-        if torch.is_grad_enabled(): ##### CHECK HERE !!!!! 
-            z_index = torch.distributions.Categorical(logits=log_pi).sample()
-        else:
+        if self.deterministic:
             z_index = log_pi.argmax(dim=-1)
+        else:
+            z_index = torch.distributions.Categorical(logits=log_pi).sample()
             
         z_onehot = F.one_hot(z_index, num_classes=self.K).float()
         return z_onehot, z_index
 
     def forward(self, outcome_mask, prev_trial_reward, h_high, z_prev, chosen_arm):
-        
         # 1. Update State
-        rnn_in      = torch.cat([z_prev, prev_trial_reward[:,None]], dim=-1)
-        h_candidate = self.rnn_cell(rnn_in, h_high)             
-        h_high_new  = torch.where(outcome_mask[:, None], h_candidate, h_high)                                                        
+        h_high_new = self.update_state(outcome_mask, prev_trial_reward, h_high, z_prev)
 
         # 2. Get Outputs (Q-Scores OR Logits)
-        outputs = self.head(h_high_new)         
+        outputs = self.head(h_high_new)
 
         # 3. Sample and Latch
-        z_candidate, z_candidate_index = self.sample_mode(outputs)                       
+        z_candidate, z_candidate_index = self.sample_mode(outputs)
 
-        z_new = torch.where(outcome_mask[:, None], z_candidate, z_prev)                                                        
-        
+        z_new = torch.where(outcome_mask[:, None], z_candidate, z_prev)
+
         z_index_prev = z_prev.argmax(dim=-1)
-        z_index_new  = torch.where(outcome_mask, z_candidate_index, z_index_prev)
-        
+        z_index_new = torch.where(outcome_mask, z_candidate_index, z_index_prev)
+
         new_state = {
             "high_level_h": h_high_new,
-            "current_z":    z_new,
+            "current_z": z_new,
             "current_z_index": z_index_new,
         }
 
-        # 4. Log
         log_dict = compute_log_dict(
-            outputs, z_index_new, h_high_new, prev_trial_reward, 
+            outputs, z_index_new, h_high_new, prev_trial_reward,
             self.tau, chosen_arm, K=self.K, is_policy=self.is_policy
         )
 
         return h_high_new, z_new, outputs, new_state, log_dict
+
+    def update_state(self, outcome_mask, prev_trial_reward, h_high, z_prev):
+        """Update reward history without choosing a new mode (used during replay)."""
+        rnn_in      = torch.cat([z_prev, prev_trial_reward[:,None]], dim=-1)
+        h_candidate = self.rnn_cell(rnn_in, h_high)
+        h_high_new = torch.where(outcome_mask[:, None], h_candidate, h_high)
+        return h_high_new

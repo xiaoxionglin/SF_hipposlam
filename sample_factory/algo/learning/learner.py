@@ -569,6 +569,16 @@ class BaseLearner(Configurable):
         # calculate policy head outside of recurrent loop
         with self.timing.add_time("forward_head"):
             head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
+            if getattr(self.cfg, "core_name", None) == "BypassSS_HighLevelRNN":
+                # The environment reward belongs to the option selected by
+                # the actor. The trial history spans rollout boundaries and is
+                # used only to train the high-level recurrent update.
+                core = self.actor_critic.core
+                history = mb.rnn_states[:, core.history_start:core.history_start + core.history_size]
+                # Keep the high-level event loss on the same valid samples as PPO.
+                head_outputs = torch.cat(
+                    (head_outputs, history, mb.hl_z, valids[:, None].to(head_outputs.dtype)), dim=-1
+                )
             minibatch_size: int = head_outputs.size(0)
             outputs["minibatch_size"] = minibatch_size
             if return_outputs[0]:
@@ -641,6 +651,14 @@ class BaseLearner(Configurable):
         stats.actual_lr = train_loop_vars.actual_lr  # potentially scaled because of masked data
 
         stats.update(self.actor_critic.summaries())
+        if getattr(self.cfg, "hl_diversity_reward_coef", 0.0) > 0.0:
+            for key in (
+                "hl/diversity_classifier_loss",
+                "hl/diversity_classifier_accuracy",
+                "hl/diversity_event_count",
+                "hl/diversity_bonus_mean",
+            ):
+                stats[key] = var[key]
 
         stats.valids_fraction = var.mb.valids.float().mean()
         stats.same_policy_fraction = (var.mb.policy_id == self.policy_id).float().mean()
@@ -748,6 +766,23 @@ class BaseLearner(Configurable):
 
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
             del buff["obs"]  # don't need non-normalized obs anymore
+
+            if getattr(self.cfg, "hl_diversity_reward_coef", 0.0) > 0.0:
+                from sf_working_directories.zeynep.dmlab.high_level_diversity import trial_end_bonus
+
+                # The outcome pulse is in obs[t+1], while hl_z[t] is the mode
+                # that drove the action reaching it. T+1 exists even at a
+                # rollout boundary. Keep shared rollout rewards untouched.
+                bonus = trial_end_bonus(
+                    self.actor_critic.hl_diversity_classifier,
+                    buff["normalized_obs"],
+                    buff["hl_z"],
+                    buff["dones"],
+                    buff["valids"][:, :-1],
+                    self.cfg.hl_diversity_reward_coef,
+                )
+                buff["rewards"] = buff["rewards"].clone() + bonus
+                buff["hl_diversity_bonus"] = bonus
 
             # calculate estimated value for the next step (T+1)
             normalized_last_obs = buff["normalized_obs"][:, -1]
@@ -981,6 +1016,21 @@ class DefaultLearner(BaseLearner):
         else:
             hl_loss = torch.tensor(0.0, device=self.device)
         ######
+
+        if getattr(self.cfg, "hl_diversity_reward_coef", 0.0) > 0.0:
+            from sf_working_directories.zeynep.dmlab.high_level_diversity import trial_end_classifier_loss
+
+            classifier_loss, event_count, accuracy = trial_end_classifier_loss(
+                self.actor_critic.hl_diversity_classifier,
+                mb.normalized_obs,
+                mb.rnn_states[:, -self.cfg.hl_K:],
+                mb.valids,
+            )
+            hl_loss = hl_loss + self.cfg.hl_diversity_classifier_loss_coef * classifier_loss
+            loss_summaries["hl/diversity_classifier_loss"] = classifier_loss.detach()
+            loss_summaries["hl/diversity_event_count"] = event_count
+            loss_summaries["hl/diversity_classifier_accuracy"] = accuracy
+            loss_summaries["hl/diversity_bonus_mean"] = mb.hl_diversity_bonus.mean().item()
         
 
         return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, hl_loss, loss_summaries
