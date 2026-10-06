@@ -22,3 +22,13 @@ def odor_observation(position: np.ndarray | None, mode: str, rng: np.random.Gene
     if mode != "gaussian4" or position is None or not 0 <= noise_std <= 1:
         raise ValueError("Invalid odor mode, position, or noise scale")
     return clean_odor(position) + rng.normal(0, noise_std, 4).astype(np.float32)
+
+
+def keyed_odor_observation(
+    position: np.ndarray | None, mode: str, seed: int, observation_index: int, noise_std: float
+) -> np.ndarray:
+    """Reproduce independent noise for a fixed seed and observation index."""
+    if seed < 0 or observation_index < 0:
+        raise ValueError("Odor noise keys must be nonnegative")
+    generator = np.random.default_rng(np.random.SeedSequence((seed, observation_index)))
+    return odor_observation(position, mode, generator, noise_std)

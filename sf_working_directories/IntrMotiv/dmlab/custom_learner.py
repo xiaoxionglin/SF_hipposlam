@@ -30,6 +30,7 @@ from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.dicts import iterate_recursively
 from sample_factory.utils.typing import ActionDistribution, Config, PolicyID
 from sample_factory.utils.utils import log
+from sf_working_directories.IntrMotiv.dmlab.ca3_goal_quality import candidate_rollout_stats
 from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import predictive_readout_loss
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import (
     build_transition_prediction_batch,
@@ -2788,6 +2789,7 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             forced_preflight_assignment_count=0.0,
         )
         self._last_graph_rollout_stats: dict[str, float] = {}
+        self._last_goal_candidate_stats: dict[str, float] = {}
         self._last_passive_recruitment_stats: dict[str, float] = {}
         self._current_predictive_eligibility = None
         self._last_predictive_update_stats: dict[str, float] = {}
@@ -4465,6 +4467,21 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 self._last_graph_rollout_stats = {
                     key: float(value.detach().cpu().item()) for key, value in graph_stats.items()
                 }
+            if bool(getattr(self.cfg, "ca3_goal_quality_enabled", False)):
+                candidate_stats = candidate_rollout_stats(
+                    buff["goal_candidate_mask"],
+                    buff["goal_candidate_choice"].squeeze(-1),
+                    buff["valids"][:, :-1],
+                )
+                self._last_goal_candidate_stats = {
+                    key: float(value.detach().cpu().item())
+                    for key, value in candidate_stats.items()
+                    if key != "candidate_per_goal"
+                }
+                self._last_goal_candidate_stats.update(
+                    {f"candidate_goal_{goal_id:03d}": float(count.item())
+                     for goal_id, count in enumerate(candidate_stats["candidate_per_goal"].detach().cpu())}
+                )
             passive_stats = self._update_passive_recruitment_graph_from_rollout(
                 buff["rnn_states"], buff["valids"][:, :-1]
             )
@@ -4954,6 +4971,11 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     stats.ca3_goal_quality_score_std = quality.scores.std(unbiased=False).detach().float()
                     stats.ca3_goal_quality_event_min = quality.event_counts.min().detach().float()
                     stats.ca3_goal_quality_event_max = quality.event_counts.max().detach().float()
+                    for goal_id in range(int(self.cfg.Hippo_n_feature)):
+                        stats[f"ca3_goal_quality_score_{goal_id:03d}"] = quality.scores[goal_id].detach().float()
+                        stats[f"ca3_goal_quality_event_count_{goal_id:03d}"] = quality.event_counts[goal_id].detach().float()
+                    for key, value in self._last_goal_candidate_stats.items():
+                        stats[f"ca3_{key}"] = value
                 completion_count = max(1.0, float(self._last_graph_rollout_stats.get("completion_count", 0.0)))
                 stats.hrl_edge_promotion_rate = stats.hrl_edge_promotions / completion_count
                 stats.hrl_edge_demotion_rate = stats.hrl_edge_demotions / completion_count

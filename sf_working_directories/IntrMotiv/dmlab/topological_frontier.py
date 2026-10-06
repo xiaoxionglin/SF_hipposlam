@@ -51,6 +51,7 @@ class TopologicalStateLayout:
     episode_y: int = 12
     episode_heading: int = 13
     validation_defer_countdown: int = 14
+    candidate_draw_count: int = 15
 
     @property
     def local_candidate_count(self) -> int:
@@ -64,7 +65,7 @@ class TopologicalStateLayout:
 
     @property
     def anchors_start(self) -> int:
-        return 15
+        return 16
 
     @property
     def anchors_end(self) -> int:
@@ -167,8 +168,21 @@ class TopologicalStateLayout:
         return self.geometry_start + GEOMETRY_POLICY_SIZE
 
     @property
-    def size(self) -> int:
+    def candidate_choice(self) -> int:
+        """Behavior-time frontier choice, including an empty eligible pool."""
         return self.geometry_end
+
+    @property
+    def candidate_start(self) -> int:
+        return self.candidate_choice + 1
+
+    @property
+    def candidate_end(self) -> int:
+        return self.candidate_start + self.n_nodes
+
+    @property
+    def size(self) -> int:
+        return self.candidate_end
 
 
 def topological_state_size(n_nodes: int) -> int:
@@ -359,24 +373,6 @@ def frontier_scores(graph, uncertainty_weight: float) -> Tensor:
     discovery_yield = (discoveries + 1.0) / (attempts + 2.0)
     score = novelty + float(uncertainty_weight) * uncertainty + 0.5 * discovery_yield
     return score.masked_fill(~observed, -torch.inf)
-
-
-def subset_frontier_scores(graph, selected: Tensor, uncertainty_weight: float) -> Tensor:
-    """C15 score with novelty and uncertainty normalized over this choice's candidates."""
-    batch, n_nodes = selected.shape
-    visits = graph.node_visits[None, :].expand(batch, n_nodes)
-    order = torch.argsort(visits.masked_fill(~selected, torch.inf), dim=-1, stable=True)
-    rank = torch.empty_like(order)
-    rank.scatter_(1, order, torch.arange(n_nodes, device=selected.device)[None, :].expand_as(order))
-    count = selected.sum(dim=-1).clamp_min(1)
-    novelty = 1.0 - rank.to(visits.dtype) / (count - 1).clamp_min(1)[:, None]
-    attempts = graph.frontier_attempts[None, :].expand_as(visits)
-    total = (attempts * selected).sum(dim=-1)
-    uncertainty = torch.sqrt(torch.log(2.0 + total[:, None]) / (1.0 + attempts)).clamp(max=1.0)
-    discovery_yield = (graph.frontier_discoveries + 1.0) / (graph.frontier_attempts + 2.0)
-    return (novelty + float(uncertainty_weight) * uncertainty + 0.5 * discovery_yield[None, :]).masked_fill(
-        ~selected, -torch.inf
-    )
 
 
 def visit_scores(graph) -> Tensor:
@@ -643,6 +639,8 @@ def _advance_options_without_probes(
     goal_candidate_k,
     goal_quality_scores,
     frontier_uncertainty_weight,
+    candidate_context,
+    candidate_seed,
 ):
     """Batch option transitions when directed-edge probing is disabled.
 
@@ -758,14 +756,34 @@ def _advance_options_without_probes(
             eligible = eligible & (ids[None, :] != node[:, None])
         if waypoint_planning or common_manager:
             eligible = eligible & torch.isfinite(dist[safe_node])
-        if goal_candidate_mode == "all" and goal_quality_scores is None:
-            candidate_scores = scores[None, :].expand_as(eligible).masked_fill(~eligible, -torch.inf)
+        if goal_candidate_mode == "all":
+            selected = eligible
         else:
             quality = goal_quality_scores
             if quality is None:
                 quality = graph.node_visits.new_zeros(n_nodes)
-            selected = candidate_mask(eligible, quality, goal_candidate_mode, goal_candidate_k)
-            candidate_scores = subset_frontier_scores(graph, selected, frontier_uncertainty_weight)
+            draw_keys = None
+            if candidate_context is not None:
+                # Each stream's recurrent choice count and detached CA3 state
+                # make sampling independent of inference batch composition and
+                # the global PyTorch RNG. Restoring the same state reproduces
+                # the same candidate set without a mutable actor-side stream.
+                context = candidate_context.detach()[:, :: max(1, candidate_context.size(1) // 64)]
+                quantized = torch.nan_to_num(context).clamp(-1e4, 1e4).mul(1000).round().long()
+                weights = torch.arange(1, quantized.size(1) + 1, device=option.device, dtype=torch.int64)
+                context_hash = (quantized * weights).sum(dim=-1)
+                count = topo[:, topo_layout.candidate_draw_count].long()
+                draw_keys = (int(candidate_seed) + 104729 * count + context_hash).remainder(2147483647)
+            selected = candidate_mask(eligible, quality, goal_candidate_mode, goal_candidate_k, draw_keys=draw_keys)
+        put(topo, topo_layout.candidate_draw_count, mask, topo[:, topo_layout.candidate_draw_count] + 1)
+        # Preserve C15's globally normalized frontier score for every arm.
+        # Candidate selection only masks destinations; it never rescales
+        # novelty or uncertainty as K changes.
+        candidate_scores = scores[None, :].expand_as(selected).masked_fill(~selected, -torch.inf)
+        put(topo, topo_layout.candidate_choice, mask, 1.0)
+        topo[:, topo_layout.candidate_start : topo_layout.candidate_end] = torch.where(
+            mask[:, None], selected.to(topo.dtype), 0.0
+        )
         frontier = candidate_scores.argmax(dim=-1)
         has_candidate = eligible.any(dim=-1)
         hop = next_hop[safe_node, frontier] if waypoint_planning else frontier
@@ -1114,6 +1132,8 @@ def advance_topological_manager(
     goal_candidate_mode: str = "all",
     goal_candidate_k: int = 16,
     goal_quality_scores: Tensor | None = None,
+    candidate_context: Tensor | None = None,
+    candidate_seed: int = 0,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Advance topological state while preserving the sampled behavior condition."""
     if control_outcome not in ("target_hit", "first_distinct"):
@@ -1274,6 +1294,8 @@ def advance_topological_manager(
             goal_candidate_k,
             goal_quality_scores,
             frontier_uncertainty_weight,
+            candidate_context,
+            candidate_seed,
         )
     else:
         _advance_options_with_probes(

@@ -16,6 +16,8 @@ from sample_factory.model.actor_critic import (
 )
 from sample_factory.utils.typing import ActionSpace, Config, ObsSpace
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import DGTransitionPredictor
+from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import hrl_option_state_size
+from sf_working_directories.IntrMotiv.dmlab.topological_frontier import TopologicalStateLayout
 
 
 def controller_core_view(core_output: Tensor, ca3_size: int, ppo_dg_gradient: str = "stop") -> Tensor:
@@ -365,6 +367,13 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
         self, normalized_obs_dict, rnn_states, values_only=False, action_mask: Optional[Tensor] = None
     ) -> TensorDict:
         result = super().forward(normalized_obs_dict, rnn_states, values_only, action_mask)
+        if bool(getattr(self.cfg, "ca3_goal_quality_enabled", False)) and not values_only:
+            n_goals = int(self.cfg.Hippo_n_feature)
+            layout = TopologicalStateLayout(n_goals)
+            start = self.core.base_state_size + hrl_option_state_size(n_goals)
+            topology = result["new_rnn_states"][:, start : start + layout.size]
+            result["goal_candidate_mask"] = topology[:, layout.candidate_start : layout.candidate_end]
+            result["goal_candidate_choice"] = topology[:, layout.candidate_choice : layout.candidate_choice + 1]
         if getattr(self, "controller_learning", "ppo") != "ppo" and not values_only:
             canonical = result["new_rnn_states"]
             if hasattr(self.core, "split_worker_state"):

@@ -6,10 +6,19 @@ from types import SimpleNamespace
 
 from sample_factory.utils.attr_dict import AttrDict
 
-from sf_working_directories.IntrMotiv.dmlab.ca3_goal_quality import CA3GoalQuality, candidate_mask
+from sf_working_directories.IntrMotiv.dmlab.ca3_goal_quality import (
+    CA3GoalQuality,
+    candidate_mask,
+    candidate_rollout_stats,
+)
 from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import HRLStateLayout
 from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import PolicyControllableGraph, hrl_option_state_size
-from sf_working_directories.IntrMotiv.dmlab.odor import ODOR_CENTERS, clean_odor, odor_observation
+from sf_working_directories.IntrMotiv.dmlab.odor import (
+    ODOR_CENTERS,
+    clean_odor,
+    keyed_odor_observation,
+    odor_observation,
+)
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import DistanceLearnerReward
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import HipposlamEncoder
 from sf_working_directories.IntrMotiv.dmlab.topological_frontier import (
@@ -31,9 +40,9 @@ def _rollout(contexts, events, valid):
 def test_new_exclusive_event_uses_pre_action_ca3_and_only_accepted_rows():
     memory = CA3GoalQuality(3, 2)
     ca3, option, valid = _rollout(
-        [[3, 0], [0, 4], [0, 5], [9, 0], [1, 1]],
-        [0, 1, 1, 2, 3],
-        [True, True, True, False],
+        [[0, 0], [3, 0], [0, 4], [0, 5], [9, 0]],
+        [0, 0, 1, 1, 2],
+        [True, False, True, True],
     )
     assert memory.update_from_rollout(ca3, option, valid) == 2
     assert memory.event_counts.tolist() == [1, 1, 0]
@@ -46,7 +55,7 @@ def test_new_exclusive_event_uses_pre_action_ca3_and_only_accepted_rows():
 def test_prequential_margin_and_exact_state_restoration():
     first = CA3GoalQuality(3, 2)
     first.prototypes[:2] = torch.tensor([[0.5, 0.0], [0.0, 0.5]])
-    ca3, option, valid = _rollout([[1, 0], [1, 0]], [0, 1], [True])
+    ca3, option, valid = _rollout([[0, 0], [1, 0], [1, 0]], [0, 0, 1], [True, True])
     checkpoint = {key: value.clone() for key, value in first.state_dict().items()}
     resumed = CA3GoalQuality(3, 2)
     resumed.load_state_dict(checkpoint)
@@ -57,6 +66,19 @@ def test_prequential_margin_and_exact_state_restoration():
     torch.testing.assert_close(first.quality[0], torch.tensor(0.01))
     torch.testing.assert_close(first.scores[0], torch.tensor(0.01 / 101))
     torch.testing.assert_close(first.prototypes[1], checkpoint["prototypes"][1])
+
+
+def test_event_acceptance_uses_action_before_the_event_observation():
+    ca3, option, _ = _rollout([[0, 0], [1, 0], [1, 0]], [0, 0, 1], [True, True])
+    rejected = CA3GoalQuality(3, 2)
+    accepted = CA3GoalQuality(3, 2)
+    assert rejected.update_from_rollout(ca3, option, torch.tensor([[False, True]])) == 0
+    assert accepted.update_from_rollout(ca3, option, torch.tensor([[True, False]])) == 1
+
+
+def test_first_observation_has_no_known_preceding_accepted_action():
+    ca3, option, valid = _rollout([[1, 0], [1, 0]], [0, 1], [True])
+    assert CA3GoalQuality(3, 2).update_from_rollout(ca3, option, valid) == 0
 
 
 def test_candidate_eligibility_capacity_and_uniform_ties():
@@ -70,6 +92,31 @@ def test_candidate_eligibility_capacity_and_uniform_ties():
                          for _ in range(400)])
     frequencies = draws.sum(0)
     assert torch.all((frequencies > 65) & (frequencies < 135))
+
+
+def test_keyed_candidates_restore_exactly_and_do_not_advance_global_rng():
+    eligible = torch.ones((4000, 4), dtype=torch.bool)
+    quality = torch.zeros(4)
+    keys = torch.arange(4000)
+    state = torch.get_rng_state().clone()
+    first = candidate_mask(eligible, quality, "hebb", 1, draw_keys=keys)
+    reordered = candidate_mask(eligible.flip(0), quality, "hebb", 1, draw_keys=keys.flip(0))
+    torch.testing.assert_close(first, reordered.flip(0), rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), state, rtol=0, atol=0)
+    frequencies = first.sum(0)
+    assert torch.all((frequencies > 850) & (frequencies < 1150))
+
+
+def test_candidate_telemetry_records_offered_sets_and_turnover():
+    masks = torch.tensor([[[1, 1, 0], [0, 0, 0], [0, 1, 1]]], dtype=torch.float32)
+    choice = torch.tensor([[1, 0, 1]], dtype=torch.float32)
+    stats = candidate_rollout_stats(masks, choice, torch.tensor([[True, True, True]]))
+    assert stats["choice_count"] == 2
+    assert stats["candidate_count_mean"] == 2
+    assert stats["candidate_distinct_goals"] == 3
+    assert stats["candidate_per_goal"].tolist() == [1, 2, 1]
+    torch.testing.assert_close(stats["candidate_turnover"], torch.tensor(2.0 / 3.0))
+    assert stats["candidate_turnover_pairs"] == 1
 
 
 def test_manager_scores_only_current_eligible_candidates():
@@ -97,6 +144,31 @@ def test_manager_scores_only_current_eligible_candidates():
     assert choice([100.0, 2.0, 1.0, 0.0]) == 2  # source ID 1 cannot be offered
     graph.node_visits[1] = 0.0
     assert choice([100.0, 2.0, 1.0, 0.0]) == 3  # unseen ID 2 cannot be offered
+
+
+def test_all16_preserves_c15_score_and_records_behavior_candidates():
+    graph = PolicyControllableGraph(4)
+    graph.node_visits[:] = torch.tensor([13.0, 13.0, 14.0, 15.0])
+    graph.frontier_attempts[:] = torch.tensor([3.0, 13.0, 14.0, 9.0])
+    graph.frontier_discoveries[:] = torch.tensor([3.0, 2.0, 14.0, 9.0])
+    option, topology, _ = advance_topological_manager(
+        torch.zeros(1, hrl_option_state_size(4)),
+        torch.zeros(1, topological_state_size(4)),
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        reduced_action_features(torch.tensor([5])), graph,
+        fallback_horizon=64, margin_ratio=0.2, margin_steps=2,
+        confidence_threshold=0.5, passive_threshold=2.0,
+        passive_min_displacement=2.0, passive_max_length=64,
+        use_motion_filter=True, frontier_uncertainty_weight=1.0,
+        waypoint_planning=False, exploration_horizon=64,
+        edge_exploration=False, target_timing="immediate",
+        direct_target_selection="frontier", goal_candidate_mode="all",
+        goal_candidate_k=4, goal_quality_scores=torch.zeros(4),
+    )
+    layout = TopologicalStateLayout(4)
+    assert int(option[0, HRLStateLayout(4).target]) == 3
+    assert int(topology[0, layout.candidate_choice]) == 1
+    assert topology[0, layout.candidate_start:layout.candidate_end].tolist() == [0.0, 1.0, 1.0, 1.0]
 
 
 def test_replay_teacher_forces_behavior_goal_after_candidate_scores_change():
@@ -165,6 +237,16 @@ def test_odor_shape_centers_noise_and_zero_mode():
     np.testing.assert_allclose(draws.mean(0), clean, atol=0.005)
     np.testing.assert_allclose(draws.std(0), 0.15, atol=0.005)
     assert (draws < 0).any()  # no clipping
+
+
+def test_keyed_odor_noise_replays_exactly_without_mutable_rng_state():
+    position = ODOR_CENTERS[0]
+    first = keyed_odor_observation(position, "gaussian4", 77, 123, 0.15)
+    np.testing.assert_array_equal(first, keyed_odor_observation(position, "gaussian4", 77, 123, 0.15))
+    assert not np.array_equal(first, keyed_odor_observation(position, "gaussian4", 77, 124, 0.15))
+    np.testing.assert_array_equal(
+        keyed_odor_observation(None, "zero", 77, 123, 0.15), np.zeros(4, dtype=np.float32)
+    )
 
 
 def test_recruitment_uses_identical_dg_input_width_and_gain():

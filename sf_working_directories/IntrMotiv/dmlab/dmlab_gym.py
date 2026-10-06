@@ -375,7 +375,8 @@ class DmlabGymEnv_custom(gym.Env):
         self.dg_odor_noise_std = float(dg_odor_noise_std)
         if dg_odor_mode not in ("none", "zero", "gaussian4") or not 0 <= self.dg_odor_noise_std <= 1:
             raise ValueError("Invalid DG odor configuration")
-        self.odor_random_state = None
+        self.odor_seed = None
+        self.odor_observation_count = 0
         self.action_path_integration = bool(action_path_integration)
         self.previous_action = 0
         self.last_debug_position = None
@@ -501,7 +502,8 @@ class DmlabGymEnv_custom(gym.Env):
                 initial_seed = seed
 
         self.random_state = np.random.RandomState(seed=initial_seed)
-        self.odor_random_state = np.random.default_rng(initial_seed ^ 0x4F444F52)
+        self.odor_seed = int(initial_seed) ^ 0x4F444F52
+        self.odor_observation_count = 0
         return [initial_seed]
 
     def format_obs_dict(self, env_obs_dict):
@@ -530,11 +532,19 @@ class DmlabGymEnv_custom(gym.Env):
             env_obs_dict["pos"] = self.last_debug_position
             env_obs_dict["rot"] = self.last_debug_rotation
         if getattr(self, "dg_odor_mode", "none") != "none":
-            from .odor import odor_observation
+            from .odor import keyed_odor_observation
 
-            env_obs_dict["dg_odor"] = odor_observation(
-                self.last_debug_position, self.dg_odor_mode, self.odor_random_state, self.dg_odor_noise_std
+            # Key each observation independently. A fixed environment seed and
+            # observation sequence now reproduce noise without depending on a
+            # mutable NumPy generator's hidden draw position.
+            env_obs_dict["dg_odor"] = keyed_odor_observation(
+                self.last_debug_position,
+                self.dg_odor_mode,
+                self.odor_seed,
+                self.odor_observation_count,
+                self.dg_odor_noise_std,
             )
+            self.odor_observation_count += 1
         if getattr(self, "with_online_spatial_telemetry", False):
             if self.last_debug_position is None or self.last_debug_rotation is None:
                 raise RuntimeError("online spatial telemetry requires DMLab debug pose observations")

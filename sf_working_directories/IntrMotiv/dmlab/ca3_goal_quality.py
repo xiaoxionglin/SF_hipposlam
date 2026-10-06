@@ -52,8 +52,14 @@ class CA3GoalQuality(nn.Module):
         event_id = option_states[:, 1:, layout.active_dg].long() - 1
         exclusive = option_states[:, 1:, layout.multi_activation] == 0
         novel = (previous_id != event_id) | (option_states[:, :-1, layout.multi_activation] > 0)
+        # rnn_states[:, t + 1] was produced while observing frame t, before
+        # action t. Its new DG event is the outcome of action t - 1, whose
+        # accepted flag is valid_steps[:, t - 1]. The preceding action is not
+        # present for t == 0 (the rollout boundary), so exclude that event.
+        accepted_preceding_action = torch.zeros_like(valid_steps, dtype=torch.bool)
+        accepted_preceding_action[:, 1:] = valid_steps[:, :-1].bool()
         selected = (
-            valid_steps.bool()
+            accepted_preceding_action
             & exclusive
             & novel
             & (event_id >= 0)
@@ -84,7 +90,9 @@ class CA3GoalQuality(nn.Module):
         return applied
 
 
-def candidate_mask(eligible: Tensor, scores: Tensor, mode: str, k: int) -> Tensor:
+def candidate_mask(
+    eligible: Tensor, scores: Tensor, mode: str, k: int, *, draw_keys: Tensor | None = None
+) -> Tensor:
     """Choose up to k currently selectable destinations for each manager choice."""
     if eligible.ndim != 2 or scores.shape != (eligible.size(1),):
         raise ValueError("Candidate eligibility and quality scores are misaligned")
@@ -96,7 +104,18 @@ def candidate_mask(eligible: Tensor, scores: Tensor, mode: str, k: int) -> Tenso
         raise ValueError("CA3 goal-quality scores must be finite")
     # Random order first, then stable score order: exact Hebbian ties are
     # uniform without adding jitter that could reorder unequal scores.
-    random_order = torch.argsort(torch.rand(eligible.shape, device=eligible.device), dim=-1)
+    if draw_keys is None:
+        random_values = torch.rand(eligible.shape, device=eligible.device)
+    else:
+        if draw_keys.shape != eligible.shape[:1]:
+            raise ValueError("One deterministic candidate draw key is required per stream")
+        modulus = 2147483647
+        goals = torch.arange(eligible.size(1), device=eligible.device, dtype=torch.int64)
+        values = (draw_keys.long()[:, None] + (goals[None, :] + 1) * 2654435761).remainder(modulus)
+        values = ((values ^ (values >> 16)) * 2246822519).remainder(modulus)
+        values = ((values ^ (values >> 13)) * 3266489917).remainder(modulus)
+        random_values = values
+    random_order = torch.argsort(random_values, dim=-1, stable=True)
     if mode == "hebb":
         ordered_scores = scores[None, :].expand_as(eligible).gather(1, random_order)
         rank = torch.argsort(ordered_scores, dim=-1, descending=True, stable=True)
@@ -109,3 +128,46 @@ def candidate_mask(eligible: Tensor, scores: Tensor, mode: str, k: int) -> Tenso
     selected = torch.zeros_like(eligible)
     selected.scatter_(1, order, selected_order)
     return selected
+
+
+@torch.no_grad()
+def candidate_rollout_stats(candidate_masks: Tensor, choice_flags: Tensor, valid_steps: Tensor) -> dict[str, Tensor]:
+    """Summarize the candidate sets actually offered on accepted actor steps.
+
+    The masks are captured from actor policy outputs before episode resets;
+    commanded-goal counts alone cannot recover them. Turnover compares each
+    accepted choice with the preceding accepted choice in the same rollout.
+    """
+    if candidate_masks.ndim != 3 or choice_flags.shape != candidate_masks.shape[:2] or valid_steps.shape != choice_flags.shape:
+        raise ValueError("Candidate telemetry must have aligned [batch, time] axes")
+    chosen = choice_flags.bool() & valid_steps.bool()
+    masks = candidate_masks.bool()
+    selected = masks & chosen.unsqueeze(-1)
+    per_goal = selected.sum(dim=(0, 1))
+    count = chosen.sum()
+    size_sum = selected.sum()
+    empty = chosen & ~masks.any(dim=-1)
+
+    prior = torch.zeros_like(masks[:, 0])
+    has_prior = torch.zeros(masks.size(0), dtype=torch.bool, device=masks.device)
+    turnover_sum = masks.new_zeros((), dtype=torch.float32)
+    turnover_pairs = masks.new_zeros((), dtype=torch.int64)
+    for step in range(masks.size(1)):
+        current = masks[:, step]
+        paired = chosen[:, step] & has_prior
+        union = (current | prior).sum(dim=-1).clamp_min(1)
+        changed = 1.0 - (current & prior).sum(dim=-1).float() / union.float()
+        turnover_sum += (changed * paired).sum()
+        turnover_pairs += paired.sum()
+        prior = torch.where(chosen[:, step, None], current, prior)
+        has_prior |= chosen[:, step]
+
+    return {
+        "choice_count": count,
+        "candidate_count_mean": size_sum.float() / count.clamp_min(1).float(),
+        "candidate_empty_count": empty.sum(),
+        "candidate_distinct_goals": (per_goal > 0).sum(),
+        "candidate_turnover": turnover_sum / turnover_pairs.clamp_min(1).float(),
+        "candidate_turnover_pairs": turnover_pairs,
+        "candidate_per_goal": per_goal,
+    }

@@ -888,6 +888,8 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     goal_candidate_mode=self.goal_candidate_mode,
                     goal_candidate_k=self.goal_candidate_k,
                     goal_quality_scores=(self.goal_quality.scores if self.goal_quality is not None else None),
+                    candidate_context=current_ca3,
+                    candidate_seed=int(getattr(self.cfg, "seed", 0)),
                     min_target_visits=self.hrl_min_target_visits,
                     reward_instruction=(
                         (reward_instruction.argmax(dim=-1) + 1) if reward_instruction is not None else None

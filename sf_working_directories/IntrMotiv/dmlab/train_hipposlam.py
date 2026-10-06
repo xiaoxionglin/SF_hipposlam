@@ -218,6 +218,11 @@ def maybe_overwrite_rnn_size(cfg):
     cfg.extra_policy_output_shapes = (
         (("dg_activity", [int(cfg.Hippo_n_feature)]),) if getattr(cfg, "online_spatial_telemetry", False) else ()
     )
+    if bool(getattr(cfg, "ca3_goal_quality_enabled", False)):
+        cfg.extra_policy_output_shapes += (
+            ("goal_candidate_mask", [int(cfg.Hippo_n_feature)]),
+            ("goal_candidate_choice", [1]),
+        )
     cfg.wandb_step_metric_namespaces = ("intrmotiv",)
     cfg.head_l1_size = int(cfg.Hippo_n_feature)
 
