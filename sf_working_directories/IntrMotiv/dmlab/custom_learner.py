@@ -1170,6 +1170,12 @@ class BaseDistanceRecorder(BaseLearner):
         if not self._uses_policy_graph():
             return None
         option_states = self._hrl_state_from_rnn(rnn_states)
+        goal_quality = getattr(self.actor_critic.core, "goal_quality", None)
+        quality_events = None
+        if goal_quality is not None:
+            # This is the accepted-rollout boundary. Actor and PPO replay
+            # forwards may read the published buffers but never learn from them.
+            quality_events = goal_quality.update_from_rollout(rnn_states, option_states, valid_steps)
         stats = self._policy_graph().update_from_option_rollout(
             option_states,
             valid_steps,
@@ -1193,6 +1199,9 @@ class BaseDistanceRecorder(BaseLearner):
                 pose_learning_rate=float(getattr(self.cfg, "hrl_geometry_learning_rate", 0.05)),
             )
             stats.update(topological_stats)
+        if quality_events is not None:
+            stats["goal_quality_events"] = rnn_states.new_tensor(float(quality_events))
+            stats["goal_quality_supported_goals"] = (goal_quality.quality_counts > 0).sum().to(rnn_states.dtype)
         return stats
 
     @torch.no_grad()
@@ -3075,7 +3084,9 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         was_training = encoder.training
         encoder.eval()
         try:
-            features = encoder.projection_input(buff["normalized_obs"][candidate_indices]).detach()
+            candidate_obs = buff["normalized_obs"][candidate_indices]
+            visual_features = encoder.projection_input(candidate_obs)
+            features = encoder.append_dg_odor(visual_features, candidate_obs).detach()
         finally:
             encoder.train(was_training)
 
@@ -4600,6 +4611,11 @@ class DistanceLearnerReward(BaseDistanceRecorder):
         stats = super()._record_summaries(train_loop_vars)
         stats.encoder_loss = var.additional_stats["encoder_loss"].detach().float()
         stats.decoder_loss = var.decoder_loss.detach().float()
+        if "dg_odor" in var.mb.normalized_obs:
+            odor = var.mb.normalized_obs["dg_odor"].float()
+            gain = float(getattr(self.cfg, "dg_odor_gain", 1.0))
+            stats.dg_odor_norm = (gain * torch.linalg.vector_norm(odor, dim=-1)).mean().detach()
+            stats.dg_odor_channel_mean = odor.mean().detach()
         for name in (
             "onset",
             "novel_onset",
@@ -4930,6 +4946,14 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 )
                 stats.hrl_edge_promotions = float(self._last_graph_rollout_stats.get("promotion_count", 0.0))
                 stats.hrl_edge_demotions = float(self._last_graph_rollout_stats.get("demotion_count", 0.0))
+                quality = getattr(self.actor_critic.core, "goal_quality", None)
+                if quality is not None:
+                    stats.ca3_goal_quality_events = float(self._last_graph_rollout_stats.get("goal_quality_events", 0.0))
+                    stats.ca3_goal_quality_supported_goals = float((quality.quality_counts > 0).sum().item())
+                    stats.ca3_goal_quality_score_mean = quality.scores.mean().detach().float()
+                    stats.ca3_goal_quality_score_std = quality.scores.std(unbiased=False).detach().float()
+                    stats.ca3_goal_quality_event_min = quality.event_counts.min().detach().float()
+                    stats.ca3_goal_quality_event_max = quality.event_counts.max().detach().float()
                 completion_count = max(1.0, float(self._last_graph_rollout_stats.get("completion_count", 0.0)))
                 stats.hrl_edge_promotion_rate = stats.hrl_edge_promotions / completion_count
                 stats.hrl_edge_demotion_rate = stats.hrl_edge_demotions / completion_count

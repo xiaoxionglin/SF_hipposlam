@@ -10,6 +10,7 @@ from sample_factory.model.core import ModelCore, ModelCoreIdentity, ModelCoreRNN
 from sample_factory.utils.typing import Config
 from sample_factory.utils.utils import log
 from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import CA3StateReadout, CausalDGInnovationPredictor
+from sf_working_directories.IntrMotiv.dmlab.ca3_goal_quality import CA3GoalQuality
 from sf_working_directories.IntrMotiv.dmlab.contextual_dg import ContextualDGFeedback
 from sf_working_directories.IntrMotiv.dmlab.dg_recruitment_graph import (
     RECRUITMENT_HISTORY_SIZE,
@@ -537,6 +538,16 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.hrl_manager_mode = getattr(cfg, "hrl_manager_mode", "visit_direct")
         self.hrl_control_outcome = getattr(cfg, "hrl_control_outcome", "target_hit")
         self.hrl_direct_target_selection = getattr(cfg, "hrl_direct_target_selection", "frontier")
+        self.goal_candidate_mode = getattr(cfg, "hrl_goal_candidate_mode", "all")
+        self.goal_candidate_k = int(getattr(cfg, "hrl_goal_candidate_k", self.Hippo_n_feature))
+        if self.goal_candidate_mode not in ("all", "random", "hebb") or not 1 <= self.goal_candidate_k <= self.Hippo_n_feature:
+            raise ValueError("Invalid goal candidate mode or capacity")
+        if self.goal_candidate_mode != "all" and (
+            self.hrl_manager_mode != "frontier_direct"
+            or self.hrl_direct_target_selection != "frontier"
+            or bool(getattr(cfg, "hrl_edge_exploration", False))
+        ):
+            raise ValueError("Goal candidate selection requires direct C15 frontier without edge probes")
         if self.hrl_control_outcome not in ("target_hit", "first_distinct"):
             raise ValueError(f"Unknown hrl_control_outcome={self.hrl_control_outcome}")
         if self.hrl_direct_target_selection not in ("frontier", "least_tested", "local_successor", "reward_value"):
@@ -663,6 +674,18 @@ class SimpleSequenceWithBypassCore(ModelCore):
             if self.hrl_enabled and self.hrl_graph_memory == "policy_buffer"
             else None
         )
+        self.goal_quality = (
+            CA3GoalQuality(
+                self.Hippo_n_feature,
+                self.core_output_size,
+                float(getattr(cfg, "ca3_goal_quality_alpha", 0.01)),
+                int(getattr(cfg, "ca3_goal_quality_support_prior", 100)),
+            )
+            if bool(getattr(cfg, "ca3_goal_quality_enabled", False))
+            else None
+        )
+        if self.goal_candidate_mode == "hebb" and self.goal_quality is None:
+            raise ValueError("HEBB candidates require CA3 goal-quality memory")
         self.passive_recruitment_graph = (
             PassiveRecruitmentGraph(self.Hippo_n_feature) if self.graph_recruitment else None
         )
@@ -862,6 +885,9 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     common_manager=self.hrl_manager_mode == "control_graph",
                     control_outcome=self.hrl_control_outcome,
                     direct_target_selection=self.hrl_direct_target_selection,
+                    goal_candidate_mode=self.goal_candidate_mode,
+                    goal_candidate_k=self.goal_candidate_k,
+                    goal_quality_scores=(self.goal_quality.scores if self.goal_quality is not None else None),
                     min_target_visits=self.hrl_min_target_visits,
                     reward_instruction=(
                         (reward_instruction.argmax(dim=-1) + 1) if reward_instruction is not None else None

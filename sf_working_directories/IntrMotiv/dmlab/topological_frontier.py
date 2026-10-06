@@ -12,6 +12,7 @@ from sf_working_directories.IntrMotiv.dmlab.hrl_controllable_graph import (
     current_dg_from_activity,
     option_target_one_hot,
 )
+from sf_working_directories.IntrMotiv.dmlab.ca3_goal_quality import candidate_mask
 
 MODE_NONE = 0
 MODE_NAVIGATE = 1
@@ -360,6 +361,24 @@ def frontier_scores(graph, uncertainty_weight: float) -> Tensor:
     return score.masked_fill(~observed, -torch.inf)
 
 
+def subset_frontier_scores(graph, selected: Tensor, uncertainty_weight: float) -> Tensor:
+    """C15 score with novelty and uncertainty normalized over this choice's candidates."""
+    batch, n_nodes = selected.shape
+    visits = graph.node_visits[None, :].expand(batch, n_nodes)
+    order = torch.argsort(visits.masked_fill(~selected, torch.inf), dim=-1, stable=True)
+    rank = torch.empty_like(order)
+    rank.scatter_(1, order, torch.arange(n_nodes, device=selected.device)[None, :].expand_as(order))
+    count = selected.sum(dim=-1).clamp_min(1)
+    novelty = 1.0 - rank.to(visits.dtype) / (count - 1).clamp_min(1)[:, None]
+    attempts = graph.frontier_attempts[None, :].expand_as(visits)
+    total = (attempts * selected).sum(dim=-1)
+    uncertainty = torch.sqrt(torch.log(2.0 + total[:, None]) / (1.0 + attempts)).clamp(max=1.0)
+    discovery_yield = (graph.frontier_discoveries + 1.0) / (graph.frontier_attempts + 2.0)
+    return (novelty + float(uncertainty_weight) * uncertainty + 0.5 * discovery_yield[None, :]).masked_fill(
+        ~selected, -torch.inf
+    )
+
+
 def visit_scores(graph) -> Tensor:
     """Novelty-only manager score used by the topology-matched control."""
     visits = graph.node_visits
@@ -620,6 +639,10 @@ def _advance_options_without_probes(
     direct_target_selection,
     min_target_visits,
     reward_instruction,
+    goal_candidate_mode,
+    goal_candidate_k,
+    goal_quality_scores,
+    frontier_uncertainty_weight,
 ):
     """Batch option transitions when directed-edge probing is disabled.
 
@@ -729,9 +752,20 @@ def _advance_options_without_probes(
             return
         eligible = (graph.node_visits > 0)[None, :].expand(option.size(0), -1)
         eligible = eligible & graph.selectable_mask()[None, :]
+        if goal_quality_scores is not None:
+            # The current landmark is a source, not a new target. Every study
+            # arm uses the same target pool before its candidate rule applies.
+            eligible = eligible & (ids[None, :] != node[:, None])
         if waypoint_planning or common_manager:
             eligible = eligible & torch.isfinite(dist[safe_node])
-        candidate_scores = scores[None, :].expand_as(eligible).masked_fill(~eligible, -torch.inf)
+        if goal_candidate_mode == "all" and goal_quality_scores is None:
+            candidate_scores = scores[None, :].expand_as(eligible).masked_fill(~eligible, -torch.inf)
+        else:
+            quality = goal_quality_scores
+            if quality is None:
+                quality = graph.node_visits.new_zeros(n_nodes)
+            selected = candidate_mask(eligible, quality, goal_candidate_mode, goal_candidate_k)
+            candidate_scores = subset_frontier_scores(graph, selected, frontier_uncertainty_weight)
         frontier = candidate_scores.argmax(dim=-1)
         has_candidate = eligible.any(dim=-1)
         hop = next_hop[safe_node, frontier] if waypoint_planning else frontier
@@ -739,7 +773,7 @@ def _advance_options_without_probes(
         put(topo, topo_layout.route_available, navigate, 1.0)
         put(topo, topo_layout.plan_hops, navigate, hop_count[safe_node, frontier])
         put(topo, topo_layout.frontier_selected, navigate, 1.0)
-        put(topo, topo_layout.frontier_score, navigate, scores[frontier])
+        put(topo, topo_layout.frontier_score, navigate, candidate_scores.gather(1, frontier[:, None]).squeeze(1))
         start(navigate, node, hop, MODE_NAVIGATE, frontier, dist[safe_node, hop.clamp_min(0)])
         explore(mask & ~navigate, fallback_score)
 
@@ -1077,6 +1111,9 @@ def advance_topological_manager(
     direct_target_selection: str = "frontier",
     min_target_visits: float = 1.0,
     reward_instruction: Tensor | None = None,
+    goal_candidate_mode: str = "all",
+    goal_candidate_k: int = 16,
+    goal_quality_scores: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Advance topological state while preserving the sampled behavior condition."""
     if control_outcome not in ("target_hit", "first_distinct"):
@@ -1233,6 +1270,10 @@ def advance_topological_manager(
             direct_target_selection,
             min_target_visits,
             reward_instruction,
+            goal_candidate_mode,
+            goal_candidate_k,
+            goal_quality_scores,
+            frontier_uncertainty_weight,
         )
     else:
         _advance_options_with_probes(

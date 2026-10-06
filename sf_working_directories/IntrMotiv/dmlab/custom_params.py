@@ -151,6 +151,9 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--DG_BN_intercept", default=2, type=float, help="instruction strength")
     p.add_argument("--with_pos_obs", default=False, type=str2bool, help="get the true position of agent")
+    p.add_argument("--dg_odor_mode", default="none", choices=("none", "zero", "gaussian4"))
+    p.add_argument("--dg_odor_gain", default=1.0, type=float)
+    p.add_argument("--dg_odor_noise_std", default=0.15, type=float)
     p.add_argument(
         "--use_jit",
         default=True,
@@ -283,6 +286,11 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--hrl_passive_min_displacement", default=2.0, type=float)
     p.add_argument("--hrl_passive_max_path_length", default=64.0, type=float)
     p.add_argument("--hrl_frontier_uncertainty_weight", default=1.0, type=float)
+    p.add_argument("--hrl_goal_candidate_mode", default="all", choices=("all", "random", "hebb"))
+    p.add_argument("--hrl_goal_candidate_k", default=16, type=int)
+    p.add_argument("--ca3_goal_quality_enabled", default=False, type=str2bool)
+    p.add_argument("--ca3_goal_quality_alpha", default=0.01, type=float)
+    p.add_argument("--ca3_goal_quality_support_prior", default=100, type=int)
     p.add_argument(
         "--hrl_edge_exploration",
         default=False,

@@ -932,25 +932,30 @@ class HipposlamEncoder(Encoder):
 
         self.encoder_out_size += self.instructions_lstm_units
         log.info("DMLab policy head output size: %r", self.encoder_out_size)
+        self.dg_odor_mode = getattr(cfg, "dg_odor_mode", "none")
+        self.dg_odor_gain = float(getattr(cfg, "dg_odor_gain", 1.0))
+        if self.dg_odor_mode not in ("none", "zero", "gaussian4") or not np.isfinite(self.dg_odor_gain) or self.dg_odor_gain <= 0:
+            raise ValueError("Invalid DG odor mode or gain")
+        self.dg_input_size = self.encoder_out_size + (4 if self.dg_odor_mode != "none" else 0)
 
         if cfg.DG_lr:
             self.dg_lr = getattr(cfg, "DG_lr", 0.001)
 
-            self.DG_projection = DGProjection(self.encoder_out_size, cfg.Hippo_n_feature, self.dg_lr)
+            self.DG_projection = DGProjection(self.dg_input_size, cfg.Hippo_n_feature, self.dg_lr)
         elif cfg.DG_temperature:
             self.temperature = getattr(cfg, "DG_temperature", 1)
-            self.DG_projection = DGProjection_simple_top1(self.encoder_out_size, cfg.Hippo_n_feature, self.temperature)
+            self.DG_projection = DGProjection_simple_top1(self.dg_input_size, cfg.Hippo_n_feature, self.temperature)
         elif cfg.DG_batch_q:
-            self.DG_projection = DGProjectionWithRunningQuantile(self.encoder_out_size, cfg.Hippo_n_feature)
+            self.DG_projection = DGProjectionWithRunningQuantile(self.dg_input_size, cfg.Hippo_n_feature)
         elif cfg.DG_softmax:
-            self.DG_projection = DGProjection_simple_softmax(self.encoder_out_size, cfg.Hippo_n_feature)
+            self.DG_projection = DGProjection_simple_softmax(self.dg_input_size, cfg.Hippo_n_feature)
         else:
-            self.DG_projection = nn.Linear(self.encoder_out_size, cfg.Hippo_n_feature)
+            self.DG_projection = nn.Linear(self.dg_input_size, cfg.Hippo_n_feature)
 
         if cfg.DG_name == "log_softmax":
-            self.DG_projection = DGProjection_log_softmax(self.encoder_out_size, cfg.Hippo_n_feature)
+            self.DG_projection = DGProjection_log_softmax(self.dg_input_size, cfg.Hippo_n_feature)
         elif cfg.DG_name == "linear_relu":
-            self.DG_projection = DGProjection_relu(self.encoder_out_size, cfg.Hippo_n_feature)
+            self.DG_projection = DGProjection_relu(self.dg_input_size, cfg.Hippo_n_feature)
         elif cfg.DG_name == "batch_novelty":
             self.dg_detect = getattr(cfg, "DG_detect", 0.1)
             if not self.dg_detect:
@@ -961,12 +966,12 @@ class HipposlamEncoder(Encoder):
                 print("getattr doesn't behave like you think, setting dg_novelty to 0.4")
                 self.dg_novelty = 0.4
             self.DG_projection = DGProjectionBatchNovelty(
-                self.encoder_out_size, cfg.Hippo_n_feature, self.dg_detect, self.dg_novelty
+                self.dg_input_size, cfg.Hippo_n_feature, self.dg_detect, self.dg_novelty
             )
         elif cfg.DG_name == "batchnorm_relu":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
             self.DG_projection = DGProjection_batchnorm_relu(
-                self.encoder_out_size,
+                self.dg_input_size,
                 cfg.Hippo_n_feature,
                 intercept=intercept,
                 batchnorm_semantics=getattr(cfg, "dg_batchnorm_semantics", "legacy_batch"),
@@ -981,7 +986,7 @@ class HipposlamEncoder(Encoder):
         elif cfg.DG_name == "batchnorm_relu_fixed":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
             self.DG_projection = DGProjection_batchnorm_relu_fixed(
-                self.encoder_out_size, cfg.Hippo_n_feature, intercept=intercept
+                self.dg_input_size, cfg.Hippo_n_feature, intercept=intercept
             )
 
         self.goal_reference_projection = None
@@ -1132,32 +1137,41 @@ class HipposlamEncoder(Encoder):
         x = torch.cat((x, last_outputs), dim=1)
         return x
 
+    def append_dg_odor(self, visual_features, obs_dict):
+        """Build the sole DG projection input, shared with recruitment telemetry."""
+        if self.dg_odor_mode == "none":
+            return visual_features
+        odor = obs_dict["dg_odor"].to(device=visual_features.device, dtype=visual_features.dtype)
+        if odor.shape != (visual_features.size(0), 4):
+            raise ValueError("DG odor observation must have four channels")
+        return torch.cat((visual_features, self.dg_odor_gain * odor), dim=-1)
+
     def forward(self, obs_dict):
         x = self.projection_input(obs_dict)
         last_outputs = x[:, -self.instructions_lstm_units :]
-
+        dg_x = self.append_dg_odor(x, obs_dict)
         # The trainable landmark encoder is the DG head. The visual/instruction
         # feature stream is a controller bypass and is not part of DG credit.
         # Detaching here keeps encoder-only updates local to DG while the
         # unchanged bypass below remains differentiable for PPO.
         goal_preactivation = None
         if self.dg_goal_write:
-            goal_preactivation = self.DG_projection.preactivation(x.detach())
+            goal_preactivation = self.DG_projection.preactivation(dg_x.detach())
             tmp_out = self.DG_projection.activation(goal_preactivation - self.DG_projection.intercept)
         elif self.context_feedback == "none":
-            tmp_out = self.DG_projection(x.detach())
+            tmp_out = self.DG_projection(dg_x.detach())
         else:
             if not isinstance(self.DG_projection, DGProjection_batchnorm_relu):
                 raise ValueError("Contextual DG feedback requires DG_name=batchnorm_relu")
             # Context and thresholding are causal recurrent operations in the
             # core. Projection and BatchNorm still happen exactly once here.
-            tmp_out = self.DG_projection.preactivation(x.detach())
+            tmp_out = self.DG_projection.preactivation(dg_x.detach())
         if self.goal_reference_projection is not None:
             # Parent ``train()`` calls must never put the frozen detector back
             # into batch-stat mode: its normalization state defines arrival.
             self.goal_reference_projection.eval()
             with torch.no_grad():
-                reference_activity = self.goal_reference_projection(x.detach())
+                reference_activity = self.goal_reference_projection(dg_x.detach())
             tmp_out = torch.cat((tmp_out, reference_activity), dim=1)
         # log.info(tmp_out)
         if self.depth_sensor:

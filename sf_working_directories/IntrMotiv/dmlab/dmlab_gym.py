@@ -316,6 +316,8 @@ class DmlabGymEnv_custom(gym.Env):
         with_pos_obs=False,
         with_pos_telemetry=False,
         with_online_spatial_telemetry=False,
+        dg_odor_mode="none",
+        dg_odor_noise_std=0.15,
         action_path_integration=False,
         capture_terminal_observation=False,
     ):
@@ -369,11 +371,16 @@ class DmlabGymEnv_custom(gym.Env):
         self.with_pos_obs = with_pos_obs
         self.with_pos_telemetry = with_pos_telemetry
         self.with_online_spatial_telemetry = bool(with_online_spatial_telemetry)
+        self.dg_odor_mode = dg_odor_mode
+        self.dg_odor_noise_std = float(dg_odor_noise_std)
+        if dg_odor_mode not in ("none", "zero", "gaussian4") or not 0 <= self.dg_odor_noise_std <= 1:
+            raise ValueError("Invalid DG odor configuration")
+        self.odor_random_state = None
         self.action_path_integration = bool(action_path_integration)
         self.previous_action = 0
         self.last_debug_position = None
         self.last_debug_rotation = None
-        if self.with_pos_obs or self.with_pos_telemetry or self.with_online_spatial_telemetry:
+        if self.with_pos_obs or self.with_pos_telemetry or self.with_online_spatial_telemetry or dg_odor_mode == "gaussian4":
             observation_format += ["DEBUG.POS.TRANS", "DEBUG.POS.ROT"]
 
         config = {
@@ -452,6 +459,10 @@ class DmlabGymEnv_custom(gym.Env):
                 shape=[3],
                 dtype=np.float64,
             )
+        if self.dg_odor_mode != "none":
+            self.observation_space.spaces["dg_odor"] = gym.spaces.Box(
+                low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32
+            )
         if getattr(self, "with_online_spatial_telemetry", False):
             self.observation_space.spaces["telemetry_pose"] = gym.spaces.Box(
                 low=np.asarray((-np.inf, -np.inf, -np.inf), dtype=np.float32),
@@ -490,6 +501,7 @@ class DmlabGymEnv_custom(gym.Env):
                 initial_seed = seed
 
         self.random_state = np.random.RandomState(seed=initial_seed)
+        self.odor_random_state = np.random.default_rng(initial_seed ^ 0x4F444F52)
         return [initial_seed]
 
     def format_obs_dict(self, env_obs_dict):
@@ -517,6 +529,12 @@ class DmlabGymEnv_custom(gym.Env):
         if self.with_pos_obs:
             env_obs_dict["pos"] = self.last_debug_position
             env_obs_dict["rot"] = self.last_debug_rotation
+        if getattr(self, "dg_odor_mode", "none") != "none":
+            from .odor import odor_observation
+
+            env_obs_dict["dg_odor"] = odor_observation(
+                self.last_debug_position, self.dg_odor_mode, self.odor_random_state, self.dg_odor_noise_std
+            )
         if getattr(self, "with_online_spatial_telemetry", False):
             if self.last_debug_position is None or self.last_debug_rotation is None:
                 raise RuntimeError("online spatial telemetry requires DMLab debug pose observations")
