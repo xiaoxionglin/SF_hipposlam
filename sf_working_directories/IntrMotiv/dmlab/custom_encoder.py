@@ -936,6 +936,13 @@ class HipposlamEncoder(Encoder):
         self.dg_odor_gain = float(getattr(cfg, "dg_odor_gain", 1.0))
         if self.dg_odor_mode not in ("none", "zero", "gaussian4") or not np.isfinite(self.dg_odor_gain) or self.dg_odor_gain <= 0:
             raise ValueError("Invalid DG odor mode or gain")
+        self.dg_prescribed_mode = getattr(cfg, "dg_prescribed_mode", "none")
+        if self.dg_prescribed_mode not in ("none", "zero", "gaussian4"):
+            raise ValueError("Invalid prescribed DG mode")
+        if self.dg_prescribed_mode != "none" and cfg.Hippo_n_feature < 4:
+            raise ValueError("Four prescribed DG identities require at least four DG channels")
+        if self.dg_prescribed_mode == "gaussian4" and getattr(cfg, "dg_context_feedback", "none") != "none":
+            raise ValueError("Prescribed DG requires post-threshold, context-independent activity")
         self.dg_input_size = self.encoder_out_size + (4 if self.dg_odor_mode != "none" else 0)
 
         if cfg.DG_lr:
@@ -1173,6 +1180,13 @@ class HipposlamEncoder(Encoder):
             with torch.no_grad():
                 reference_activity = self.goal_reference_projection(dg_x.detach())
             tmp_out = torch.cat((tmp_out, reference_activity), dim=1)
+        if self.dg_prescribed_mode == "gaussian4":
+            from .prescribed_dg import replace_prescribed_channels
+
+            prescribed = obs_dict["dg_prescribed"].to(device=tmp_out.device, dtype=tmp_out.dtype)
+            # The four fixed identities enter CA3 at the ordinary DG interface.
+            # No DG projection or PPO gradient can alter these four values.
+            tmp_out = replace_prescribed_channels(tmp_out, prescribed)
         # log.info(tmp_out)
         if self.depth_sensor:
             depth_out = self.depth_encoder(obs_dict["obs"][:, -1:, :, :])

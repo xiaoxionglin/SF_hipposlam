@@ -203,6 +203,7 @@ def make_dmlab_env_impl(
         with_online_spatial_telemetry=getattr(cfg, "online_spatial_telemetry", True),
         dg_odor_mode=getattr(cfg, "dg_odor_mode", "none"),
         dg_odor_noise_std=float(getattr(cfg, "dg_odor_noise_std", 0.15)),
+        dg_prescribed_mode=getattr(cfg, "dg_prescribed_mode", "none"),
         action_path_integration=(
             getattr(cfg, "hrl_action_path_integration", False)
             or getattr(cfg, "dg_context_history", "ca3") == "ca3_action"

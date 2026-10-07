@@ -179,6 +179,13 @@ def current_dg_from_activity(dg_activity: Tensor) -> tuple[Tensor, Tensor, Tenso
     return dg_id, has_active, n_active
 
 
+def restrict_goal_identities(dg_activity: Tensor, count: int) -> Tensor:
+    """Preserve DG width while hiding context-only units from goal bookkeeping."""
+    if dg_activity.ndim != 2 or not 1 <= count <= dg_activity.size(-1):
+        raise ValueError("Goal identity count must fit inside the DG population")
+    return torch.cat((dg_activity[:, :count], torch.zeros_like(dg_activity[:, count:])), dim=-1)
+
+
 def source_from_trace(sequence_core: Tensor) -> Tensor:
     """Return the DG with the most recent occupied CA3 slot, or -1 if empty."""
     occupied = sequence_core != 0

@@ -326,6 +326,7 @@ def dg_unused_batch_recruitment_loss(
     valids: Tensor,
     intercept: float,
     temperature: float,
+    eligible_features: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Encourage units absent from all valid transitions in this minibatch."""
     if temperature <= 0:
@@ -338,6 +339,10 @@ def dg_unused_batch_recruitment_loss(
 
     observed = (prior_active.bool() | (current_activity > 0)) & valid.unsqueeze(-1)
     unused = ~observed.any(dim=0)
+    if eligible_features is not None:
+        if eligible_features.shape != unused.shape:
+            raise ValueError("Eligible DG feature mask has the wrong shape")
+        unused &= eligible_features.bool()
     if not valid.any() or not unused.any():
         return pre_threshold_logits.sum() * 0.0, unused
 
@@ -3270,6 +3275,10 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 valids,
                 float(projection.intercept),
                 float(self.cfg.encoder_batch_loss_temperature),
+                eligible_features=(
+                    torch.arange(self.cfg.Hippo_n_feature, device=head_outputs.device) >= 4
+                    if getattr(self.cfg, "dg_prescribed_mode", "none") == "gaussian4" else None
+                ),
             )
         # log.info(f'ADDITIONAL LOSSES: {loss_penalty.item()}; {loss_reward.item()}; {batch_penalty.item()}')
         else:

@@ -840,6 +840,13 @@ class SimpleSequenceWithBypassCore(ModelCore):
     def _update_hrl(
         self, hrl_state, dg_activity, prev_core_state, action_features=None, current_ca3=None, reward_instruction=None
     ):
+        goal_count = int(getattr(self.cfg, "hrl_goal_identity_count", 0))
+        if goal_count:
+            from .hrl_controllable_graph import restrict_goal_identities
+
+            # Learned context channels remain in CA3 but cannot define manager
+            # sources, destinations, hits, or graph edges.
+            dg_activity = restrict_goal_identities(dg_activity, goal_count)
         if self.contextual_graph_hits:
             assert self.policy_graph is not None and self.state_readout is not None and current_ca3 is not None
             dg_activity = self.policy_graph.contextual_activity(
