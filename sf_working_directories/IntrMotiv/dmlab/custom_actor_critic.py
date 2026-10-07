@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Dict, Optional
 
 import gymnasium as gym
@@ -130,6 +131,36 @@ class TargetFiLMDecoder(nn.Module):
         return self.decoder_out_size
 
 
+class LegacyGoalGainDecoder(nn.Module):
+    """Scale only the goal slice before the existing legacy decoder.
+
+    The core, graph, hit detector, and replayed command retain the original
+    unit one-hot. All decoder callers, including action probes, share this
+    transform.
+    """
+
+    def __init__(self, decoder: nn.Module, target_start: int, n_targets: int, gain: float):
+        super().__init__()
+        self.decoder = decoder
+        self.target_start = int(target_start)
+        self.n_targets = int(n_targets)
+        self.gain = float(gain)
+
+    def goal_scaled_input(self, core_output: Tensor) -> Tensor:
+        end = self.target_start + self.n_targets
+        return torch.cat(
+            (core_output[..., : self.target_start], core_output[..., self.target_start : end] * self.gain,
+             core_output[..., end:]),
+            dim=-1,
+        )
+
+    def forward(self, core_output: Tensor) -> Tensor:
+        return self.decoder(self.goal_scaled_input(core_output))
+
+    def get_out_size(self) -> int:
+        return self.decoder.get_out_size()
+
+
 class WorkerGoalFiLMDecoder(nn.Module):
     """Fresh FiLM adapter for detached z-state and ID or continuous goals."""
 
@@ -258,6 +289,15 @@ class IntrMotivActorCriticSharedWeights(_PreserveMarkedInitializationMixin, Acto
                 nn.init.zeros_(self.decoder.goal_adapter.weight)
             self.critic_linear.apply(self.initialize_weights)
             self.action_parameterization.apply(self.initialize_weights)
+        legacy_gain = float(getattr(cfg, "hrl_legacy_goal_input_gain", 1.0))
+        if not math.isfinite(legacy_gain) or legacy_gain <= 0:
+            raise ValueError("hrl_legacy_goal_input_gain must be finite and positive")
+        if legacy_gain != 1.0:
+            if goal_conditioning != "legacy" or not bool(getattr(cfg, "hrl_controllable_graph", False)):
+                raise ValueError("Legacy goal gain requires graph HRL with legacy conditioning")
+            self.decoder = LegacyGoalGainDecoder(
+                self.decoder, self.core.target_condition_start, self.core.Hippo_n_feature, legacy_gain
+            )
 
         self.separate_goal_controllers = getattr(cfg, "intrinsic_goal_controller", "shared") == "separate"
         if getattr(self, "separate_goal_controllers", False):

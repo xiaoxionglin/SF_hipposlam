@@ -371,6 +371,14 @@ def maybe_overwrite_rnn_size(cfg):
     if getattr(cfg, "hrl_edge_exploration", False) and manager_mode not in ("control_graph", "frontier_waypoint"):
         raise ValueError("Edge exploration requires a waypoint or control_graph manager")
     goal_conditioning = getattr(cfg, "hrl_goal_conditioning", "legacy")
+    target_expiration = getattr(cfg, "hrl_target_expiration", "deadline")
+    if target_expiration == "episode" and (
+        not getattr(cfg, "hrl_controllable_graph", False)
+        or getattr(cfg, "hrl_edge_exploration", False)
+        or getattr(cfg, "hrl_manager_mode", "visit_direct") not in ("visit_direct", "frontier_direct")
+        or getattr(cfg, "hrl_control_outcome", "target_hit") != "target_hit"
+    ):
+        raise ValueError("Episode-long target mode requires direct target-hit graph HRL without edge probes")
     intrinsic_goal = getattr(cfg, "intrinsic_goal_mode", "none") != "none"
     memory_inhibition = getattr(cfg, "dg_ca3_reentry_inhibition", "none") != "none"
     if intrinsic_goal or memory_inhibition or getattr(cfg, "decoder_reward_gate", "none") != "none":

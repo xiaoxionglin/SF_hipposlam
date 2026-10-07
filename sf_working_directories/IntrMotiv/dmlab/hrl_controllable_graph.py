@@ -307,6 +307,7 @@ def update_hrl_state(
     exploration_mode: bool = False,
     manager_exploration_probability: float = 0.0,
     exploration_horizon: int = 64,
+    target_expiration: str = "deadline",
 ) -> tuple[Tensor, Tensor]:
     layout = HRLStateLayout(dg_activity.size(-1))
     n_nodes = layout.n_nodes
@@ -331,7 +332,11 @@ def update_hrl_state(
     has_option = normal_target | exploring
     hit = has_active & normal_target & (current_dg == target)
     elapsed = age + 1.0
+    if target_expiration not in ("deadline", "episode"):
+        raise ValueError(f"Unknown target_expiration={target_expiration}")
     expired = (~hit) & has_option & (countdown <= 1.0)
+    if target_expiration == "episode":
+        expired &= ~normal_target
     target_expired = expired & normal_target
     exploration_expired = expired & exploring
     reset = hit | expired | (~has_option)
@@ -412,10 +417,18 @@ def update_hrl_state(
         target[reset] = selected
         source[reset] = new_source[reset]
         age[reset] = 0.0
-        countdown[reset] = deadline
+        countdown[reset] = torch.where(
+            selected_valid & (target_expiration == "episode"),
+            torch.full_like(deadline, -1.0),
+            deadline,
+        )
         state[reset, layout.option_reset] = 1.0
         state[reset, layout.deadline_learned] = deadline_learned.to(dtype=state.dtype)
-        state[reset, layout.selected_deadline] = deadline
+        state[reset, layout.selected_deadline] = torch.where(
+            selected_valid & (target_expiration == "episode"),
+            torch.full_like(deadline, -1.0),
+            deadline,
+        )
         completed = (hit | expired)[reset]
         signed_elapsed = torch.where(exploration_expired[reset], -elapsed[reset], elapsed[reset])
         state[reset, layout.completion_elapsed] = torch.where(
@@ -424,7 +437,14 @@ def update_hrl_state(
 
     keep = ~reset
     age[keep] = age[keep] + 1.0
-    countdown[keep] = torch.clamp(countdown[keep] - 1.0, min=0.0)
+    if target_expiration == "episode":
+        countdown[keep] = torch.where(
+            normal_target[keep],
+            torch.full_like(countdown[keep], -1.0),
+            torch.clamp(countdown[keep] - 1.0, min=0.0),
+        )
+    else:
+        countdown[keep] = torch.clamp(countdown[keep] - 1.0, min=0.0)
 
     state[:, layout.target] = _encode_id(target, state.dtype)
     state[:, layout.source] = _encode_id(source, state.dtype)
@@ -1414,6 +1434,7 @@ def update_option_state_from_policy_graph(
     exploration_horizon: int = 64,
     target_timing: str = "delayed",
     fast_weight_half_life_options: float = 10000.0,
+    target_expiration: str = "deadline",
 ) -> tuple[Tensor, Tensor]:
     """Advance option state without mutating global graph buffers.
 
@@ -1457,6 +1478,7 @@ def update_option_state_from_policy_graph(
         exploration_mode=exploration_mode,
         manager_exploration_probability=manager_exploration_probability,
         exploration_horizon=exploration_horizon,
+        target_expiration=target_expiration,
     )
     compact_state = prev_option_state.new_zeros(prev_option_state.shape)
     compact_state[:, : layout.persistent_start] = next_state[:, : layout.persistent_start]

@@ -346,6 +346,7 @@ def test_previous_action_observation_uses_reset_sentinel_then_executed_action():
     env.with_number_instruction = True
     env.instructions = np.zeros(1, dtype=np.int32)
     env.previous_action = 5
+    env.dg_prescribed_mode = "none"
     obs = env.format_obs_dict({"RGBD_INTERLEAVED": np.zeros((2, 2, 4), dtype=np.uint8)})
     assert obs["prev_action"].tolist() == [5]
 
@@ -601,6 +602,76 @@ def test_node_only_objective_does_not_turn_passive_events_into_edge_probes():
     )
     assert topo[0, TopologicalStateLayout(3).mode].item() == MODE_EXPLORE
     assert option[0, HRLStateLayout(3).target].item() == 4
+
+
+def test_episode_long_direct_goal_survives_wrong_field_and_former_deadline():
+    graph = PolicyControllableGraph(3)
+    graph.node_visits[:2] = torch.tensor([2.0, 1.0])
+    graph.passive_confidence[0, 1] = 2.0
+    graph.passive_time[0, 1] = 5.0
+    option = torch.zeros(1, hrl_option_state_size(3))
+    topo = torch.zeros(1, topological_state_size(3))
+    kwargs = dict(
+        waypoint=False, edge_exploration=False, target_timing="immediate",
+        target_expiration="episode",
+    )
+    option, topo, condition = _manager_step(
+        option, topo, torch.tensor([[1.0, 0.0, 0.0]]), graph, **kwargs
+    )
+    layout = HRLStateLayout(3)
+    assert option[0, layout.target].item() == 2.0
+    assert option[0, layout.countdown].item() == -1.0
+    assert option[0, layout.selected_deadline].item() == -1.0
+    for step in range(70):
+        observation = torch.tensor([[0.0, 0.0, 1.0]]) if step == 7 else torch.zeros(1, 3)
+        option, topo, condition = _manager_step(option, topo, observation, graph, **kwargs)
+        assert option[0, layout.target].item() == 2.0
+        assert option[0, layout.option_expired].item() == 0.0
+        assert condition[0, 1].item() == 1.0
+    option, _, _ = _manager_step(option, topo, torch.tensor([[0.0, 1.0, 0.0]]), graph, **kwargs)
+    assert option[0, layout.target_hit].item() == 1.0
+
+
+def test_episode_long_direct_goal_matches_packed_replay_past_former_deadline():
+    n_nodes = 3
+    cfg = SimpleNamespace(
+        Hippo_R=2,
+        Hippo_L=3,
+        Hippo_n_feature=n_nodes,
+        hrl_controllable_graph=True,
+        hrl_graph_memory="policy_buffer",
+        hrl_manager_mode="frontier_direct",
+        hrl_target_timing="immediate",
+        hrl_target_expiration="episode",
+        hrl_control_outcome="target_hit",
+        hrl_edge_exploration=False,
+        hrl_goal_identity_count=n_nodes,
+        hrl_bootstrap_horizon=64,
+    )
+    core = SimpleSequenceWithBypassCore(cfg, n_nodes + ACTION_FEATURE_SIZE)
+    core.policy_graph.node_visits[:2] = torch.tensor([2.0, 1.0])
+    core.policy_graph.passive_confidence[0, 1] = 2.0
+    core.policy_graph.passive_time[0, 1] = 5.0
+    initial = torch.zeros(1, core.total_state_size)
+    sequence = torch.zeros(70, 1, n_nodes + ACTION_FEATURE_SIZE)
+    sequence[0, 0, 0] = 1.0
+    sequence[7, 0, 2] = 1.0
+    sequence[..., -ACTION_FEATURE_SIZE:] = reduced_action_features(torch.tensor([5])).view(1, 1, -1)
+
+    sampled_state = initial.clone()
+    sampled_outputs = []
+    for step in sequence:
+        output, sampled_state = core(step, sampled_state)
+        sampled_outputs.append(output)
+    sampled_outputs = torch.stack(sampled_outputs)
+    packed = torch.nn.utils.rnn.pack_padded_sequence(
+        sequence, torch.tensor([len(sequence)]), enforce_sorted=False
+    )
+    replay_output, replay_state = core(packed, initial.clone())
+    replay_output, _ = torch.nn.utils.rnn.pad_packed_sequence(replay_output)
+    assert torch.equal(replay_output, sampled_outputs)
+    assert torch.equal(replay_state, sampled_state)
+    assert torch.all(sampled_outputs[:, 0, -n_nodes:].argmax(dim=-1) == 1)
 
 
 def test_reliable_and_candidate_deadlines_have_only_the_1p2_multiplier():

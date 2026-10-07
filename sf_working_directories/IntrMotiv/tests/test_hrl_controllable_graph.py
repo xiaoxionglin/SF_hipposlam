@@ -472,6 +472,44 @@ class ControllableGraphHRLTest(unittest.TestCase):
         self.assertTrue(torch.equal(deadline, torch.tensor([14.0, 64.0])))
         self.assertTrue(torch.equal(learned, torch.tensor([True, False])))
 
+    def test_episode_long_goal_ignores_expired_unknown_and_known_deadlines(self):
+        layout = HRLStateLayout(3)
+        state = initial_hrl_state(2, 3)
+        state[:, layout.source] = 1.0
+        state[:, layout.target] = 2.0
+        state[:, layout.age] = 70.0
+        state[:, layout.countdown] = 1.0
+        state[1, layout.tctrl_start + 1] = 3.0
+        wrong_field = torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
+        state, condition = update_hrl_state(
+            state, wrong_field, torch.zeros(2, 3, 6), fallback_horizon=8,
+            target_expiration="episode",
+        )
+        self.assertTrue((state[:, layout.target] == 2).all())
+        self.assertTrue((state[:, layout.option_expired] == 0).all())
+        self.assertTrue((state[:, layout.countdown] == -1).all())
+        self.assertTrue((condition[:, 1] == 1).all())
+
+        hit = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+        state, _ = update_hrl_state(
+            state, hit, torch.zeros(2, 3, 6), fallback_horizon=8,
+            target_expiration="episode",
+        )
+        self.assertTrue((state[:, layout.target_hit] == 1).all())
+        self.assertTrue((state[:, layout.option_reset] == 1).all())
+
+    def test_episode_long_new_goal_uses_no_deadline_sentinel(self):
+        layout = HRLStateLayout(3)
+        state = initial_hrl_state(1, 3)
+        state[:, layout.visits_start : layout.visits_end] = torch.tensor([[2.0, 1.0, 0.0]])
+        state, _ = update_hrl_state(
+            state, torch.tensor([[1.0, 0.0, 0.0]]), torch.zeros(1, 3, 6),
+            fallback_horizon=8, target_expiration="episode",
+        )
+        self.assertEqual(state[0, layout.target].item(), 2.0)
+        self.assertEqual(state[0, layout.selected_deadline].item(), -1.0)
+        self.assertEqual(state[0, layout.countdown].item(), -1.0)
+
     def test_intended_target_hits_keep_best_successful_time(self):
         layout = HRLStateLayout(3)
         state = initial_hrl_state(1, 3)

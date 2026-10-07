@@ -9,7 +9,9 @@ from sf_working_directories.IntrMotiv.evaluation.target_control_interventions im
     add_matched_shuffled_targets,
     balanced_target,
     classify_trial_completion,
+    matched_goal_pairs,
     pair_deadline,
+    rotated_matched_targets,
     summarize_trials,
 )
 
@@ -43,6 +45,30 @@ def test_intervention_deadline_uses_reliable_then_passive_then_bootstrap():
     graph.passive_time[0, 1] = 4.1
     assert pair_deadline(graph, 0, 1) == 64
     assert pair_deadline(graph, 1, 2) == 64
+
+
+def test_matched_panel_ignores_context_only_rows_and_keeps_frozen_graph_intact():
+    graph = PolicyControllableGraph(5)
+    graph.passive_confidence[0, 4] = 2
+    graph.passive_confidence[0, 1] = 2
+    before = graph.passive_confidence.clone()
+    passive = matched_goal_pairs(graph, goal_count=3, selection="passive")
+    assert passive[0, 1]
+    assert not passive[0, 4]
+    all_goals = matched_goal_pairs(graph, goal_count=3, selection="all_eligible")
+    assert all_goals[:3, :3].sum() == 6
+    assert not all_goals[3:, :].any()
+    torch.testing.assert_close(graph.passive_confidence, before)
+
+
+def test_rotated_matched_targets_covers_sixteen_goal_vocabulary():
+    graph = PolicyControllableGraph(16)
+    pairs = matched_goal_pairs(graph, goal_count=16, selection="all_eligible")
+    selected = [
+        rotated_matched_targets(pairs, source=0, repeat=repeat, count=3)
+        for repeat in range(5)
+    ]
+    assert set().union(*(set(part) for part in selected)) == set(range(1, 16))
 
 
 def test_first_distinct_completion_stops_on_wrong_outcome_but_ignores_source_and_multi_active():

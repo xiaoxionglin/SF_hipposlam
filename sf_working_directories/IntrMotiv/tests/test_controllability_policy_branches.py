@@ -9,6 +9,7 @@ from torch import nn
 from sample_factory.utils.attr_dict import AttrDict
 from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import (
     IntrMotivActorCriticSharedWeights,
+    LegacyGoalGainDecoder,
     TargetFiLMDecoder,
     TargetRelativeDecoder,
 )
@@ -104,6 +105,26 @@ def test_target_id_film_checkpoint_round_trip_preserves_modulation():
     second.load_state_dict(first.state_dict())
     for name, value in first.state_dict().items():
         assert torch.equal(value, second.state_dict()[name])
+
+
+def test_legacy_gain_scales_only_decoder_goal_for_original_and_alternative_commands():
+    class EchoDecoder(nn.Module):
+        def forward(self, value):
+            return value
+
+        def get_out_size(self):
+            return 7
+
+    decoder = LegacyGoalGainDecoder(EchoDecoder(), target_start=2, n_targets=3, gain=9)
+    core_outputs = torch.tensor(
+        [[4.0, 5.0, 1.0, 0.0, 0.0, 6.0, 7.0], [4.0, 5.0, 0.0, 1.0, 0.0, 6.0, 7.0]]
+    )
+    transformed = decoder(core_outputs)
+    torch.testing.assert_close(transformed[:, :2], core_outputs[:, :2])
+    torch.testing.assert_close(transformed[:, 5:], core_outputs[:, 5:])
+    torch.testing.assert_close(transformed[:, 2:5], core_outputs[:, 2:5] * 9)
+    torch.testing.assert_close(core_outputs.sum(-1), torch.tensor([23.0, 23.0]))
+    assert decoder.get_out_size() == 7
 
 
 class _ActionParameters(nn.Module):

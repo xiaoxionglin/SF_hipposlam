@@ -641,6 +641,7 @@ def _advance_options_without_probes(
     frontier_uncertainty_weight,
     candidate_context,
     candidate_seed,
+    target_expiration,
 ):
     """Batch option transitions when directed-edge probing is disabled.
 
@@ -658,6 +659,8 @@ def _advance_options_without_probes(
     hit = exclusive & normal & (current == target)
     wrong = (control_outcome == "first_distinct") & exclusive & normal & (current != source) & (current != target)
     expired = ~hit & (normal | (target == n_nodes)) & (option[:, option_layout.countdown] <= 1)
+    if target_expiration == "episode":
+        expired &= ~normal
     elapsed = option[:, option_layout.age] + 1
     final = decode_node(topo[:, topo_layout.final_goal])
     pending = decode_node(topo[:, topo_layout.pending_destination])
@@ -675,6 +678,8 @@ def _advance_options_without_probes(
                 (torch.ceil(cost * (1 + margin_ratio)) + margin_steps).clamp_min(1),
                 float(fallback_horizon),
             )
+            if target_expiration == "episode":
+                deadline = torch.full_like(deadline, -1.0)
         for field, value in (
             (option_layout.target, dst + 1),
             (option_layout.source, src + 1),
@@ -831,7 +836,10 @@ def _advance_options_without_probes(
     other_hit = hit & (mode != MODE_RETURN) & (mode != MODE_VALIDATE) & (mode != MODE_NAVIGATE)
     choose(wrong | timed_out | no_target | validating | other_hit | (navigating & ~reached & (hop < 0)))
     put(option, option_layout.age, keep, elapsed)
-    put(option, option_layout.countdown, keep, (option[:, option_layout.countdown] - 1).clamp_min(0))
+    next_countdown = (option[:, option_layout.countdown] - 1).clamp_min(0)
+    if target_expiration == "episode":
+        next_countdown = torch.where(normal, torch.full_like(next_countdown, -1.0), next_countdown)
+    put(option, option_layout.countdown, keep, next_countdown)
 
 
 def _advance_options_with_probes(
@@ -1134,12 +1142,17 @@ def advance_topological_manager(
     goal_quality_scores: Tensor | None = None,
     candidate_context: Tensor | None = None,
     candidate_seed: int = 0,
+    target_expiration: str = "deadline",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Advance topological state while preserving the sampled behavior condition."""
     if control_outcome not in ("target_hit", "first_distinct"):
         raise ValueError(f"Unknown control_outcome={control_outcome}")
     if direct_target_selection not in ("frontier", "least_tested", "local_successor", "reward_value"):
         raise ValueError(f"Unknown direct_target_selection={direct_target_selection}")
+    if target_expiration not in ("deadline", "episode"):
+        raise ValueError(f"Unknown target_expiration={target_expiration}")
+    if target_expiration == "episode" and edge_exploration:
+        raise ValueError("Episode-long targets require direct selection without edge probes")
     n_nodes = dg_activity.size(-1)
     option_layout = HRLStateLayout(n_nodes)
     topo_layout = TopologicalStateLayout(n_nodes)
@@ -1296,6 +1309,7 @@ def advance_topological_manager(
             frontier_uncertainty_weight,
             candidate_context,
             candidate_seed,
+            target_expiration,
         )
     else:
         _advance_options_with_probes(

@@ -528,6 +528,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.hrl_timeout_margin_ratio = float(getattr(cfg, "hrl_timeout_margin_ratio", 0.20))
         self.hrl_timeout_margin_steps = int(getattr(cfg, "hrl_timeout_margin_steps", 2))
         self.hrl_bootstrap_horizon = int(getattr(cfg, "hrl_bootstrap_horizon", 64))
+        self.hrl_target_expiration = getattr(cfg, "hrl_target_expiration", "deadline")
         self.hrl_min_target_visits = float(getattr(cfg, "hrl_min_target_visits", 1.0))
         self.hrl_persistent_fast_weights = bool(getattr(cfg, "hrl_persistent_fast_weights", False))
         self.hrl_fast_weight_half_life_options = float(getattr(cfg, "hrl_fast_weight_half_life_options", 10000.0))
@@ -898,6 +899,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                     candidate_context=current_ca3,
                     candidate_seed=int(getattr(self.cfg, "seed", 0)),
                     min_target_visits=self.hrl_min_target_visits,
+                    target_expiration=self.hrl_target_expiration,
                     reward_instruction=(
                         (reward_instruction.argmax(dim=-1) + 1) if reward_instruction is not None else None
                     ),
@@ -934,6 +936,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 self.hrl_exploration_horizon,
                 self.hrl_target_timing,
                 self.hrl_fast_weight_half_life_options,
+                self.hrl_target_expiration,
             )
         return update_hrl_state(
             hrl_state,
@@ -949,6 +952,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
             self.hrl_exploration_mode,
             self.hrl_manager_exploration_probability,
             self.hrl_exploration_horizon,
+            self.hrl_target_expiration,
         )
 
     def _behavior_descriptor(self, condition: Tensor) -> Tensor:

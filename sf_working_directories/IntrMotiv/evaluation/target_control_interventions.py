@@ -106,6 +106,30 @@ def pair_deadline(graph, source: int, target: int, fallback: int = 64) -> int:
     return int(fallback)
 
 
+def matched_goal_pairs(graph, goal_count: int, selection: str) -> np.ndarray:
+    """Return eligible ordered pairs without mutating the frozen graph."""
+    if selection == "all_eligible":
+        pairs = np.zeros((graph.n_nodes, graph.n_nodes), dtype=bool)
+        pairs[:goal_count, :goal_count] = True
+    elif selection == "passive":
+        pairs = (graph.passive_confidence > 0).cpu().numpy().copy()
+        pairs[goal_count:, :] = False
+        pairs[:, goal_count:] = False
+    else:
+        raise ValueError(f"Unknown matched goal selection={selection}")
+    np.fill_diagonal(pairs, False)
+    return pairs
+
+
+def rotated_matched_targets(pairs: np.ndarray, source: int, repeat: int, count: int) -> list[int]:
+    """Cycle through a broad goal vocabulary across exact repeated starts."""
+    targets = np.flatnonzero(pairs[source]).tolist()
+    if not targets:
+        return []
+    offset = repeat * count % len(targets)
+    return (targets[offset:] + targets[:offset])[:count]
+
+
 def target_geometry(graph, source: int, target: int, device, dtype) -> torch.Tensor:
     result = torch.zeros(GEOMETRY_POLICY_SIZE, device=device, dtype=dtype)
     if graph is None or not bool(graph.pose_valid[source]) or not bool(graph.pose_valid[target]):
@@ -317,6 +341,9 @@ def run_landmark_matched_interventions(
     reward_cell=None,
     physical_horizon=None,
     discovery_multiplier=2,
+    target_selection="passive",
+    fixed_evaluation_horizon=None,
+    horizons=None,
 ):
     """Execute different commands from identical engine/prefix states.
 
@@ -327,14 +354,26 @@ def run_landmark_matched_interventions(
     from sample_factory.algo.utils.make_env import make_env_func_batched
 
     n = int(cfg.Hippo_n_feature)
+    goal_count = int(getattr(cfg, "hrl_goal_identity_count", 0)) or n
+    if not 1 < goal_count <= n:
+        raise ValueError("Invalid evaluated goal vocabulary")
+    max_sources = min(max_sources, goal_count)
+    if target_selection not in ("passive", "all_eligible"):
+        raise ValueError("Unknown matched-intervention target selection")
+    if fixed_evaluation_horizon is not None and fixed_evaluation_horizon <= 0:
+        raise ValueError("fixed_evaluation_horizon must be positive")
+    horizons = tuple(int(value) for value in (horizons or ()))
+    if horizons and (tuple(sorted(set(horizons))) != horizons or horizons[0] <= 0):
+        raise ValueError("horizons must be sorted unique positive decisions")
+    if fixed_evaluation_horizon is not None and horizons and horizons[-1] > fixed_evaluation_horizon:
+        raise ValueError("horizons exceed fixed_evaluation_horizon")
     if focus_target is not None and not 0 <= focus_target < n:
         raise ValueError("focus_target is outside the DG capacity")
     if focus_sources is not None and any(not 0 <= source < n for source in focus_sources):
         raise ValueError("focus_sources contains an invalid DG ID")
     graph = actor.core.policy_graph
     before = {k: v.detach().clone() for k, v in actor.state_dict().items()}
-    pairs = (graph.passive_confidence > 0).cpu().numpy()
-    np.fill_diagonal(pairs, False)
+    pairs = matched_goal_pairs(graph, goal_count, target_selection)
     rows, panel, missing = [], {}, []
     decisions = 0
     ambiguous_discovery_observations = 0
@@ -405,7 +444,7 @@ def run_landmark_matched_interventions(
                 actions = np.random.default_rng(seed).integers(0, actor.action_space.n, prefix_cap)
                 for action in actions:
                     h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
-                    active = torch.nonzero(h[0, :n] > 0).flatten()
+                    active = torch.nonzero(h[0, :goal_count] > 0).flatten()
                     ambiguous_discovery_observations += int(active.numel() > 1)
                     source = int(active.item()) if active.numel() == 1 else -1
                     if (
@@ -413,7 +452,9 @@ def run_landmark_matched_interventions(
                         and (focus_sources is None or source in focus_sources)
                         and (source in panel or len(panel) < max_sources)
                     ):
-                        targets = np.flatnonzero(pairs[source]).tolist()
+                        targets = rotated_matched_targets(
+                            pairs, source, len(panel.get(source, [])), targets_per_source
+                        )
                         if focus_target is not None:
                             if focus_target in targets:
                                 targets.remove(focus_target)
@@ -435,8 +476,12 @@ def run_landmark_matched_interventions(
                     break
             for source, starts in sorted(panel.items()):
                 for rep, (seed, prefix, targets, reference) in enumerate(starts):
-                    horizon = max(pair_deadline(graph, source, t) for t in targets)
-                    if physical_horizon is not None:
+                    horizon = (
+                        fixed_evaluation_horizon
+                        if fixed_evaluation_horizon is not None
+                        else max(pair_deadline(graph, source, t) for t in targets)
+                    )
+                    if physical_horizon is not None and fixed_evaluation_horizon is None:
                         horizon = max(horizon, physical_horizon)
                     cost = len(targets) * (len(prefix) + horizon)
                     if decisions + cost > decision_cap:
@@ -485,7 +530,7 @@ def run_landmark_matched_interventions(
                             if done:
                                 break
                             h = actor.forward_head(prepare_and_normalize_obs(actor, obs))
-                            active = torch.nonzero(h[0, :n] > 0).flatten()
+                            active = torch.nonzero(h[0, :goal_count] > 0).flatten()
                             ambiguous_trial_observations += int(active.numel() > 1)
                             hit = int(active.item()) if active.numel() == 1 else -1
                             if hit >= 0 and hit != source and first_other is None:
@@ -493,12 +538,15 @@ def run_landmark_matched_interventions(
                             if hit in first_times and first_times[hit] is None:
                                 first_times[hit] = elapsed
                         for target in targets:
-                            deadline = pair_deadline(graph, source, target)
+                            deadline = (
+                                fixed_evaluation_horizon
+                                if fixed_evaluation_horizon is not None
+                                else pair_deadline(graph, source, target)
+                            )
                             hit_time = first_times[target]
                             hit = hit_time is not None and hit_time <= deadline
                             censored = not hit and done and elapsed < deadline
-                            rows.append(
-                                dict(
+                            row = dict(
                                     source=source,
                                     repeat=rep,
                                     prefix_seed=seed,
@@ -523,7 +571,9 @@ def run_landmark_matched_interventions(
                                     physical_entry_r300=start_distance > 300 and minimum_distance <= 300,
                                     physical_cell_contact=physical_contact,
                                 )
-                            )
+                            row.update({f"hit_by_{window}": bool(hit_time is not None and hit_time <= window)
+                                        for window in horizons})
+                            rows.append(row)
     finally:
         env.close()
     if any(not torch.equal(v, actor.state_dict()[k]) for k, v in before.items()):
@@ -533,11 +583,11 @@ def run_landmark_matched_interventions(
         for rep in range(len(starts)):
             for target in starts[rep][2]:
                 group = [r for r in rows if r["source"] == source and r["repeat"] == rep and r["target"] == target]
-                actual = [float(r["hit"]) for r in group if r["commanded"] and not r["censored"]]
-                alternate = [float(r["hit"]) for r in group if not r["commanded"] and not r["censored"]]
+                actual = [float(r["hit"]) for r in group if r["commanded"]]
+                alternate = [float(r["hit"]) for r in group if not r["commanded"]]
                 if actual and alternate:
                     differences.append(actual[0] - float(np.mean(alternate)))
-    eligible_sources = range(n) if focus_sources is None else focus_sources
+    eligible_sources = range(goal_count) if focus_sources is None else focus_sources
     supported_sources = sum(
         int(pairs[source].sum() >= 2 and (focus_target is None or pairs[source, focus_target]))
         for source in eligible_sources
@@ -593,6 +643,10 @@ def run_landmark_matched_interventions(
         focus_sources=focus_sources,
         focus_target=focus_target,
         physical_horizon=physical_horizon,
+        fixed_evaluation_horizon=fixed_evaluation_horizon,
+        horizons=list(horizons),
+        target_selection=target_selection,
+        goal_count=goal_count,
         discovery_multiplier=discovery_multiplier,
     )
     return pd.DataFrame(rows), summary
@@ -784,7 +838,10 @@ def main() -> None:
             if source in intervention
         },
         landmark_options=(
-            {key: intervention[key] for key in ("max_sources", "targets_per_source", "repeats") if key in intervention}
+            {key: intervention[key] for key in (
+                "max_sources", "targets_per_source", "repeats", "discovery_multiplier",
+                "target_selection", "fixed_evaluation_horizon", "horizons"
+            ) if key in intervention}
             if intervention.get("evaluation") == "landmark-matched-commands-v1"
             else None
         ),

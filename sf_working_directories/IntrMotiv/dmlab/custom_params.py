@@ -259,6 +259,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="Option horizon used before an intended source-target mean time has been learned.",
     )
     p.add_argument(
+        "--hrl_target_expiration",
+        default="deadline",
+        choices=["deadline", "episode"],
+        help="Expire DG target options at their deadline, or retain them until hit/episode reset.",
+    )
+    p.add_argument(
         "--hrl_exploration_mode",
         default=False,
         type=str2bool,
@@ -326,6 +332,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
             "Goal decoder input: legacy/additive concatenated one-hot, target embedding plus selected "
             "CA3 trace, or identity-initialized target-ID FiLM without a selected trace."
         ),
+    )
+    p.add_argument(
+        "--hrl_legacy_goal_input_gain",
+        default=1.0,
+        type=float,
+        help="Scale only the commanded goal one-hot entering the legacy decoder.",
     )
     p.add_argument(
         "--hrl_exploration_policy",
