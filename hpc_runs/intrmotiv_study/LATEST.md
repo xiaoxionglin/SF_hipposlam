@@ -4,6 +4,7 @@
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 verified 1.14.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/global_defaults_v114/hpc_runs/intrmotiv_study/`
+- NEMO2 verified 1.14.1 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_odor_ca3_v2_20261007/hpc_runs/intrmotiv_study/`
 - NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
@@ -15,8 +16,9 @@ The second `RUN` is an artifact folder; exact discovery now skips directories
 below `analysis/`, while still rejecting two actual run payloads. This fixes
 `render-telemetry` after online snapshots begin without changing StudySpec
 fingerprints or training commands. The corrected 40-run odor/CA3 study exposed
-the case at its 5M/10M/25M seed-99 milestones. Focused local and synchronized
-NEMO2 tests verify artifact exclusion and real-duplicate rejection.
+the case at its 5M/10M/25M seed-99 milestones. All 38 canonical tests passed
+locally and in the synchronized NEMO2 source; the study's declared 1.14.0
+version and SHA-256 remain unchanged.
 
 ## 1.14.0 planned milestones and telemetry consistency
 
