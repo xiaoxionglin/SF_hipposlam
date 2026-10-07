@@ -1,12 +1,12 @@
 {
   "schema": "intrmotiv/study/v1",
   "workflow_version": "1.14.1",
-  "study_id": "episode_long_dg_controller_20261008",
-  "description": "Twelve-run episode-long DG goal study: prescribed FiLM, prescribed legacy gain-9, learned-four FiLM, and all-sixteen C15 FiLM; three paired seeds to 150M.",
-  "expected_runs": 12,
+  "study_id": "episode_long_dg_legacy9_qualification_20261008",
+  "description": "Corrected seed-99 524288-frame qualification for the legacy gain-9 arm after FiLM-only reset flag validation failure.",
+  "expected_runs": 1,
   "metadata": {
     "project": "SF_IntrMotiv_EpisodeLongDG",
-    "training_steps": 150000000,
+    "training_steps": 524288,
     "preflight_steps": 524288,
     "oracle_goal_ids": "0,1,2,3",
     "oracle_centers": "(550,550);(1450,550);(550,1450);(1650,1650)",
@@ -15,19 +15,21 @@
     "learned_context_units": 12,
     "source_study_sha256": "c325acb58098b763c5a8e7c0d97a07bca676eaa8dde4e262b6c9dffc4a94d7de",
     "goal_duration": "until_hit_or_episode_end",
-    "legacy_goal_input_gain": 9
+    "legacy_goal_input_gain": 9,
+    "preflight_of": "episode_long_dg_controller_20261008",
+    "production_study_sha256": "261fd73bab3689dc6c178e105795ae1f727160d70ff3bf26c5f6abe05052100b"
   },
   "training": {
     "mode": "sample_factory",
-    "batch_name": "intrmotiv_episode_long_dg_controller_20261008",
+    "batch_name": "intrmotiv_episode_long_dg_legacy9_qualification_20261008",
     "workspace_root": "/work/classic/fr_xl1014-corridor-geometry",
-    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_episode_long_dg_controller_20261008",
-    "run_name_template": "ELDG_{arm_label}_S{seed}",
-    "condition_name_template": "ELDG_{arm_label}",
+    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/intrmotiv_episode_long_dg_controller_20261008_legacy9_qualification",
+    "run_name_template": "QLEG9_{arm_label}_S{seed}",
+    "condition_name_template": "QLEG9_{arm_label}",
     "seed_arg": "--seed={seed}",
     "common_args": [
       "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
-      "--train_for_env_steps=150000000",
+      "--train_for_env_steps=524288",
       "--algo=APPO",
       "--gamma=0.99",
       "--learning_rate=0.0002",
@@ -162,13 +164,12 @@
       "--encoder_reward_require_local_predecessor=True",
       "--dg_recruitment_victim_rule=monitor",
       "--dg_recruitment_endpoint_gate=open",
-      "--wandb_project=SF_IntrMotiv_EpisodeLongDG",
-      "--wandb_group=intrmotiv_episode_long_dg_controller_20261008",
+      "--wandb_project=SF_IntrMotiv_EpisodeLongDG_Qualification",
+      "--wandb_group=intrmotiv_episode_long_dg_legacy9_qualification_20261008",
       "--dg_orthogonal_recruitment=True",
       "--dg_orthogonal_recruitment_max_per_rollout=0",
       "--hrl_goal_candidate_mode=all",
-      "--checkpoint_frame_targets=5000000,25000000,50000000,75000000,100000000,150000000",
-      "--online_spatial_snapshot_targets=5000000,25000000,50000000,75000000,100000000,150000000",
+      "--checkpoint_frame_targets=262144,524288",
       "--hrl_target_expiration=episode"
     ]
   },
@@ -187,17 +188,6 @@
       "name": "arm",
       "levels": [
         {
-          "value": "oracle_film",
-          "label": "ORACLE_FILM",
-          "args": [
-            "--dg_prescribed_mode=gaussian4",
-            "--hrl_goal_conditioning=target_id_film",
-            "--hrl_goal_identity_count=4",
-            "--hrl_goal_candidate_k=4",
-            "--dg_recruitment_reset_goal_adapter=True"
-          ]
-        },
-        {
           "value": "oracle_leg9",
           "label": "ORACLE_LEG9",
           "args": [
@@ -208,47 +198,19 @@
             "--hrl_goal_candidate_k=4",
             "--dg_recruitment_reset_goal_adapter=False"
           ]
-        },
-        {
-          "value": "learned4_film",
-          "label": "LEARNED4_FILM",
-          "args": [
-            "--dg_prescribed_mode=zero",
-            "--hrl_goal_conditioning=target_id_film",
-            "--hrl_goal_identity_count=4",
-            "--hrl_goal_candidate_k=4",
-            "--dg_recruitment_reset_goal_adapter=True"
-          ]
-        },
-        {
-          "value": "c15_film",
-          "label": "C15_FILM",
-          "args": [
-            "--dg_prescribed_mode=zero",
-            "--hrl_goal_identity_count=16",
-            "--hrl_goal_candidate_k=16",
-            "--hrl_goal_conditioning=target_id_film",
-            "--dg_recruitment_reset_goal_adapter=True"
-          ]
         }
       ]
     }
   ],
   "seeds": [
-    8,
-    99,
-    123
+    99
   ],
   "analysis": {
     "step_tag": "train/env_steps",
-    "terminal_width": 5000000,
+    "terminal_width": 262144,
     "synchronized_steps": [
-      5000000,
-      25000000,
-      50000000,
-      75000000,
-      100000000,
-      150000000
+      262144,
+      524288
     ],
     "max_workers": 4,
     "group_by": [
@@ -272,75 +234,15 @@
       "target_action_probability_tv": "intrmotiv/hrl/goal_condition/action_probability_tv"
     },
     "cumulative_metrics": {},
-    "contrasts": [
-      {
-        "name": "ORACLE_FILM_minus_LEARNED4_FILM",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "oracle_film"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "learned4_film"
-            }
-          }
-        ]
-      },
-      {
-        "name": "ORACLE_LEG9_minus_ORACLE_FILM",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "oracle_leg9"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "oracle_film"
-            }
-          }
-        ]
-      },
-      {
-        "name": "C15_FILM_minus_LEARNED4_FILM",
-        "terms": [
-          {
-            "weight": 1,
-            "where": {
-              "arm": "c15_film"
-            }
-          },
-          {
-            "weight": -1,
-            "where": {
-              "arm": "learned4_film"
-            }
-          }
-        ]
-      }
-    ]
+    "contrasts": []
   },
   "telemetry": {
     "protocol": "dg-place-fields-v1",
     "target_frames": [
-      5000000,
-      25000000,
-      50000000,
-      75000000,
-      100000000,
-      150000000
+      524288
     ],
     "trajectory_seed": 99,
-    "terminal_seeds": [
-      8,
-      123
-    ],
+    "terminal_seeds": [],
     "label_template": "{condition}__s{seed}__f{checkpoint_frames}",
     "manifest_fields": {
       "family": "c15_arr_mon_episode_long",
@@ -358,8 +260,7 @@
       "protocol": "target-control-intervention-v1",
       "evaluation": "landmark-matched-commands-v1",
       "target_frames": [
-        75000000,
-        150000000
+        524288
       ],
       "freeze_policy": true,
       "freeze_graph": true,
@@ -382,14 +283,6 @@
         900
       ],
       "fixed_evaluation_horizon": 900
-    },
-    "online_spatial_target_frames": [
-      5000000,
-      25000000,
-      50000000,
-      75000000,
-      100000000,
-      150000000
-    ]
+    }
   }
 }
