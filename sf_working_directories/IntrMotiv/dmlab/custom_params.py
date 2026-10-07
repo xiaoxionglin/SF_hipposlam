@@ -25,6 +25,10 @@ def hipposlam_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    # Tracking identity from the canonical StudySpec has no model-side effect.
+    p.add_argument("--study_id", default=None, type=str)
+    p.add_argument("--study_condition", default=None, type=str)
+    p.add_argument("--study_base", default=None, type=str)
     p.add_argument("--controller_learning", choices=["ppo", "shadow", "ddqn"], default="ppo")
     p.add_argument("--controller_replay_state", choices=("reconstruct", "stored"), default="reconstruct")
     p.add_argument("--controller_her", type=str2bool, default=False)
@@ -329,6 +333,18 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--hrl_target_hit_reward", default=1.0, type=float)
     p.add_argument("--hrl_distance_bonus_coeff", default=0.1, type=float)
+    p.add_argument(
+        "--hrl_distance_bonus_mode",
+        default="temporal",
+        choices=["temporal", "constant", "none"],
+        help="Distance bonus weighting on target hits; the base hit reward is unchanged.",
+    )
+    p.add_argument(
+        "--hrl_distance_bonus_constant",
+        default=0.0,
+        type=float,
+        help="Fixed distance units used only when hrl_distance_bonus_mode=constant.",
+    )
     p.add_argument(
         "--hrl_control_outcome",
         default="target_hit",
@@ -677,6 +693,18 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         default=False,
         type=str2bool,
         help="Drop encoder events without an aligned predecessor onset in the same actor rollout.",
+    )
+    p.add_argument(
+        "--encoder_interval_credit_mode",
+        default="temporal",
+        choices=["temporal", "constant", "none"],
+        help="Weight the existing DG credit events by temporal distance, a constant, or zero.",
+    )
+    p.add_argument(
+        "--encoder_interval_credit_constant",
+        default=0.0,
+        type=float,
+        help="Fixed distance units used only when encoder_interval_credit_mode=constant.",
     )
     p.add_argument("--load_model_path", default=None, type=str, help="Path to specific .pth file for the entire model")
     p.add_argument(

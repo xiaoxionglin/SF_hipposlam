@@ -179,6 +179,8 @@ def legacy_reward_streams(
     baseline: float,
     reward_scale: float,
     encoder_reward_method: str,
+    encoder_credit_mode: str = "temporal",
+    encoder_credit_constant: float = 0.0,
 ) -> tuple[Tensor, Tensor]:
     decoder_reward = (baseline - internal_reward[:, 2:]) * reward_scale
     encoder_base = internal_reward[:, 1:-1]
@@ -202,7 +204,21 @@ def legacy_reward_streams(
         encoder_reward = adjusted[:, 1:-1] * reward_scale
     else:
         raise ValueError(f"Unknown encoder_reward_method: {encoder_reward_method}")
+    if encoder_credit_mode != "temporal":
+        credit = ablation_distance_weight(encoder_base, encoder_credit_mode, encoder_credit_constant)
+        encoder_reward = credit * reward_scale
     return decoder_reward, encoder_reward
+
+
+def ablation_distance_weight(distance: Tensor, mode: str, constant: float) -> Tensor:
+    """Change only the weight on an existing credit event, never its eligibility."""
+    if mode == "temporal":
+        return distance
+    if mode == "none":
+        return torch.zeros_like(distance)
+    if mode == "constant" and math.isfinite(constant) and constant > 0:
+        return torch.full_like(distance, float(constant))
+    raise ValueError(f"Invalid distance ablation mode or constant: {mode}, {constant}")
 
 
 def dominant_new_activation_masks(
@@ -355,6 +371,8 @@ def build_matched_encoder_credit(
     baseline: int,
     reward_scale: float,
     recipient: str,
+    credit_mode: str = "temporal",
+    credit_constant: float = 0.0,
 ) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
     """Align each arrival to a verified within-rollout predecessor onset."""
     if progression.shape != candidates.shape or progression.shape != dominant.shape:
@@ -416,7 +434,10 @@ def build_matched_encoder_credit(
         credit_t, credit_row = (arrival_t, arrival_row) if recipient == "arrival" else (source_t, source_row)
         if bool(row_mask[stream, credit_t, credit_row]):
             counts["collisions"].add_(1.0)
-        reward = float(reward_scale) * float(lag)
+        weight = ablation_distance_weight(
+            progression.new_tensor(float(lag), dtype=torch.float), credit_mode, credit_constant
+        )
+        reward = float(reward_scale) * float(weight.item())
         rewards[stream, credit_t, credit_row].add_(reward)
         row_mask[stream, credit_t, credit_row] = True
         counts["credited"].add_(1.0)
@@ -587,12 +608,17 @@ def target_reward_magnitude(
     mode: str,
     hit_reward: float,
     distance_bonus_coeff: float,
+    bonus_mode: str = "temporal",
+    bonus_constant: float = 0.0,
 ) -> Tensor:
     """Current positive hit magnitude, kept separate from outcome semantics."""
     reward = torch.full_like(internal_reward[:, 2:], float(hit_reward))
     if mode == "hit_distance":
         legacy_bonus = ((baseline - internal_reward[:, 2:]) * reward_scale).clamp_min(0.0)
-        reward = reward + float(distance_bonus_coeff) * legacy_bonus
+        bonus = ablation_distance_weight(
+            legacy_bonus, bonus_mode, float(bonus_constant) * reward_scale
+        )
+        reward = reward + float(distance_bonus_coeff) * bonus
     elif mode != "hit":
         raise ValueError(f"Unknown HRL worker reward mode: {mode}")
     return reward
@@ -639,9 +665,14 @@ def target_success_worker_reward(
     wrong_outcome: Tensor | None = None,
     n_targets: int | None = None,
     command_set_size: Tensor | None = None,
+    bonus_mode: str = "temporal",
+    bonus_constant: float = 0.0,
 ) -> Tensor:
     hit = target_hit[:, 2:].to(dtype=internal_reward.dtype)
-    reward = target_reward_magnitude(internal_reward, baseline, reward_scale, mode, hit_reward, distance_bonus_coeff)
+    reward = target_reward_magnitude(
+        internal_reward, baseline, reward_scale, mode, hit_reward, distance_bonus_coeff,
+        bonus_mode, bonus_constant,
+    )
     worker_reward = worker_reward_from_magnitude(
         reward,
         hit,
@@ -1015,9 +1046,17 @@ class BaseDistanceRecorder(BaseLearner):
             segment_lengths = her.valid.float().sum(dim=1)
             if self.cfg.hrl_worker_reward_mode == "hit_distance":
                 baseline = float(self.cfg.Hippo_L + self.cfg.Hippo_R - 1)
-                terminal_values = float(self.cfg.hrl_target_hit_reward) + float(self.cfg.hrl_distance_bonus_coeff) * (
-                    (baseline - (segment_lengths - 1.0)).clamp_min(0.0) * float(self.cfg.reward_scale)
+                temporal_bonus = (baseline - (segment_lengths - 1.0)).clamp_min(0.0) * float(
+                    self.cfg.reward_scale
                 )
+                bonus = ablation_distance_weight(
+                    temporal_bonus,
+                    getattr(self.cfg, "hrl_distance_bonus_mode", "temporal"),
+                    float(getattr(self.cfg, "hrl_distance_bonus_constant", 0.0)) * float(self.cfg.reward_scale),
+                )
+                terminal_values = float(self.cfg.hrl_target_hit_reward) + float(
+                    self.cfg.hrl_distance_bonus_coeff
+                ) * bonus
                 terminal_scale = terminal_values / float(self.cfg.hrl_target_hit_reward)
             else:
                 terminal_scale = torch.ones_like(segment_lengths)
@@ -4071,6 +4110,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
             baseline,
             self.cfg.reward_scale,
             self.cfg.encoder_reward_method,
+            getattr(self.cfg, "encoder_interval_credit_mode", "temporal"),
+            float(getattr(self.cfg, "encoder_interval_credit_constant", 0.0)),
         )
         from .ca3_memory import absent_event_gate
 
@@ -4119,6 +4160,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 self.cfg.hrl_worker_reward_mode,
                 self.cfg.hrl_target_hit_reward,
                 self.cfg.hrl_distance_bonus_coeff,
+                getattr(self.cfg, "hrl_distance_bonus_mode", "temporal"),
+                float(getattr(self.cfg, "hrl_distance_bonus_constant", 0.0)),
             )
             decoder_reward = target_success_worker_reward(
                 internal_reward,
@@ -4134,6 +4177,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 wrong_outcome=wrong_outcome,
                 n_targets=layout.n_nodes,
                 command_set_size=command_set_size,
+                bonus_mode=getattr(self.cfg, "hrl_distance_bonus_mode", "temporal"),
+                bonus_constant=float(getattr(self.cfg, "hrl_distance_bonus_constant", 0.0)),
             )
             buff["hrl_control_correct_outcome"] = outcome_labels["correct"]
             buff["hrl_control_wrong_outcome"] = wrong_outcome
@@ -4173,6 +4218,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 baseline,
                 self.cfg.reward_scale,
                 getattr(self.cfg, "encoder_reward_recipient", "arrival"),
+                getattr(self.cfg, "encoder_interval_credit_mode", "temporal"),
+                float(getattr(self.cfg, "encoder_interval_credit_constant", 0.0)),
             )
             credited = max(1.0, float(credit_stats["credited"].item()))
             self._last_encoder_credit_stats = {
