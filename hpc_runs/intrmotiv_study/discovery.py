@@ -20,6 +20,11 @@ def discover_run_directories(study: StudySpec, batch_root: Path) -> dict[str, Pa
     }
     found: dict[str, list[Path]] = {run_name: [] for run_name in expected}
     for path in batch_root.rglob("*"):
+        # Online spatial snapshots live below each launcher's analysis/
+        # directory and may reuse the exact run name as an artifact folder.
+        # They are not Sample Factory run directories.
+        if "analysis" in path.relative_to(batch_root).parts:
+            continue
         if path.is_dir() and path.name in accepted_names:
             found[accepted_names[path.name]].append(path)
     # RUN_/00_RUN is a launcher container plus its actual experiment, not two
@@ -27,17 +32,18 @@ def discover_run_directories(study: StudySpec, batch_root: Path) -> dict[str, Pa
     # duplicates (including nested experiments) must still fail closed.
     for run_name, paths in found.items():
         found[run_name] = [
-            path
-            for path in paths
+            path for path in paths
             if not (
                 any(path in other.parents for other in paths if other != path)
-                and not any(
-                    (path / marker).exists() for marker in ("config.json", "cfg.json", ".summary", "checkpoint_p0")
-                )
+                and not any((path / marker).exists() for marker in ("config.json", "cfg.json", ".summary", "checkpoint_p0"))
             )
         ]
-    errors = {run_name: paths for run_name, paths in found.items() if len(paths) != 1}
+    errors = {
+        run_name: paths for run_name, paths in found.items() if len(paths) != 1
+    }
     if errors:
-        details = ", ".join(f"{run_name}={len(paths)}" for run_name, paths in sorted(errors.items()))
+        details = ", ".join(
+            f"{run_name}={len(paths)}" for run_name, paths in sorted(errors.items())
+        )
         raise SpecError(f"expected exactly one directory per declared run; {details}")
     return {run_name: paths[0] for run_name, paths in found.items()}

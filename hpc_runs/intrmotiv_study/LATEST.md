@@ -1,12 +1,22 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.14.0` (planned-frame milestones, spatial target validation, verified evaluation grids)
+- Implementation: `1.14.1` (ignore nested online-spatial artifact folders during exact run discovery)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 verified 1.14.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/global_defaults_v114/hpc_runs/intrmotiv_study/`
 - NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.14.1 run discovery with online-spatial artifacts
+
+The launcher stores `RUN_/00_RUN` beside `RUN_/analysis/online_spatial/unbatched/RUN`.
+The second `RUN` is an artifact folder; exact discovery now skips directories
+below `analysis/`, while still rejecting two actual run payloads. This fixes
+`render-telemetry` after online snapshots begin without changing StudySpec
+fingerprints or training commands. The corrected 40-run odor/CA3 study exposed
+the case at its 5M/10M/25M seed-99 milestones. Focused local and synchronized
+NEMO2 tests verify artifact exclusion and real-duplicate rejection.
 
 ## 1.14.0 planned milestones and telemetry consistency
 
@@ -30,7 +40,9 @@ geometry: 19-by-19 for the corridor and 9-by-9 for the landmark map. NEMO2
 preflight job `8218673` completed with exit code zero and wrote a 9-by-9 NPZ
 with bounds `[100, 1000, 100, 1000]`, matched geometry and pre-threshold
 arrays, and a valid summary. The 12-row 10k-decision plan passed print-only
-validation but was not submitted.
+validation; its 75M production sweep later completed all twelve field and
+matched-episode jobs on 6 October 2026. See the
+[easy-landmark production report](../../06_experiments/environments_transfer/easy_landmark_maze_production_analysis_20261006.md).
 
 ## 1.13.0 depth-default compatibility
 
@@ -56,7 +68,7 @@ wall removal. Its 9-by-9 interior has 74 accessible cells, with 10 decals and
 10 colored wall faces plus a same-sites neutral control. Its three StudySpecs,
 exact fingerprints, local native evidence, and
 remaining NEMO2 gates are recorded in
-`06_experiments/easy_landmark_maze_implementation_20260923.md`. Version 1.12.0
+`06_experiments/environments_transfer/easy_landmark_maze_implementation_20260923.md`. Version 1.12.0
 is synchronized to an isolated NEMO2 worktree. The 53-test canonical suite,
 six-test native DMLab suite, and workspace-resident submission audit pass. A
 dedicated 4.6 TB workspace at `/work/classic/fr_xl1014-easy-landmark-maze`
@@ -98,7 +110,7 @@ traversability-aware field components, isolated DMLab runfiles, and wall overlay
 Existing study/NPZ schemas remain v1; geometry fields are optional additions.
 The 27-run screen and nine-run qualification are `corridor_geometry.study.json`
 and `corridor_geometry_preflight.study.json`. Deployment and qualification
-status: `06_experiments/corridor_geometry_20260919.md`. Do not infer production
+status: `06_experiments/environments_transfer/corridor_geometry_20260919.md`. Do not infer production
 qualification from a rendered plan or a successful unit test.
 
 ## 1.9.0 standardized atlas figures — verified CPU2048 regeneration
@@ -195,7 +207,7 @@ goal-conditioned policies. Local and synchronized NEMO2 focused suites:
 27 tests passed. The updated IntrMotiv runtime passed 257 tests. Ten CA3-memory
 training preflight jobs completed with exit 0 and passed the 2M-frame scientific
 runtime audit. Exact deployment and production records are in
-`06_experiments/ca3_memory_novelty_goal_implementation.md`.
+`06_experiments/ca3_goals/ca3_memory_novelty_goal_implementation.md`.
 
 The previous vault source and NEMO2 runtime copy were synchronized at `1.4.1`. Version
 1.4 extends the compact online-spatial snapshot contract with cached place-field
