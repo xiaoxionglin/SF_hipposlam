@@ -149,8 +149,11 @@ class LegacyGoalGainDecoder(nn.Module):
     def goal_scaled_input(self, core_output: Tensor) -> Tensor:
         end = self.target_start + self.n_targets
         return torch.cat(
-            (core_output[..., : self.target_start], core_output[..., self.target_start : end] * self.gain,
-             core_output[..., end:]),
+            (
+                core_output[..., : self.target_start],
+                core_output[..., self.target_start : end] * self.gain,
+                core_output[..., end:],
+            ),
             dim=-1,
         )
 

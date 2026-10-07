@@ -155,8 +155,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--dg_odor_gain", default=1.0, type=float)
     p.add_argument("--dg_odor_noise_std", default=0.15, type=float)
     p.add_argument("--dg_prescribed_mode", default="none", choices=("none", "zero", "gaussian4"))
-    p.add_argument("--hrl_goal_identity_count", default=0, type=int,
-                   help="Restrict manager identities to the first N DG channels; 0 keeps all channels")
+    p.add_argument(
+        "--hrl_goal_identity_count",
+        default=0,
+        type=int,
+        help="Restrict manager identities to the first N DG channels; 0 keeps all channels",
+    )
     p.add_argument(
         "--use_jit",
         default=True,

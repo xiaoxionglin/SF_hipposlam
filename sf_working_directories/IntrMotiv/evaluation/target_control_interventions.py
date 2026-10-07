@@ -452,9 +452,7 @@ def run_landmark_matched_interventions(
                         and (focus_sources is None or source in focus_sources)
                         and (source in panel or len(panel) < max_sources)
                     ):
-                        targets = rotated_matched_targets(
-                            pairs, source, len(panel.get(source, [])), targets_per_source
-                        )
+                        targets = rotated_matched_targets(pairs, source, len(panel.get(source, [])), targets_per_source)
                         if focus_target is not None:
                             if focus_target in targets:
                                 targets.remove(focus_target)
@@ -547,32 +545,36 @@ def run_landmark_matched_interventions(
                             hit = hit_time is not None and hit_time <= deadline
                             censored = not hit and done and elapsed < deadline
                             row = dict(
-                                    source=source,
-                                    repeat=rep,
-                                    prefix_seed=seed,
-                                    command=command,
-                                    target=target,
-                                    initial_action_probabilities=json.dumps(initial_prob),
-                                    commanded=command == target,
-                                    deadline=deadline,
-                                    hit=hit,
-                                    hit_time=hit_time,
-                                    first_distinct=first_other,
-                                    censored=censored,
-                                    timeout=not hit and not censored,
-                                    elapsed=elapsed,
-                                    path_length=path,
-                                    start_position=json.dumps(start_pos.tolist()),
-                                    endpoint=json.dumps(last.tolist()),
-                                    exact_start_verified=True,
-                                    physical_start_distance=start_distance,
-                                    physical_minimum_distance=minimum_distance,
-                                    physical_entry_r200=start_distance > 200 and minimum_distance <= 200,
-                                    physical_entry_r300=start_distance > 300 and minimum_distance <= 300,
-                                    physical_cell_contact=physical_contact,
-                                )
-                            row.update({f"hit_by_{window}": bool(hit_time is not None and hit_time <= window)
-                                        for window in horizons})
+                                source=source,
+                                repeat=rep,
+                                prefix_seed=seed,
+                                command=command,
+                                target=target,
+                                initial_action_probabilities=json.dumps(initial_prob),
+                                commanded=command == target,
+                                deadline=deadline,
+                                hit=hit,
+                                hit_time=hit_time,
+                                first_distinct=first_other,
+                                censored=censored,
+                                timeout=not hit and not censored,
+                                elapsed=elapsed,
+                                path_length=path,
+                                start_position=json.dumps(start_pos.tolist()),
+                                endpoint=json.dumps(last.tolist()),
+                                exact_start_verified=True,
+                                physical_start_distance=start_distance,
+                                physical_minimum_distance=minimum_distance,
+                                physical_entry_r200=start_distance > 200 and minimum_distance <= 200,
+                                physical_entry_r300=start_distance > 300 and minimum_distance <= 300,
+                                physical_cell_contact=physical_contact,
+                            )
+                            row.update(
+                                {
+                                    f"hit_by_{window}": bool(hit_time is not None and hit_time <= window)
+                                    for window in horizons
+                                }
+                            )
                             rows.append(row)
     finally:
         env.close()
@@ -838,10 +840,19 @@ def main() -> None:
             if source in intervention
         },
         landmark_options=(
-            {key: intervention[key] for key in (
-                "max_sources", "targets_per_source", "repeats", "discovery_multiplier",
-                "target_selection", "fixed_evaluation_horizon", "horizons"
-            ) if key in intervention}
+            {
+                key: intervention[key]
+                for key in (
+                    "max_sources",
+                    "targets_per_source",
+                    "repeats",
+                    "discovery_multiplier",
+                    "target_selection",
+                    "fixed_evaluation_horizon",
+                    "horizons",
+                )
+                if key in intervention
+            }
             if intervention.get("evaluation") == "landmark-matched-commands-v1"
             else None
         ),

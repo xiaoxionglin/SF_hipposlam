@@ -541,7 +541,10 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.hrl_direct_target_selection = getattr(cfg, "hrl_direct_target_selection", "frontier")
         self.goal_candidate_mode = getattr(cfg, "hrl_goal_candidate_mode", "all")
         self.goal_candidate_k = int(getattr(cfg, "hrl_goal_candidate_k", self.Hippo_n_feature))
-        if self.goal_candidate_mode not in ("all", "random", "hebb") or not 1 <= self.goal_candidate_k <= self.Hippo_n_feature:
+        if (
+            self.goal_candidate_mode not in ("all", "random", "hebb")
+            or not 1 <= self.goal_candidate_k <= self.Hippo_n_feature
+        ):
             raise ValueError("Invalid goal candidate mode or capacity")
         if self.goal_candidate_mode != "all" and (
             self.hrl_manager_mode != "frontier_direct"
