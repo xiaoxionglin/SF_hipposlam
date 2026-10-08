@@ -575,6 +575,10 @@ class BaseLearner(Configurable):
                 # used only to train the high-level recurrent update.
                 core = self.actor_critic.core
                 history = mb.rnn_states[:, core.history_start:core.history_start + core.history_size]
+
+                if mb.hl_z.sum().item() == 0.0:
+                    log.warning("CRITICAL WARNING: mb.hl_z IS COMPLETELY EMPTY IN SHARED MEMORY!")
+
                 # Keep the high-level event loss on the same valid samples as PPO.
                 head_outputs = torch.cat(
                     (head_outputs, history, mb.hl_z, valids[:, None].to(head_outputs.dtype)), dim=-1
@@ -767,6 +771,7 @@ class BaseLearner(Configurable):
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
             del buff["obs"]  # don't need non-normalized obs anymore
 
+            # ADDED Pass the high-level diversity reward to the buffer if the coefficient is greater than 0
             if getattr(self.cfg, "hl_diversity_reward_coef", 0.0) > 0.0:
                 from sf_working_directories.zeynep.dmlab.high_level_diversity import trial_end_bonus
 
@@ -1158,7 +1163,7 @@ class DefaultLearner(BaseLearner):
                     curr_policy_version = self.train_step  # policy version before the weight update
                     
                     ## ADDED TO LOG INF ##
-                    total_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.cfg.max_grad_norm)
+                    total_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), float("inf")) # changed from max_grad_norm to inf to get the actual total grad norm
                     if not torch.isfinite(total_grad_norm):
                         log.error(
                             f"Skipping optimizer step: non-finite total gradient norm={total_grad_norm}"

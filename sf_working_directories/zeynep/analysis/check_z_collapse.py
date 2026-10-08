@@ -1,100 +1,64 @@
-import sys
+import os
+import glob
 import torch
 import torch.nn.functional as F
 import itertools
 
-from sample_factory.algo.utils.env_info import extract_env_info
-from sample_factory.algo.utils.make_env import make_env_func_batched
-from sample_factory.cfg.arguments import load_from_checkpoint
-from sample_factory.model.actor_critic import create_actor_critic
-from sample_factory.utils.utils import log
+def check_weight_collapse(checkpoint_path=None, exp_dir=None):
+    # 1. FIND THE CHECKPOINT (.pth file)
+    if checkpoint_path is None and exp_dir is not None:
+        # Search for the latest checkpoint in the folder
+        checkpoints = glob.glob(os.path.join(exp_dir, "*.pth"))
+        if not checkpoints:
+            print(f"❌ No .pth files found in {exp_dir}")
+            return
+        
+        # Pick the one with the highest modification time (latest save)
+        checkpoint_path = max(checkpoints, key=os.path.getmtime)
+        print(f"Found latest checkpoint: {checkpoint_path}")
 
-from sf_working_directories.zeynep.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
-
-def check_weight_collapse():
-    # 1. EXACT ARGUMENTS FROM YOUR RUN
-    mapname = "ymaze_instr_hl"
-    #expname = "03_Q_grid_HighLevelRNN_see_1111_D.c.mod_FiLM_c.i.coe_200"
-    expname = "07_Q_grid_HighLevelRNN_see_2222_D.c.mod_FiLM_c.i.coe_200"
-    #expname = '13_Q_grid_HighLevelRNN_see_4444_D.c.mod_additive_c.i.coe_200'
-    traindir = "/work/classic/fr_ze12-data/ymaze_newRNN/HighLevelChoice/stage2/Q_run6_grid_fixedrew_decdiff/train_dir/Q_grid_HighLevelRNN/Q_grid_HighLevelRNN_"
-    
-    cli = [
-        "--algo", "APPO",
-        "--env", mapname,
-        "--experiment", expname,
-        "--train_dir", traindir,
-        "--core_name", "BypassSS_HighLevelRNN",
-        "--Decoder_context_mod", "FiLM",
-        "--context_injection_coef", "200",
-        "--hl_K", "4",
-        "--hl_d_H", "16",
-        "--rnn_size", "1166",
-        "--no_render",
-        "--load_checkpoint_kind", "latest"
-    ]
-
-    cli_dict = {
-        'algo': 'APPO',
-        'env': mapname,
-        'experiment': expname,
-        'train_dir': traindir,
-        'core_name': 'BypassSS_HighLevelRNN',
-        'Decoder_context_mod': 'FiLM',
-        "context_injection_coef": 200,
-        'hl_K': 4,
-        'hl_d_H': 16,
-        'rnn_size': 1166,
-        'no_render': True,
-        'load_checkpoint_kind': 'latest'
-    }
-
-    # 2. LOAD CONFIGURATION
-    try:
-        register_dmlab_components()
-    except Exception:
-        pass # Handle safely if it expects cfg
-
-    cfg = parse_dmlab_args(evaluation=True, argv=cli)
-    cfg.cli_args = cli_dict
-    
-    # If the first register failed, do it safely here with the cfg
-    try:
-        register_dmlab_components(cfg=cfg)
-    except Exception:
-        pass
-
-    cfg = load_from_checkpoint(cfg)
-
-    # 3. CREATE ENVIRONMENT & MODEL
-    env = make_env_func_batched(cfg, env_config=None)
-    actor_critic = create_actor_critic(cfg, env.observation_space, env.action_space)
-    actor_critic.eval()
-    
-    log.info(f"Successfully loaded model from experiment: {cfg.experiment}")
-
-    # 4. LOCATE THE Z-MODULATION WEIGHTS
-    mod_type = getattr(cfg, "Decoder_context_mod", "additive")
-    target_layer_name = "film_gamma.weight" if mod_type == "FiLM" else "context_proj.weight"
-    
-    z_weights = None
-    for name, param in actor_critic.named_parameters():
-        if target_layer_name in name:
-            log.info(f"Found Z-Modulation layer: {name} | Shape: {param.shape}")
-            z_weights = param.detach()
-            break
-            
-    if z_weights is None:
-        log.error(f"Could not find {target_layer_name}! Available parameters:")
-        for name, _ in actor_critic.named_parameters():
-            print(f" - {name}")
+    if checkpoint_path is None:
+        print("❌ Please provide a checkpoint_path or exp_dir")
         return
 
-    # Transpose if necessary so each column is a mode
-    if z_weights.shape[0] == 4: 
+    print(f"\nLoading raw trained weights directly from: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+
+    # SF stores the state dict inside 'model', 'model_state_dict', or at root
+    if 'model' in checkpoint:
+        state_dict = checkpoint['model']
+    elif 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+    else:
+        state_dict = checkpoint
+
+    # 2. LOCATE THE Z-MODULATION WEIGHTS
+    z_weights = None
+    target_name = None
+    
+    for key in state_dict.keys():
+        if 'film_gamma.weight' in key or 'context_proj.weight' in key:
+            target_name = key
+            z_weights = state_dict[key].detach()
+            break
+
+    if z_weights is None:
+        print("❌ Could not find 'film_gamma.weight' or 'context_proj.weight' in the checkpoint!")
+        return
+
+    print(f"✅ Found trained Z-Modulation layer: {target_name} | Shape: {z_weights.shape}")
+    
+    # 3. COMPUTE METRICS
+    # nn.Linear weights are shape [out_features, in_features]
+    # We want columns to represent the modes (K)
+    if z_weights.shape[0] < z_weights.shape[1]: 
+        # If rows are smaller than columns, it's likely transposed
         z_weights = z_weights.T
-        
+
     K = z_weights.shape[1]
+    mod_type = "FiLM" if "film" in target_name else "Additive"
+
+    print(f"Exact raw sum of all weights: {z_weights.sum().item()}")
     
     print("\n" + "="*50)
     print(f"MODE COLLAPSE ANALYSIS ({mod_type.upper()})")
@@ -102,9 +66,13 @@ def check_weight_collapse():
     
     # Check 1: L2 Norms
     norms = torch.norm(z_weights, p=2, dim=0)
+    all_exactly_one = True
     for k in range(K):
-        print(f"Mode {k} Weight Magnitude (L2 Norm): {norms[k].item():.4f}")
-        
+        norm_val = norms[k].item()
+        print(f"Mode {k} Weight Magnitude (L2 Norm): {norm_val:.6f}")
+        if abs(norm_val - 1.0) > 1e-4:
+            all_exactly_one = False
+            
     print("-" * 50)
     
     # Check 2: Cosine Similarity
@@ -114,7 +82,19 @@ def check_weight_collapse():
         
         cos_sim = F.cosine_similarity(vec_i.unsqueeze(0), vec_j.unsqueeze(0), eps=1e-8).item()
         warning = " <--- ⚠️ COLLAPSED!" if cos_sim > 0.90 else ""
-        print(f"Similarity between Mode {i} and Mode {j}: {cos_sim:.4f}{warning}")
+        print(f"Similarity between Mode {i} and Mode {j}: {cos_sim:.6f}{warning}")
+
+    print("\n" + "="*50)
+    if all_exactly_one:
+        print("🚨 WARNING: The L2 norms are EXACTLY 1.000000!")
+        print("🚨 This means PyTorch's `nn.init.orthogonal_` is untouched.")
+        print("🚨 EITHER the checkpoint didn't save right, OR the loss gradient to this layer is 0.0.")
+    else:
+        print("🎉 SUCCESS: The norms are no longer 1.000000!")
+        print("🎉 The model has successfully learned to move the weights during training!")
+
 
 if __name__ == "__main__":
-    check_weight_collapse()
+    # Specific checkpoint path provided
+    checkpoint_path = "/work/classic/fr_ze12-data/ymaze_newRNN/HighLevelChoice/stage2_rollout/noclassifier/run2_film_logperK_gradclip/train_dir/Q_noclassifier_logperK_gradclip/Q_noclassifier_logperK_gradclip_/04_Q_noclassifier_logperK_gradclip_see_5555_D.c.mod_FiLM/checkpoint_p2/checkpoint_000005894_46809088.pth"
+    check_weight_collapse(checkpoint_path=checkpoint_path)

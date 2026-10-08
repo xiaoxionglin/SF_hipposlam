@@ -121,24 +121,35 @@ def compute_log_dict(
 
     selected = scores_or_logits.gather(                              # (B,)
         dim=-1, index=z_index.unsqueeze(-1)
-    ).squeeze(-1)
+    ).squeeze(-1)                                           # selected mode's score/Q-value
 
     top2       = scores_or_logits.topk(k=2, dim=-1).values            # (B, 2)
     gap      = top2[:, 0] - top2[:, 1]                   # (B,)  gap top1 - top2
 
     if is_policy:
-        log_dict = {"z_index": z_index, "logits": scores_or_logits, "entropy": entropy, "h": h_high_new, "reward_prev": reward_prev,
-                    "logit_selected": selected, "logit_gap": gap, "mode_probs": pi}
+        log_dict = {"entropy": entropy, "h": h_high_new, "logit_selected": selected, "logit_gap": gap}
     else:
-        log_dict = {"z_index": z_index, "scores": scores_or_logits, "entropy": entropy, "h": h_high_new, "reward_prev": reward_prev,
-                    "q_selected": selected, "q_gap": gap, "mode_probs": pi}
+        log_dict = {"entropy": entropy, "h": h_high_new, "q_selected": selected, "q_gap": gap}
 
     went_right = (chosen_arm == 1.0) if chosen_arm is not None else None
     went_left  = (chosen_arm == 2.0) if chosen_arm is not None else None
 
     for k in range(K):
+
+        if is_policy:
+            log_dict[f"logit_mode{k}"] = scores_or_logits[:, k]
+        else:
+            log_dict[f"qval_mode{k}"] = scores_or_logits[:, k] # if you plot it together with reward_achieved they must overlap. 
+
+        log_dict[f"prob_mode{k}"] = pi[:, k] # predicted probability to select this mode 
+
         went_mode_k = (z_index == k)
-        if went_mode_k.sum() > 0:
+
+        log_dict[f"selection_rate_mode{k}"] = went_mode_k.float().mean() # fraction of times mode k was ACTUALLY selected (emprical) 
+
+        if went_mode_k.sum() > 0 and chosen_arm is not None:
+            log_dict[f"reward_achieved_mode{k}"] = reward_prev[went_mode_k].float().mean() # average reward achieved when mode k was selected
+
             prob_R = went_right[went_mode_k].float().mean()
             prob_L = went_left[went_mode_k].float().mean()
 

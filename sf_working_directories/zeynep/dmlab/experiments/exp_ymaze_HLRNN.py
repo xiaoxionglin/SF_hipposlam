@@ -12,8 +12,8 @@ _params = ParamGrid(
         #("learning_rate", [0.00002, 0.0001]),
         #("seed", [2222]),
         #("DG_context_mod", ["concat", "sigmoid", "multiply"]),
-        ("Decoder_context_mod", ["additive", "FiLM"]),
-        ("context_injection_coef", [9, 200]),
+        ("Decoder_context_mod", ["additive"]),
+        ("context_injection_coef", [1, 9, 200]),
     ]
 )
 
@@ -68,8 +68,8 @@ _params = ParamGrid(
 #    ]
 #)
 
-prj = "ymaze_HighLevelRNN"
-vstr = "Q_grid_HighLevelRNN"
+prj = "ymaze_HighLevelRNN_v2"
+vstr = "Q_classifier_logperK_gradclip"
 
 cli = (
     "--env=ymaze_instr_hl "
@@ -88,7 +88,7 @@ cli = (
     "--batch_size=2048 "
     "--num_batches_per_epoch=2 "
     "--benchmark=False "
-    "--max_grad_norm=1.0 " # TRY THIS BECAUSE OF GRADIENT EXPLOSION WITH LORA
+    "--max_grad_norm=0.0 " # TRY 1 BECAUSE OF GRADIENT EXPLOSION WITH LORA, try default 0.0 for HL
     "--dmlab_renderer=software "
     "--decorrelate_experience_max_seconds=120 "
     "--nonlinearity=relu "
@@ -111,9 +111,9 @@ cli = (
     "--save_every_sec=120 "
     "--save_milestones_sec=5400 "
     "--decoder_mlp_layers 64 64 "
-    "--env_frameskip=8 " # lowered from 8
-    "--dmlab_reduced_action_set=True "
-    #"--dmlab_navigation_action_set=True "
+    "--env_frameskip=4 " # lowered from 8
+    #"--dmlab_reduced_action_set=True "
+    "--dmlab_navigation_action_set=True "
     "--core_name=BypassSS_HighLevelRNN " # default was set to ByPassSS or try BypassSS_HighLevelRNN
     "--rnn_type=gru "
     "--DG_name=batchnorm_relu "
@@ -152,7 +152,9 @@ cli = (
     "--hl_history_len=8 "
     "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
     "--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
+    "--hl_diversity_include_chosen_arm=True " # include the chosen arm in the classifier input for levels that return to an identical center view at outcome
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
+    #"--context_injection_coef=200 "
 )
 
 

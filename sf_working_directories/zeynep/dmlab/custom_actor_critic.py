@@ -1,6 +1,7 @@
 from typing import Dict
 from sample_factory.model.actor_critic import default_make_actor_critic_func, ActorCritic
 import torch
+from sample_factory.utils.utils import log
 
 def add_custom_summaries(actor_critic: ActorCritic) -> ActorCritic:
     """Dynamically extends the summaries method to pull custom stats from the Core."""
@@ -40,19 +41,21 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
         selector = getattr(core, 'hl_learner', None)
         # Bootstrap values should be reproducible. Actor action collection
         # still samples unless hl_deterministic was explicitly configured.
-        previous_deterministic = selector.deterministic if selector is not None else None
+        previous_deterministic = selector.deterministic if selector is not None else None # PPO guesses the value of next state (bootstrapping). Force deterministic only during value-guessing step to keep math clean.
         if selector is not None and values_only:
-            selector.deterministic = True
+            selector.deterministic = True # When passed the 64 rollout frames, make a guess and bypass the sampling of high-level mode. This is only for bootstrapping the value function, not for training the high-level RNN.
         try:
             result_dict = original_forward(*args, **kwargs)
         finally:
             if selector is not None:
-                selector.deterministic = previous_deterministic
+                selector.deterministic = previous_deterministic 
 
         if getattr(actor_critic.cfg, 'core_name', None) == 'BypassSS_HighLevelRNN':
             # This is the mode actually used by the actor's decoder at this step.
             # Sample Factory records it alongside actions for learner replay.
-            result_dict['hl_z'] = result_dict['new_rnn_states'][:, -actor_critic.cfg.hl_K:]
+            result_dict['hl_z'] = result_dict['new_rnn_states'][:, -actor_critic.cfg.hl_K:].clone()
+
+            #log.debug(f"High-level RNN mode (hl_z) shape: {result_dict['hl_z'].shape}, values: {result_dict['hl_z']}")
         
         # 2. Locate the core
         # 3. Extract the Q-loss if it exists

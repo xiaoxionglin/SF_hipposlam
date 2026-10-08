@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from sample_factory.utils.utils import log
 
 # ---------------------------
 # Fixed positional bases
@@ -67,6 +68,10 @@ class MlpDecoderFiLMJit(Decoder):
             self.film_gamma = nn.Linear(context_dim, self.decoder_out_size) #decoder_out_size is equal to 128 
             self.film_beta = nn.Linear(context_dim, self.decoder_out_size)
 
+            self.film_gamma.weight.register_hook(
+            lambda grad: log.warning(f"\n[LIVE PROOF] FiLM Gamma Grad Norm: {grad.norm().item():.6f}\n")
+            ) # log gradient from backprop, before optimizer
+
             # Identity init — gamma=1, beta=0 so FiLM starts as passthrough
             # (film_residual_init from configuration_notes.md)
             nn.init.orthogonal_(self.film_gamma.weight)
@@ -87,9 +92,16 @@ class MlpDecoderFiLMJit(Decoder):
         h = self.mlp(x)
     
         if self.context_dim > 0 and context is not None:
+
+            if context.shape[0] > 100:  # Only print for the Learner (batch size ~2048)
+                log.warning(f"LEARNER CONTEXT EXACT SUM: {context.sum().item()}") # log batch data being fed into decoder during learning
+
             gamma = self.film_gamma(context) # it functions as a gate to amplify or silence the input based on the context/mode.
             beta = self.film_beta(context)
             h = gamma * h + beta
+
+        #print("DID WE USE FILM?", "gamma" in locals())
+        #print("CONTEXT VECTOR:", context[0].detach().cpu().numpy() if context is not None else "NONE")
             
         return h
     

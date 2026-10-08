@@ -584,13 +584,15 @@ class ContextRNNWrapperCore(ModelCore):
 class HighLevelRNNWrapperCore(ModelCore):
     """
     Stage 1 & 2: High-Level RNN Wrapper.
+    Record the last N completed trials and use them to update the high-level state for the next trial.
+    The high-level state is used to produce a distribution over the K possible modes for the next trial.
     """
     def __init__(self, cfg, input_size):
         super().__init__(cfg)
         self.cfg = cfg
         self.K = getattr(cfg, "hl_K", 4)
         self.d_H = getattr(cfg, "hl_d_H", 16)
-        self.history_len = getattr(cfg, "hl_history_len", 8)
+        self.history_len = getattr(cfg, "hl_history_len", 8) # get the last 8 completed trials to update the high-level state
         if self.history_len < 1:
             raise ValueError("hl_history_len must be at least one completed trial")
         self.event_width = self.d_H + self.K + 2  # pre-event h, chosen z, reward, valid flag
@@ -639,24 +641,25 @@ class HighLevelRNNWrapperCore(ModelCore):
         """Keep completed trials for learner unrolling; this is not a policy input."""
         entry = torch.cat((h_before.detach(), z_before.detach(), reward[:, None],
                            torch.ones_like(reward[:, None])), dim=-1)
-        shifted = torch.cat((history[:, self.event_width:], entry), dim=-1)
+        shifted = torch.cat((history[:, self.event_width:], entry), dim=-1) # Shift history to the left and append new entry
         valid_outcome = event_mask & (z_before.sum(dim=-1) > 0.5)
-        return torch.where(valid_outcome[:, None], shifted, history)
+        return torch.where(valid_outcome[:, None], shifted, history) # Return the updated history, only if the outcome is valid
 
     def scores_from_history(self, history, fallback_h):
-        """Rebuild the decision state through past trial events under current weights."""
-        events = history.reshape(-1, self.history_len, self.event_width)
-        valid = events[:, :, -1] > 0.5
-        first = valid.int().argmax(dim=1)
+        """Rebuild the decision state through past trial events under current weights.
+           When a trial ends, it rewinds to the oldest saved trial in the backpack and fast-forward through history to calculate exact Q-values."""
+        events = history.reshape(-1, self.history_len, self.event_width) # reshape to 3D tensor: (batch, history_len, event_width)
+        valid = events[:, :, -1] > 0.5 # get the events that are actual trials (valid flag)
+        first = valid.int().argmax(dim=1) # first ever trial
         batch = torch.arange(events.size(0), device=events.device)
-        h = torch.where(valid.any(dim=1, keepdim=True),
-                        events[batch, first, :self.d_H], fallback_h)
+        h = torch.where(valid.any(dim=1, keepdim=True), 
+                        events[batch, first, :self.d_H], fallback_h) # use the first valid trial's h as the starting point, or fallback_h if no valid trials
         for k in range(self.history_len):
             event = events[:, k]
             z = event[:, self.d_H:self.d_H + self.K]
             reward = event[:, self.d_H + self.K]
-            h = self.hl_learner.update_state(valid[:, k], reward, h, z)
-        return self.hl_learner.head(h)
+            h = self.hl_learner.update_state(valid[:, k], reward, h, z) # step HLRNN forward one trial at a time, using the saved z and reward from history
+        return self.hl_learner.head(h) # Calculate current Q-values for the current frame.
 
     def forward(self, head_output, rnn_states):
         is_packed = isinstance(head_output, PackedSequence)
@@ -714,7 +717,7 @@ class HighLevelRNNWrapperCore(ModelCore):
             # Learner._forward_pass appends the actor's selected mode to each
             # timestep. Never sample a new mode while replaying actor actions.
             valid_seq = head_output[:, :, -1].bool()
-            actor_z_seq = head_output[:, :, -(self.K + 1):-1]
+            actor_z_seq = head_output[:, :, -(self.K + 1):-1] # sent from mb["hl_z"], the exact mode agent has picked during rollout 
             actor_history_seq = head_output[:, :, -(self.K + self.history_size + 1):-(self.K + 1)]
             head_output = head_output[:, :, :-(self.K + self.history_size + 1)]
             
@@ -765,7 +768,7 @@ class HighLevelRNNWrapperCore(ModelCore):
                     h_high_t = self.hl_learner.update_state(
                         outcome_mask_t, prev_trial_reward_t, h_high_t, z_t
                     )
-                    z_t = actor_z_seq[t]
+                    z_t = actor_z_seq[t] # overwrite the mode with the actor's actual choice from the past. 
 
                 base_core_out_t, base_states_t = self.base_core(base_head_output_t, base_states_t)
 
@@ -807,9 +810,9 @@ class HighLevelRNNWrapperCore(ModelCore):
                 with torch.no_grad():
                     valid_rewards = rewards_stacked[mask_stacked]
                     self.last_hl_metrics.update({
-                        "hl/valid_outcomes": valid_rewards.numel(),
-                        "hl/trial_reward_mean": valid_rewards.mean().item() if valid_rewards.numel() else 0.0,
-                        "hl/trial_reward_abs_max": valid_rewards.abs().max().item() if valid_rewards.numel() else 0.0,
+                        "hl/valid_outcomes": valid_rewards.numel(), # how many trials actually ended in the batch
+                        "hl/trial_reward_mean": valid_rewards.mean().item() if valid_rewards.numel() else 0.0, # average raw reward from the environment
+                        "hl/trial_reward_abs_max": valid_rewards.abs().max().item() if valid_rewards.numel() else 0.0, # the maximum absolute reward from the environment
                     })
 
                 self.last_hl_loss = total_loss
