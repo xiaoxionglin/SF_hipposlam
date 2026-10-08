@@ -103,8 +103,10 @@ class TargetFiLMDecoder(nn.Module):
         goal_init = getattr(getattr(core, "cfg", None), "hrl_film_goal_init", "zero")
         if goal_init == "orthogonal":
             # Rows are goal-specific scale/shift vectors; an absent one-hot
-            # still leaves the state unchanged before the output layer.
-            nn.init.orthogonal_(self.target_modulation)
+            # still leaves the state unchanged before the output layer. A local
+            # generator preserves all later model initialization for paired seeds.
+            generator = torch.Generator().manual_seed(int(getattr(core.cfg, "seed", 0)) + 1910)
+            nn.init.orthogonal_(self.target_modulation, generator=generator)
         elif goal_init == "zero" and bool(getattr(getattr(core, "cfg", None), "fixed_task_goal_mixture", False)):
             # A fresh flat actor needs distinct goal effects for reward to
             # identify mixture weights on its first update. Full policy transfer

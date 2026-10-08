@@ -74,7 +74,7 @@ def test_target_id_film_strips_one_hot_and_starts_as_exact_identity_modulation()
 def test_target_id_film_orthogonal_goal_rows_are_distinct_at_initialization():
     torch.manual_seed(7)
     core = _film_core()
-    core.cfg = SimpleNamespace(hrl_film_goal_init="orthogonal")
+    core.cfg = SimpleNamespace(hrl_film_goal_init="orthogonal", seed=99)
     decoder = TargetFiLMDecoder(core)
     modulation = decoder.target_modulation.detach()
     torch.testing.assert_close(modulation @ modulation.T, torch.eye(3), atol=1e-6, rtol=1e-6)
@@ -86,6 +86,23 @@ def test_target_id_film_orthogonal_goal_rows_are_distinct_at_initialization():
     outputs = decoder(inputs)
     assert not torch.equal(outputs[0], outputs[1])
     assert not torch.equal(outputs[1], outputs[2])
+
+
+def test_orthogonal_goal_init_preserves_other_weight_initialization():
+    core = _film_core()
+    core.cfg = SimpleNamespace(hrl_film_goal_init="zero", seed=99)
+    torch.manual_seed(23)
+    zero = TargetFiLMDecoder(core)
+    zero_rng = torch.get_rng_state()
+
+    core.cfg.hrl_film_goal_init = "orthogonal"
+    torch.manual_seed(23)
+    orthogonal = TargetFiLMDecoder(core)
+    torch.testing.assert_close(torch.get_rng_state(), zero_rng)
+    for layer in ("state_layer", "output_layer"):
+        for key, value in getattr(zero, layer).state_dict().items():
+            torch.testing.assert_close(value, getattr(orthogonal, layer).state_dict()[key])
+    assert torch.count_nonzero(orthogonal.target_modulation).item() > 0
 
 
 def test_target_id_film_learns_target_specific_multiplicative_conditioning():
