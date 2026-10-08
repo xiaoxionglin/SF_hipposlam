@@ -2,7 +2,7 @@
   "schema": "intrmotiv/study/v1",
   "workflow_version": "1.14.1",
   "study_id": "orthogonal_film_episode_dg_qualification_20261008",
-  "description": "Compute-node qualification for orthogonal_film_episode_dg_20261008.study.json",
+  "description": "Compute-node qualification for orthogonal_film_episode_dg_20261008.study.json Uses a local goal-matrix RNG so paired weights retain their original initialization.",
   "expected_runs": 1,
   "metadata": {
     "project": "SF_IntrMotiv_EpisodeLongDG",
@@ -23,9 +23,9 @@
   },
   "training": {
     "mode": "sample_factory",
-    "batch_name": "orth_eldg_20261008_qual",
+    "batch_name": "orth_eldg_20261008_qual_r2",
     "workspace_root": "/work/classic/fr_xl1014-corridor-geometry",
-    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/orth_eldg_20261008_qual",
+    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/orth_eldg_20261008_qual_r2",
     "run_name_template": "OELDG_{arm_label}_S{seed}",
     "condition_name_template": "OELDG_{arm_label}",
     "seed_arg": "--seed={seed}",
@@ -174,7 +174,7 @@
       "--train_for_env_steps=1048576",
       "--checkpoint_frame_targets=1048576",
       "--online_spatial_snapshot_targets=1048576",
-      "--wandb_group=orth_eldg_20261008_qual"
+      "--wandb_group=orth_eldg_20261008_qual_r2"
     ]
   },
   "bases": [
