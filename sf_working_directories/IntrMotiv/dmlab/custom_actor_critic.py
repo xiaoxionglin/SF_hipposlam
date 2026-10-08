@@ -100,13 +100,20 @@ class TargetFiLMDecoder(nn.Module):
         # this as an explicit parameter makes the conditioning operation
         # transparent and maps an all-zero no-target vector to zero modulation.
         self.target_modulation = nn.Parameter(torch.zeros(self.n_targets, 2 * hidden_size))
-        if bool(getattr(getattr(core, "cfg", None), "fixed_task_goal_mixture", False)):
+        goal_init = getattr(getattr(core, "cfg", None), "hrl_film_goal_init", "zero")
+        if goal_init == "orthogonal":
+            # Rows are goal-specific scale/shift vectors; an absent one-hot
+            # still leaves the state unchanged before the output layer.
+            nn.init.orthogonal_(self.target_modulation)
+        elif goal_init == "zero" and bool(getattr(getattr(core, "cfg", None), "fixed_task_goal_mixture", False)):
             # A fresh flat actor needs distinct goal effects for reward to
             # identify mixture weights on its first update. Full policy transfer
             # replaces this table with the learned source table afterward.
             generator = torch.Generator().manual_seed(int(getattr(core.cfg, "seed", 0)) + 1908)
             with torch.no_grad():
                 self.target_modulation.copy_(0.01 * torch.randn(self.target_modulation.shape, generator=generator))
+        elif goal_init != "zero":
+            raise ValueError(f"Unknown hrl_film_goal_init={goal_init}")
         self.output_layer = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),

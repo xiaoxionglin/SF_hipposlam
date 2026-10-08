@@ -371,6 +371,8 @@ def maybe_overwrite_rnn_size(cfg):
     if getattr(cfg, "hrl_edge_exploration", False) and manager_mode not in ("control_graph", "frontier_waypoint"):
         raise ValueError("Edge exploration requires a waypoint or control_graph manager")
     goal_conditioning = getattr(cfg, "hrl_goal_conditioning", "legacy")
+    if getattr(cfg, "hrl_film_goal_init", "zero") != "zero" and goal_conditioning != "target_id_film":
+        raise ValueError("Nondefault FiLM goal initialization requires target_id_film conditioning")
     target_expiration = getattr(cfg, "hrl_target_expiration", "deadline")
     if target_expiration == "episode" and (
         not getattr(cfg, "hrl_controllable_graph", False)

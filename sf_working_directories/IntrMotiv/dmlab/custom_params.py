@@ -344,6 +344,12 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
         help="Scale only the commanded goal one-hot entering the legacy decoder.",
     )
     p.add_argument(
+        "--hrl_film_goal_init",
+        default="zero",
+        choices=["zero", "orthogonal"],
+        help="Initialize the FiLM goal-to-scale/shift matrix; zero preserves historical runs.",
+    )
+    p.add_argument(
         "--hrl_exploration_policy",
         default="shared",
         choices=["shared", "separate"],

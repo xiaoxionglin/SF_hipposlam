@@ -71,6 +71,23 @@ def test_target_id_film_strips_one_hot_and_starts_as_exact_identity_modulation()
     assert not any(key.startswith("core.") for key in decoder.state_dict())
 
 
+def test_target_id_film_orthogonal_goal_rows_are_distinct_at_initialization():
+    torch.manual_seed(7)
+    core = _film_core()
+    core.cfg = SimpleNamespace(hrl_film_goal_init="orthogonal")
+    decoder = TargetFiLMDecoder(core)
+    modulation = decoder.target_modulation.detach()
+    torch.testing.assert_close(modulation @ modulation.T, torch.eye(3), atol=1e-6, rtol=1e-6)
+
+    inputs = torch.randn(3, 20)
+    inputs[:, 12:15] = torch.eye(3)
+    inputs[1:, :12] = inputs[0, :12]
+    inputs[1:, 15:] = inputs[0, 15:]
+    outputs = decoder(inputs)
+    assert not torch.equal(outputs[0], outputs[1])
+    assert not torch.equal(outputs[1], outputs[2])
+
+
 def test_target_id_film_learns_target_specific_multiplicative_conditioning():
     torch.manual_seed(11)
     decoder = TargetFiLMDecoder(_film_core(), hidden_size=8)

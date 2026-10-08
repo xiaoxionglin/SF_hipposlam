@@ -1,0 +1,329 @@
+{
+  "schema": "intrmotiv/study/v1",
+  "workflow_version": "1.14.1",
+  "study_id": "orthogonal_film_finite_dg_20261008",
+  "description": "Orthogonally initialized FiLM goal matrix M; matched replacement of four_prescribed_dg_controller_20261007.study.json",
+  "expected_runs": 6,
+  "metadata": {
+    "project": "SF_IntrMotiv_FourPrescribedDG",
+    "training_steps": 75000000,
+    "preflight_steps": 524288,
+    "oracle_goal_ids": "0,1,2,3",
+    "oracle_centers": "(550,550);(1450,550);(550,1450);(1650,1650)",
+    "oracle_sigma": 20,
+    "oracle_support_radius": 40,
+    "learned_context_units": 12,
+    "source_study_sha256": "c325acb58098b763c5a8e7c0d97a07bca676eaa8dde4e262b6c9dffc4a94d7de",
+    "parent_study_id": "four_prescribed_dg_controller_20261007",
+    "parent_study_sha256": "009cd13111d886839f04624be0913f95773ef4e672ce5c86b6853724afca6b1d",
+    "film_goal_initialization": "orthogonal_rows_gain_1"
+  },
+  "training": {
+    "mode": "sample_factory",
+    "batch_name": "orth_fdg_20261008",
+    "workspace_root": "/work/classic/fr_xl1014-corridor-geometry",
+    "output_root": "/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/orth_fdg_20261008",
+    "run_name_template": "OFDG_{representation_label}_S{seed}",
+    "condition_name_template": "OFDG_{representation_label}",
+    "seed_arg": "--seed={seed}",
+    "common_args": [
+      "--env=openfield_map2_fixed_loc3_fixedlength_noreward",
+      "--train_for_env_steps=75000000",
+      "--algo=APPO",
+      "--gamma=0.99",
+      "--learning_rate=0.0002",
+      "--exploration_loss_coeff=0.005",
+      "--value_loss_coeff=0.3",
+      "--ppo_clip_ratio=0.25",
+      "--num_workers=32",
+      "--num_envs_per_worker=2",
+      "--worker_num_splits=2",
+      "--num_epochs=1",
+      "--rollout=64",
+      "--recurrence=64",
+      "--batch_size=2048",
+      "--num_batches_per_epoch=2",
+      "--decorrelate_experience_max_seconds=120",
+      "--max_grad_norm=0.0",
+      "--dmlab_renderer=software",
+      "--dmlab_extended_action_set=False",
+      "--dmlab_reduced_action_set=True",
+      "--dmlab_one_task_per_worker=True",
+      "--dmlab_use_level_cache=True",
+      "--dmlab_level_cache_path=/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/runtime/dmlab_cache",
+      "--set_workers_cpu_affinity=True",
+      "--force_envs_single_thread=True",
+      "--num_policies=1",
+      "--with_pbt=False",
+      "--max_policy_lag=35",
+      "--use_record_episode_statistics=True",
+      "--keep_checkpoints=8",
+      "--save_every_sec=300",
+      "--save_best_every_sec=300",
+      "--save_best_after=1200",
+      "--save_best_metric=z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "--env_frameskip=8",
+      "--core_name=BypassSS",
+      "--DG_name=batchnorm_relu",
+      "--Hippo_n_feature=16",
+      "--Hippo_R=8",
+      "--Hippo_L=64",
+      "--depth_sensor=True",
+      "--normalize_input=False",
+      "--encoder_conv_architecture=layer2_resnet18",
+      "--use_rnn=True",
+      "--rnn_type=gru",
+      "--rnn_size=0",
+      "--nonlinearity=relu",
+      "--actor_critic_share_weights=True",
+      "--with_wandb=True",
+      "--wandb_user=xiaoxionglin-bernstein-center-freiburg",
+      "--wandb_dir=/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/SF_hipposlam/train_dir/wandb",
+      "--benchmark=False",
+      "--with_number_instruction=True",
+      "--number_instruction_coef=9",
+      "--device=cpu",
+      "--rec_distances=True",
+      "--distance_learning=True",
+      "--masked_distance_matrix=False",
+      "--normalize_advantage=True",
+      "--advantage_reward_source=internal",
+      "--extra_encoder_losses=True",
+      "--metric=sum",
+      "--reward_scale=0.1",
+      "--double_value=False",
+      "--reset_critic=False",
+      "--reset_decoder=False",
+      "--encoder_grad_coeff=1",
+      "--encoder_batch_loss=True",
+      "--encoder_batch_loss_temperature=0.5",
+      "--encoder_multi_activation_loss=True",
+      "--encoder_unused_sequence_loss=False",
+      "--extra_decoder_loss=False",
+      "--encoder_population_usage_loss=False",
+      "--encoder_density_loss_coeff=0.0",
+      "--encoder_collision_loss_coeff=0.0",
+      "--encoder_reward_method=encourage",
+      "--dg_global_punishment_coeff=0.0",
+      "--dg_global_punishment_temperature=0.5",
+      "--dg_row_repulsion_coeff=0.0",
+      "--dg_ca3_temporal_exclusion_coeff=0.0",
+      "--dg_path_scatter_coeff=0.0",
+      "--iterative_update=False",
+      "--ca3_predictor_shadow=False",
+      "--exploration_coverage_telemetry=True",
+      "--exploration_coverage_grid_size=100",
+      "--DG_BN_intercept=2.43",
+      "--dg_orthogonal_recruitment_mode=graph",
+      "--dg_orthogonal_recruitment_margin=0.5",
+      "--dg_orthogonal_recruitment_residual_eps=1e-6",
+      "--dg_recruitment_connectivity_threshold=0.25",
+      "--dg_recruitment_redundancy_max_steps=4",
+      "--dg_recruitment_passive_half_life_events=5000",
+      "--dg_recruitment_attempt_threshold=0.5",
+      "--dg_recruitment_pred_min_context_attempts=4.0",
+      "--dg_recruitment_pred_half_life_options=5000",
+      "--dg_batchnorm_semantics=legacy_batch",
+      "--hrl_controllable_graph=True",
+      "--hrl_graph_memory=policy_buffer",
+      "--hrl_persistent_fast_weights=False",
+      "--hrl_fast_weight_half_life_options=5000",
+      "--hrl_target_timing=immediate",
+      "--hrl_worker_reward_mode=hit_distance",
+      "--hrl_target_hit_reward=1.0",
+      "--hrl_distance_bonus_coeff=0.1",
+      "--hrl_min_target_visits=1",
+      "--hrl_edge_confidence_threshold=0.5",
+      "--hrl_edge_reliability_threshold=0.5",
+      "--hrl_edge_exploration=False",
+      "--hrl_manager_mode=frontier_direct",
+      "--hrl_exploration_mode=False",
+      "--hrl_manager_exploration_probability=0.0",
+      "--hrl_exploration_horizon=64",
+      "--hrl_empirical_her=False",
+      "--hrl_empirical_her_horizon=64",
+      "--hrl_empirical_her_coeff=0.0",
+      "--hrl_timeout_margin_ratio=0.20",
+      "--hrl_timeout_margin_steps=2",
+      "--hrl_bootstrap_horizon=64",
+      "--hrl_passive_edge_confidence_threshold=2",
+      "--hrl_passive_min_displacement=2",
+      "--hrl_passive_max_path_length=64",
+      "--hrl_frontier_uncertainty_weight=1.0",
+      "--hrl_action_path_integration=False",
+      "--hrl_motion_policy_input=False",
+      "--hrl_landmark_geometry=none",
+      "--hrl_behavior_mode_condition=False",
+      "--hrl_exploration_policy=shared",
+      "--depth_sensor_inverse=False",
+      "--ppo_dg_gradient=stop",
+      "--hrl_control_outcome=target_hit",
+      "--hrl_direct_target_selection=frontier",
+      "--encoder_reward_recipient=arrival",
+      "--encoder_reward_require_local_predecessor=True",
+      "--dg_recruitment_victim_rule=monitor",
+      "--dg_recruitment_endpoint_gate=open",
+      "--hrl_goal_conditioning=target_id_film",
+      "--dg_recruitment_reset_goal_adapter=True",
+      "--dg_orthogonal_recruitment=True",
+      "--dg_orthogonal_recruitment_max_per_rollout=0",
+      "--hrl_goal_identity_count=4",
+      "--hrl_goal_candidate_mode=all",
+      "--hrl_goal_candidate_k=4",
+      "--checkpoint_frame_targets=5000000,25000000,50000000,75000000",
+      "--online_spatial_snapshot_targets=5000000,25000000,50000000,75000000",
+      "--wandb_project=SF_IntrMotiv_OrthogonalFiLM",
+      "--wandb_group=orth_fdg_20261008",
+      "--hrl_film_goal_init=orthogonal"
+    ]
+  },
+  "bases": [
+    {
+      "name": "C15_F16",
+      "label": "C15F16",
+      "args": [],
+      "metadata": {
+        "family": "c15_arr_mon_film"
+      }
+    }
+  ],
+  "factors": [
+    {
+      "name": "representation",
+      "levels": [
+        {
+          "value": "learned",
+          "label": "LEARNED",
+          "args": [
+            "--dg_prescribed_mode=zero"
+          ]
+        },
+        {
+          "value": "oracle",
+          "label": "ORACLE",
+          "args": [
+            "--dg_prescribed_mode=gaussian4"
+          ]
+        }
+      ]
+    }
+  ],
+  "seeds": [
+    8,
+    99,
+    123
+  ],
+  "analysis": {
+    "step_tag": "train/env_steps",
+    "terminal_width": 5000000,
+    "synchronized_steps": [
+      5000000,
+      25000000,
+      50000000,
+      75000000
+    ],
+    "max_workers": 4,
+    "group_by": [
+      "representation"
+    ],
+    "contrast_group_by": [],
+    "replicate_by": [
+      "seed"
+    ],
+    "window_metrics": {
+      "coverage_auc": "policy_stats/avg_z_00_openfield_map2_fixed_loc3_fixedlength_noreward_coverage_auc",
+      "dg_density": "intrmotiv/dg/density",
+      "dg_silent_fraction": "intrmotiv/dg/silent_unit_fraction",
+      "dg_usage_entropy": "intrmotiv/dg/usage_entropy",
+      "target_action_sensitivity": "intrmotiv/hrl/goal_condition/action_sensitivity",
+      "option_success_fraction": "intrmotiv/hrl/option_success_fraction",
+      "target_hit_numerator": "intrmotiv/hrl/target_hit_numerator",
+      "target_hit_event_count": "intrmotiv/hrl/target_hit_event_count",
+      "shuffled_hit_numerator": "intrmotiv/hrl/shuffled_hit_numerator",
+      "shuffled_hit_event_count": "intrmotiv/hrl/shuffled_hit_event_count",
+      "behavior_replay_mismatch": "intrmotiv/hrl/behavior_replay_mismatch",
+      "target_action_probability_tv": "intrmotiv/hrl/goal_condition/action_probability_tv"
+    },
+    "cumulative_metrics": {},
+    "contrasts": [
+      {
+        "name": "ORACLE_minus_LEARNED",
+        "terms": [
+          {
+            "weight": 1,
+            "where": {
+              "representation": "oracle"
+            }
+          },
+          {
+            "weight": -1,
+            "where": {
+              "representation": "learned"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "telemetry": {
+    "protocol": "dg-place-fields-v1",
+    "target_frames": [
+      5000000,
+      25000000,
+      50000000,
+      75000000
+    ],
+    "trajectory_seed": 99,
+    "terminal_seeds": [
+      8,
+      123
+    ],
+    "label_template": "{condition}__s{seed}__f{checkpoint_frames}",
+    "manifest_fields": {
+      "family": "c15_arr_mon_film",
+      "representation": "{representation}",
+      "oracle_goal_ids": "0,1,2,3",
+      "normalization": "legacy_batch"
+    },
+    "spatial_outcomes": [
+      "silent_unit_fraction",
+      "active_only_map_cosine",
+      "peak_diversity",
+      "spatial_information",
+      "pre_threshold_maps"
+    ],
+    "intervention": {
+      "protocol": "target-control-intervention-v1",
+      "target_frames": [
+        75000000
+      ],
+      "freeze_policy": true,
+      "freeze_graph": true,
+      "exclusive_source_only": true,
+      "alternative_targets": 3,
+      "attempts_per_ordered_pair": 8,
+      "decision_cap": 400000,
+      "record_orientation_bins": true,
+      "source_context_matched_shuffle": false,
+      "counterfactual_action_sensitivity": true,
+      "evaluation": "landmark-matched-commands-v1",
+      "max_sources": 4,
+      "targets_per_source": 3,
+      "repeats": 8,
+      "discovery_multiplier": 10,
+      "target_selection": "all_eligible",
+      "horizons": [
+        64,
+        128,
+        256
+      ],
+      "fixed_evaluation_horizon": 256
+    },
+    "online_spatial_target_frames": [
+      5000000,
+      25000000,
+      50000000,
+      75000000
+    ]
+  }
+}
