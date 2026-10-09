@@ -87,7 +87,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
                    help="Temperature for sampling high-level modes from Q scores; must be positive.")
     p.add_argument("--hl_history_len", default=8, type=int,
                    help="Completed trials retained only for high-level BPTT across frame rollouts.")
-    p.add_argument("--hl_is_policy", default=True, type=str2bool, help="Whether the high-level RNN uses policy logits instead of Q-values.")
+    p.add_argument("--hl_is_policy", default=False, type=str2bool, help="Whether the high-level RNN uses policy logits instead of Q-values.")
     p.add_argument("--hl_deterministic", default=False, type=str2bool,
                    help="Use greedy high-level choices; keep False for exploratory training rollouts.")
     p.add_argument("--hl_diversity_reward_coef", default=0.0, type=float,
@@ -96,6 +96,8 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
                    help="Weight of the trial-end mode classifier loss when the diversity reward is enabled.")
     p.add_argument("--hl_diversity_include_chosen_arm", default=False, type=str2bool,
                    help="Also classify the reached arm when the trial-end visual observation is ambiguous.")
+    p.add_argument("--hl_train_fix_base", default=False, type=str2bool,
+                   help="Freeze encoder, base core, and decoder; only train the high-level RNN.")
     p.add_argument("--context_injection_coef", default=1.0, type=float, help="Coefficient for scaling the context vector before injection into the decoder.")
     ###################  
 

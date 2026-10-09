@@ -96,6 +96,10 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
 
             info["episode_extra_stats"]["custom/flexibility"] = existing_extra_stats.get("custom/flexibility", 0.0)
             info["episode_extra_stats"]["custom/instr_switch"] = existing_extra_stats.get("custom/instr_switch", 1)
+
+            info["episode_extra_stats"]["custom/R_trials"] = existing_extra_stats.get("custom/R_trials", 0)
+            info["episode_extra_stats"]["custom/L_trials"] = existing_extra_stats.get("custom/L_trials", 0)
+            
             #info["episode_extra_stats"]["custom/instr_block"] = existing_extra_stats.get("custom/instr_block", 0)
             info["episode_extra_stats"]["custom/arm_obedience"] = existing_extra_stats.get("custom/arm_obedience", 0.0)
 

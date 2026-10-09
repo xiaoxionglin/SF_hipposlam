@@ -691,6 +691,8 @@ class HipposlamEncoder(Encoder):
             self.high_level = True
             self.reward_input = False
 
+            self.dg_only_no_bypass_instr = True
+
         if hasattr(cfg, "depth_sensor"):
            log.info(f"denpth_sensor {cfg.depth_sensor}")
            if self.depth_sensor:
@@ -808,6 +810,8 @@ class HipposlamEncoder(Encoder):
 
         DG_mod = self.DG_context_mod if self.oracle_context else "None"
         Dec_mod = self.Decoder_context_mod if self.oracle_context else "None"
+        if getattr(self, 'high_level', False):
+            Dec_mod = "None"
 
         depth_out = None
         if self.depth_sensor:

@@ -10,12 +10,21 @@ _params = ParamGrid(
         #("number_instruction_coef", [9, 200]),
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
-        ("DG_context_mod", ["concat", "multiply", "sigmoid", "None"]),
-        ("Decoder_context_mod", ["None"]), # verify rnn_size
         #("seed", [2222]),
-        #("context_injection_coef", [1, 200]),
+        ("Decoder_context_mod", ["additive"]),
+        ("context_injection_coef", [1, 9, 200]),
     ]
 )
+
+# 01.10 - Bug fixed: q-loss addition to total loss function in learner
+# 02.10 - Bug fixed: chosen_arm pulse removed, now chosen_arm is persistent until trial ends, might be
+# the reason why HL-RNN is not learning to persist the mode (z) until trial ends. Now, the chosen_arm is persistent until trial ends, and the outcome_event_pulse is used to tick the HL-RNN only at outcome events.
+# 02.10 - Policy gradient loss is now added to the total loss function in the learner, so that the HL-RNN can learn to output a policy (z) that maximizes the expected reward. The Q-loss is still used for the value function update, but it is not used for the policy update.
+# 02.10 - The first run with persistent rewards in environment was buggy so I reverted back the reward pulse in envrionment but the others keep persistent.
+# 05.10 - This configuration now uses Q regression and eight completed-trial
+# records for high-level RNN training. See dmlab/HIGH_LEVEL_RNN_ROLLOUT_FIX.md.
+# The optional controller diversity reward is explained in
+# dmlab/HIGH_LEVEL_DIVERSITY_REWARD.md.
 
 # _params = ParamGrid(
 #     [
@@ -50,15 +59,21 @@ _params = ParamGrid(
 #     ]
 # )
 
+#_params = ParamGrid(
+#    [
+#        ("seed", [1111, 2222, 3333, 4444, 5555]),
+#        ("learning_rate", [0.00002, 0.0001, 0.0002]),
+#        ("number_instruction_coef", [9, 200])
+#    ]
+#)
 
-
-vstr = "100_alt"
-prj = "ymaze_stage0_oracle"
+prj = "ymaze_HighLevelRNN_v3_100"
+vstr = "oracleZ_100_alt"
 
 cli = (
-    "--env=ymaze_hl_100_alt " # hl_100_alt has 100% reward alternating always
+    "--env=ymaze_hl_100_alt " # it has context if wanted to use
     f"--wandb_project={prj} "
-    #"--seed=42 "
+    # "--seed=42 "
     "--train_for_seconds=144000 "
     "--algo=APPO "
     "--gamma=0.99 "
@@ -72,7 +87,7 @@ cli = (
     "--batch_size=2048 "
     "--num_batches_per_epoch=2 "
     "--benchmark=False "
-    "--max_grad_norm=0.0 "
+    "--max_grad_norm=1.0 " # TRY 1 BECAUSE OF GRADIENT EXPLOSION WITH LORA, try default 0.0 for HL, still gradients very bad (tho not inf) so reverted back to 1.0 because it worked on 24.09.26 oracleZ runs
     "--dmlab_renderer=software "
     "--decorrelate_experience_max_seconds=120 "
     "--nonlinearity=relu "
@@ -97,42 +112,53 @@ cli = (
     "--decoder_mlp_layers 64 64 "
     "--env_frameskip=4 " # lowered from 8
     #"--dmlab_reduced_action_set=True "
-    "--dmlab_navigation_action_set=True " # better turning
-    "--core_name=BypassSS "
+    "--dmlab_navigation_action_set=True "
+    "--core_name=BypassSS_HighLevelRNN " # default was set to ByPassSS or try BypassSS_HighLevelRNN
     "--rnn_type=gru "
     "--DG_name=batchnorm_relu "
-    #"--learning_rate=0.0002 "
+    "--learning_rate=0.0002 " # default 
     "--fix_encoder_when_load=True "
     # "--encoder_load_path=/home/fr/fr_xl1014/training/best_000025288_203030528_reward_94.185.pth "
-    "--with_wandb=True " # set True to log to wandb, False to log to tensorboard 
+    "--with_wandb=True " # BE CAREFUL
     "--wandb_user=xiaoxionglin-bernstein-center-freiburg "
     "--pbt_mix_policies_in_one_env=False "
     "--pbt_target_objective=lenweighted_score "
-    "--with_number_instruction=True "
+    "--with_number_instruction=True " # keep it true, oracle_context = False blocks instruction input to encoder
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    "--number_instruction_coef=200 " ## increase if needed, default is 1
+    #"--number_instruction_coef=200 "
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1146 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER
+    "--rnn_size=1324 " # 1166 base + 8 trial records * (16 pre-event h + 2 mode + reward + valid)
     # "--exploration_loss_coeff=0.005 "
-    # "--value_loss_coeff=0.3 " 
-    #"--ppo_clip_ratio=0.25 " 
+    # "--value_loss_coeff=0.3 "
+    # "--ppo_clip_ratio=0.25 "
     # "--pbt_perturb_max=1.3 "
     # "--pbt_replace_fraction=0.2 "
     "--save_best_every_sec=30 "
     # "--decoder_type=sr_transformer "
-    "--oracle_context=True "
-    #"--DG_context_mod=sigmoid " # BE CAREFUL
-    #"--Decoder_context_mod=None " # BE CAREFUL
-    "--reward_scale=0.1 " ## LOWERED FROM 1
-    "--hl_K=0 "
-    "--hl_d_H=0 "
+    "--reward_input=False " # add + 1 to rnn size
+    "--DG_context_mod=None "
+    "--oracle_context=True " # set to true if stage1 HL_RNN will use oracle to fix z
+    #"--Decoder_context_mod=None " 
+    "--hl_K=2 " # MAKE THIS 4 FOR LEARNING Z, 2 FOR ORACLE Z. If 2, then rnn is 1324
+    "--hl_d_H=16 "
+    "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
+    "--hl_history_len=8 "
+    "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
+    #"--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
+    #"--hl_diversity_include_chosen_arm=True " # include the chosen arm in the classifier input for levels that return to an identical center view at outcome
+    "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
+    #"--context_injection_coef=200 "
 )
+
+
+_experiments = []
+
 
 _experiments = [
     Experiment(vstr, cli, _params.generate_params(False)),

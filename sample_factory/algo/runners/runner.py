@@ -354,16 +354,16 @@ class Runner(EventLoopObject, Configurable):
                 hi_miss_stats = self.policy_avg_stats.get("custom/highrew_miss", [[] for _ in range(self.cfg.num_policies)])[policy_id]
                 lo_hit_stats = self.policy_avg_stats.get("custom/lowrew_hit", [[] for _ in range(self.cfg.num_policies)])[policy_id]
                 lo_miss_stats = self.policy_avg_stats.get("custom/lowrew_miss", [[] for _ in range(self.cfg.num_policies)])[policy_id]
+                R_trials_stats = self.policy_avg_stats.get("custom/R_trials", [[] for _ in range(self.cfg.num_policies)])[policy_id]
+                L_trials_stats = self.policy_avg_stats.get("custom/L_trials", [[] for _ in range(self.cfg.num_policies)])[policy_id]
 
                 # --- NEW COUNTING LOGIC FOR BLOCKS ---
-                block_stats = self.policy_avg_stats.get("custom/instr_switch", [[] for _ in range(self.cfg.num_policies)])[policy_id] ## block stats of last 100 episodes as defaulted stats_avg in cfg.py
-                total_tracked = len(block_stats)
+                # Changed from instr to R/L trial counting for HL because there is no oracle instruction
+                R_mean = int(np.mean(R_trials_stats)) if len(R_trials_stats) > 0 else 0
+                L_mean = int(np.mean(L_trials_stats)) if len(L_trials_stats) > 0 else 0
+                total_tracked = R_mean + L_mean
                 if total_tracked > 0:
-                    # Count how many items in the list are Baseline (1.0) vs Reversed (2.0)
-                    baseline_count = sum(1 for val in block_stats if val < 1.5)
-                    reversed_count = sum(1 for val in block_stats if val >= 1.5)
-                    
-                    distribution_str = f"[{baseline_count}/{total_tracked} High at R | {reversed_count}/{total_tracked} High at L]"
+                    distribution_str = f"[{R_mean}/{total_tracked} High at R | {L_mean}/{total_tracked} High at L]"
                 # --------------------------
 
                 # Calculate means safely

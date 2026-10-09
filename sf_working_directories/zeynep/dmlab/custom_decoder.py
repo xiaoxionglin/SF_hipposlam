@@ -162,16 +162,22 @@ class MlpDecoderAdditiveJit(Decoder):
 
 def make_hipposlam_decoder(cfg: Config, core_input_size: int) -> Decoder:
     if cfg.core_name == "BypassSS_HighLevelRNN":
-        context_size = 4 # when using high-level RNN, K = 4 modes
+        if cfg.oracle_context:
+            context_size = 2 # for 2D oracle context
+        else:
+            context_size = 4 # for 4D learned context 
     else:
-        context_size = 2# for 2D oracle context to only low-level CA3 core
+        context_size = 2# for 2D oracle context 
     input_size = core_input_size - context_size # send depth features to MLP like original did. Context instead does additive modulation
     
     if getattr(cfg, "Decoder_context_mod") == "FiLM":
+        log.warning("FiLM context modulation to decoder.")
         return MlpDecoderFiLMJit(cfg, input_size, context_dim=context_size)
     elif getattr(cfg, "Decoder_context_mod") == "additive":
+        log.warning("Additive context modulation to decoder.")
         return MlpDecoderAdditiveJit(cfg, input_size, context_dim=context_size)
     else:
+        log.warning("Standard MLP decoder without context modulation (concatenation).")
         return MlpDecoderJit(cfg, core_input_size)
 
 ############################################################################

@@ -12,8 +12,8 @@ _params = ParamGrid(
         #("learning_rate", [0.00002, 0.0001]),
         #("seed", [2222]),
         #("DG_context_mod", ["concat", "sigmoid", "multiply"]),
-        ("Decoder_context_mod", ["additive"]),
-        ("context_injection_coef", [1, 9, 200]),
+        #("Decoder_context_mod", ["additive"]),
+        #("context_injection_coef", [1, 9, 200]),
     ]
 )
 
@@ -69,7 +69,7 @@ _params = ParamGrid(
 #)
 
 prj = "ymaze_HighLevelRNN_v2"
-vstr = "Q_classifier_logperK_gradclip"
+vstr = "Q_noclassifier_logperK_gradclip_concat"
 
 cli = (
     "--env=ymaze_instr_hl "
@@ -124,11 +124,11 @@ cli = (
     "--wandb_user=xiaoxionglin-bernstein-center-freiburg "
     "--pbt_mix_policies_in_one_env=False "
     "--pbt_target_objective=lenweighted_score "
-    "--with_number_instruction=True "
+    "--with_number_instruction=True " # keep it true, oracle_context = False blocks instruction input to encoder
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    "--number_instruction_coef=200 "
+    #"--number_instruction_coef=200 "
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
@@ -145,14 +145,14 @@ cli = (
     "--reward_input=False " # add + 1 to rnn size
     "--DG_context_mod=None "
     "--oracle_context=False " # set to true if stage1 HL_RNN will use oracle to fix z
-    #"--Decoder_context_mod=additive " 
+    "--Decoder_context_mod=None " 
     "--hl_K=4 "
     "--hl_d_H=16 "
     "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
     "--hl_history_len=8 "
     "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
-    "--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
-    "--hl_diversity_include_chosen_arm=True " # include the chosen arm in the classifier input for levels that return to an identical center view at outcome
+    #"--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
+    #"--hl_diversity_include_chosen_arm=True " # include the chosen arm in the classifier input for levels that return to an identical center view at outcome
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
     #"--context_injection_coef=200 "
 )

@@ -99,6 +99,28 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
 def make_hipposlam_actor_critic(cfg, obs_space, action_space) -> ActorCritic:
     # Use Sample Factory's default creation logic
     actor_critic = default_make_actor_critic_func(cfg, obs_space, action_space)
+
+    if getattr(cfg, "hl_train_fix_base", False):
+        log.warning("Fix encoder, base core, decoder. Only train high-level RNN and its loss.")
+
+        # 1. Freeze the vision
+        if hasattr(actor_critic, 'encoder'):
+            for param in actor_critic.encoder.parameters():
+                param.requires_grad = False
+        
+        if hasattr(actor_critic, 'core'):
+            if hasattr(actor_critic.core, 'base_core'):
+                for param in actor_critic.core.base_core.parameters():
+                    param.requires_grad = False
+            else:
+                log.warning("No base_core found in actor_critic.core. Skipping freezing base_core parameters.")
+
+        if hasattr(actor_critic, 'decoder'):
+            for param in actor_critic.decoder.parameters():
+                param.requires_grad = False
+
+
+
     if getattr(cfg, 'hl_diversity_reward_coef', 0.0) > 0.0:
         if cfg.core_name != 'BypassSS_HighLevelRNN':
             raise ValueError('High-level diversity reward requires BypassSS_HighLevelRNN')

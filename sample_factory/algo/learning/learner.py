@@ -1162,15 +1162,6 @@ class DefaultLearner(BaseLearner):
 
                     curr_policy_version = self.train_step  # policy version before the weight update
                     
-                    ## ADDED TO LOG INF ##
-                    total_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), float("inf")) # changed from max_grad_norm to inf to get the actual total grad norm
-                    if not torch.isfinite(total_grad_norm):
-                        log.error(
-                            f"Skipping optimizer step: non-finite total gradient norm={total_grad_norm}"
-                        )
-                        self.optimizer.zero_grad(set_to_none=True)
-                        return
-                    ######
                     actual_lr = self.curr_lr
                     if num_invalids > 0:
                         # if we have masked (invalid) data we should reduce the learning rate accordingly

@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from typing import Tuple, Dict
+from sample_factory.utils.utils import log
 
 # HighLevelContextRNN  —  §16, §18
 
@@ -40,18 +41,23 @@ class HighLevelContextRNN_Stage1(nn.Module):
             # If inst_block is provided, we can use it to select a mode deterministically
             # For example, if inst_block is 1, we select mode 0; if it's 2, we select mode 1, and so on.
             oracle_idx = torch.clamp(inst_block - 1, 0, 1)  # Ensure the index is within bounds
+            log.info(f"Using oracle Z.")
             z_candidate = F.one_hot(oracle_idx, num_classes=self.K).float()
         else:
             # Otherwise, we can randomly select a mode for testing purposes
             # This case Z has no correlation with where the actual reward is. Low-level policy considers z as "noise". 
             B = z_prev.size(0)
             random_indices = torch.randint(0, self.K, (B,), device=z_prev.device)
+            log.info(f"Randomly selecting modes.")
             z_candidate = F.one_hot(random_indices, num_classes=self.K).float()
 
         # 3. Latch the new mode only at outcome events
         # Keep z_prev unless it is at trigger (outcome event) then update to z_candidate
+
+        should_update = outcome_mask | (z_prev.sum(dim=-1) < 0.5)  # Update if it's an outcome event or if z_prev is all zeros (initial state)
+        
         z_new = torch.where(
-            outcome_mask[:, None],
+            should_update[:, None],
             z_candidate,
             z_prev,
         )

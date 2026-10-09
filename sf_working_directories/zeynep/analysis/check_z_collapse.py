@@ -43,10 +43,24 @@ def check_weight_collapse(checkpoint_path=None, exp_dir=None):
             break
 
     if z_weights is None:
-        print("❌ Could not find 'film_gamma.weight' or 'context_proj.weight' in the checkpoint!")
+        decoder_keys = [k for k in state_dict.keys() if 'decoder.mlp' in k and 'weight' in k]
+        
+        if decoder_keys:
+            # Sort the keys alphabetically/numerically so we guarantee we grab 
+            # the VERY FIRST layer (e.g., 'decoder.mlp.0.weight')
+            target_name = sorted(decoder_keys)[0]
+            full_weight = state_dict[target_name].detach()
+            
+            # Because z is concatenated at the end of the visual features,
+            # we slice exactly the last K columns!
+            z_weights = full_weight[:, -4:]
+    # Final Check
+    if z_weights is None:
+        print("❌ Could not find FiLM, Additive, or Concatenation weights in the checkpoint!")
         return
-
-    print(f"✅ Found trained Z-Modulation layer: {target_name} | Shape: {z_weights.shape}")
+        
+    print(f"✅ Extracted weights from: {target_name}")
+    print(f"   Shape of extracted z_weights: {z_weights.shape}")
     
     # 3. COMPUTE METRICS
     # nn.Linear weights are shape [out_features, in_features]
@@ -56,8 +70,13 @@ def check_weight_collapse(checkpoint_path=None, exp_dir=None):
         z_weights = z_weights.T
 
     K = z_weights.shape[1]
-    mod_type = "FiLM" if "film" in target_name else "Additive"
-
+    if "film" in target_name:
+        mod_type = "FiLM"
+    elif "additive" in target_name:
+        mod_type = "Additive"
+    else:
+        mod_type = "Concatenation"
+        
     print(f"Exact raw sum of all weights: {z_weights.sum().item()}")
     
     print("\n" + "="*50)
@@ -96,5 +115,5 @@ def check_weight_collapse(checkpoint_path=None, exp_dir=None):
 
 if __name__ == "__main__":
     # Specific checkpoint path provided
-    checkpoint_path = "/work/classic/fr_ze12-data/ymaze_newRNN/HighLevelChoice/stage2_rollout/noclassifier/run2_film_logperK_gradclip/train_dir/Q_noclassifier_logperK_gradclip/Q_noclassifier_logperK_gradclip_/04_Q_noclassifier_logperK_gradclip_see_5555_D.c.mod_FiLM/checkpoint_p2/checkpoint_000005894_46809088.pth"
+    checkpoint_path = "/work/classic/fr_ze12-data/ymaze_newRNN/HighLevelChoice/stage2_rollout/noclassifier/run3_concat/train_dir/Q_noclassifier_logperK_gradclip_concat/Q_noclassifier_logperK_gradclip_concat_/04_Q_noclassifier_logperK_gradclip_concat_see_5555/checkpoint_p2/checkpoint_000001684_13205504.pth"
     check_weight_collapse(checkpoint_path=checkpoint_path)

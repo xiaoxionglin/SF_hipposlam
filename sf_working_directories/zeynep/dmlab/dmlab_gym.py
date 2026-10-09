@@ -365,7 +365,7 @@ class DmlabGymEnv_custom(gym.Env):
             'highrew_hit', 'highrew_miss', 'lowrew_hit', 'lowrew_miss',
             'highrew_hit_total', 'highrew_miss_total',
             'lowrew_hit_total', 'lowrew_miss_total',
-            'flexibility', 'inst_block'
+            'flexibility', 'inst_block', "outcome_event", "prev_trial_reward", "chosen_arm"
         ]
 
         self.reward_input = reward_input
@@ -387,6 +387,8 @@ class DmlabGymEnv_custom(gym.Env):
         self.lo_hit_history = []
         self.lo_miss_history = []
         self.current_episode_step = 0
+        self._R_trials = 0
+        self._L_trials = 0
         ###########################
 
         config = {
@@ -403,7 +405,6 @@ class DmlabGymEnv_custom(gym.Env):
         self.high_level=high_level
         if self.high_level:
             log.warning("HighLevel mode is enabled for this environment!")
-            observation_format += ['outcome_event', 'prev_trial_reward', 'chosen_arm']
 
         self.render_mode: Optional[str] = render_mode
 
@@ -493,12 +494,12 @@ class DmlabGymEnv_custom(gym.Env):
                 shape=(1,),
                 dtype=np.float32,
             )
-            # self.observation_space.spaces["inst_block"] = gym.spaces.Box(
-            #     low=0,
-            #     high=2,
-            #     shape=(1,),
-            #     dtype=np.int32,
-            # )
+            self.observation_space.spaces["inst_block"] = gym.spaces.Box(
+                low=0,
+                high=2,
+                shape=(1,),
+                dtype=np.int32,
+         )
 
             self.observation_space.spaces["chosen_arm"] = gym.spaces.Box(
                 low=0,
@@ -554,18 +555,23 @@ class DmlabGymEnv_custom(gym.Env):
             ).reshape(1) 
 
         # Required for HL-RNN to know when a trial has ended and what the outcome was from obs dictionary:
-        if self.high_level:
-            chosen_arm = env_obs_dict.pop("chosen_arm", [0])
+        chosen_arm = env_obs_dict.pop("chosen_arm", [0])
+
+        outcome_event = env_obs_dict.pop("outcome_event", [0.0])
+        self._current_outcome_event = float(outcome_event[0])  # Store the current outcome event for internal tracking
+
+        prev_trial_reward = env_obs_dict.pop("prev_trial_reward", [0.0])
+
+        inst_block = env_obs_dict.pop("inst_block", [0])
+        self._inst_block = int(inst_block[0])  # Store the current instruction block for internal tracking
+
+        if getattr(self, "high_level", False):
+            log.info("HL Enabled: Adding chosen_arm, outcome_event, prev_trial_reward, and inst_block to observation dictionary that is returned to the agent.")
             env_obs_dict["chosen_arm"] = np.asarray(chosen_arm, dtype=np.int32).reshape(1)
-
-            outcome_event = env_obs_dict.pop("outcome_event", [0.0])
             env_obs_dict["outcome_event"] = np.asarray(outcome_event, dtype=np.float32).reshape(1)
-
-            prev_trial_reward = env_obs_dict.pop("prev_trial_reward", [0.0])
             env_obs_dict["prev_trial_reward"] = np.asarray(prev_trial_reward, dtype=np.float32).reshape(1)
-
-            inst_block = env_obs_dict.pop("inst_block", [0])
             env_obs_dict["inst_block"] = np.asarray(inst_block, dtype=np.int32).reshape(1)
+            
         ##########################################
 
         if instr is not None:
@@ -594,7 +600,8 @@ class DmlabGymEnv_custom(gym.Env):
         self._total_lo_miss = float(env_obs_dict.pop('lowrew_miss_total', [0.0])[0])
 
         self._flexibility = float(env_obs_dict.pop('flexibility', [0.0])[0])
-        #self._inst_block = int(env_obs_dict.pop('inst_block', [0])[0])
+        #self._inst_block = int(env_obs_dict.pop('inst_block', [0])[0]) # WHEN USING Q LEARNING FOR HL POP IT!
+        #self._inst_block = int(env_obs_dict.get('inst_block', [0])[0])  # Use get to avoid KeyError if not present
         # -----------------------------------------
 
       # if self.with_pos_obs:
@@ -657,6 +664,14 @@ class DmlabGymEnv_custom(gym.Env):
         info["lowrew_hit"] = getattr(self, '_temp_lo_hit', 0.0) > 0
         info["lowrew_miss"] = getattr(self, '_temp_lo_miss', 0.0) > 0
 
+        ## COUNT TRIALS PER BLOCKS AS THEY HAPPEN ##
+        if getattr(self, "_current_outcome_event", 0.0) > 0.5:
+            current_block = getattr(self, "_inst_block", 1)
+            if current_block < 1.5:
+                self._R_trials += 1
+            else:
+                self._L_trials += 1
+
 
         if terminated or truncated:
             if "episode_extra_stats" not in info:
@@ -672,6 +687,9 @@ class DmlabGymEnv_custom(gym.Env):
             total_incorrect = self._total_hi_miss + self._total_lo_miss
             total_trials = total_correct + total_incorrect
             info["episode_extra_stats"]["custom/arm_obedience"] = total_correct / total_trials if total_trials > 0 else 0.0
+            
+            info["episode_extra_stats"]["custom/R_trials"] = self._R_trials
+            info["episode_extra_stats"]["custom/L_trials"] = self._L_trials
 
             info["episode_extra_stats"]["custom/flexibility"] = self._flexibility
 
@@ -686,6 +704,8 @@ class DmlabGymEnv_custom(gym.Env):
             info["lo_miss_history"] = self.lo_miss_history.copy()
 
             # Reset local step clocks and history
+            self._R_trials = 0
+            self._L_trials = 0
             self.current_episode_step = 0
             self.hi_hit_history.clear()
             self.hi_miss_history.clear()
