@@ -1,5 +1,21 @@
 # Initialize a high-level RNN from an oracle controller
 
+## Note for Zeynep
+
+This adds a way to start a new high-level RNN experiment from **one oracle checkpoint that you choose**. The checkpoint supplies the visual encoder, DG, base sequence core, decoder, action head, critic, and observation-normalization state. Its first two trained decoder modes become the two learned modes. The high-level RNN, optimizer, and training counters start fresh. The transferred action controller is frozen by default while the high-level RNN and critic train.
+
+In your existing `experiments/exp_ymaze_HLRNN.py` launcher, give the new experiment a unique name and add this option to its `cli` string:
+
+```text
+--oracle_init_checkpoint=/absolute/path/to/oracle_run/checkpoint_pN/best_....pth
+```
+
+Choose the policy-specific `checkpoint_pN` file yourself. The code does not rank W&B runs or download checkpoints. Use a checkpoint whose companion run config describes a four-mode oracle high-level run with DG conditioning (`concat`, `multiply`, or `sigmoid`) and either `FiLM` or `additive` decoder conditioning. The loader checks tensor shapes before training and reports the incompatible tensor if the architecture differs.
+
+For a later fine-tuning configuration, add `--oracle_freeze_controller=False`. The source checkpoint is needed for the initial run only; a target run's own checkpoint takes priority when resuming. Compare episode length, flexibility, and `highrew_hit` with the chosen oracle and a fresh high-level run before drawing a performance conclusion. The local tests cover the transfer and replay behavior; a full training smoke test still needs your checkpoint and training environment.
+
+## Direct CLI example
+
 Pass an exact local oracle checkpoint to `train_hipposlam.py` when starting a **new** experiment:
 
 ```bash
