@@ -847,10 +847,17 @@ class HipposlamEncoder(Encoder):
             tmp_out = self.DG_projection(x)
             
                 # Bypass carries instructions (and depth if present)
-            if self.depth_sensor:
-                bypass_out = torch.cat((depth_out, last_outputs), dim=1)
+            if getattr(self, "dg_only_no_bypass_instr", False):
+                if self.depth_sensor:
+                    bypass_out = depth_out
+                else:
+                    bypass_out = x
             else:
-                bypass_out = last_outputs
+                if self.depth_sensor:
+                    bypass_out = torch.cat((depth_out, last_outputs), dim=1)
+                else:
+                    bypass_out = last_outputs
+
             
         elif DG_mod != "None" and Dec_mod != "None":
                 # 3. DG + Decoder context: instructions modulate DG AND are visible to decoder
@@ -868,10 +875,16 @@ class HipposlamEncoder(Encoder):
                 tmp_out = self.DG_projection(x)
             
                 # Bypass also carries raw instructions (and depth if present)
-            if self.depth_sensor:
-                bypass_out = torch.cat((depth_out, last_outputs), dim=1)
+            if getattr(self, "dg_only_no_bypass_instr", False):
+                if self.depth_sensor:
+                    bypass_out = depth_out
+                else:
+                    bypass_out = x
             else:
-                bypass_out = last_outputs
+                if self.depth_sensor:
+                    bypass_out = torch.cat((depth_out, last_outputs), dim=1)
+                else:
+                    bypass_out = last_outputs
             
         else:
                 # 0. No context: plain DG + optional visual/depth bypass

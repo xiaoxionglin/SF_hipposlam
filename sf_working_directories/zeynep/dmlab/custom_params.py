@@ -71,7 +71,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     ##### ADDED ##### 
     ##      Oracle context modulation parameters (DG & Decoder)      ##
     p.add_argument("--DG_context_mod", default="None", type=str, choices=["None", "concat", "multiply", "sigmoid"], help="Whether to use context modulation in the DG layer.")
-    p.add_argument("--Decoder_context_mod", default="None", type=str, choices=["None", "enter", "FiLM", "additive"], help="Whether to use context modulation in the decoder layer.")
+    p.add_argument("--Decoder_context_mod", default="None", type=str, choices=["None", "concat", "FiLM", "additive"], help="Whether to use context modulation in the decoder layer.")
     p.add_argument("--reward_input", default=False, type=str2bool, help="Whether to use the reward input as an additional input to the encoder.")
     p.add_argument("--oracle_context", default=False, type=str2bool, help="Whether to enable instruction-driven oracle context in the encoder.")
     ##       Context Inference Module        ## 
