@@ -585,6 +585,17 @@ class HipposlamEncoder(Encoder):
         
         self.reward_input = getattr(cfg, "reward_input", False) ## ADDED 
 
+        ## 11.10.2026 ADDED High-Level mode DG modulation initialization ##
+        self.hl_DG_mod = getattr(cfg, "hl_DG_mod", "None")
+        self.high_level = bool(cfg.core_name and "HighLevel" in cfg.core_name)
+        if self.high_level:
+            log.warning("HighLevel core is enabled")
+            self.reward_input = False
+            self.dg_only_no_bypass_instr = True
+            self.hl_K = getattr(cfg, "hl_K", 4)
+            self.current_hl_z = None
+        ###################################################################
+
         self.with_number_instruction = cfg.with_number_instruction
         self.number_instruction_coef = getattr(cfg, "number_instruction_coef", 1)
         if self.oracle_context and self.with_number_instruction:
@@ -620,10 +631,19 @@ class HipposlamEncoder(Encoder):
         # Instructions enter DG only in concat mode. Instead of doing substraction like previously, we will add them to the encoder output size only in concat mode. 31.08.26
         if self.oracle_context and self.DG_context_mod == "concat":
             self.encoder_out_size += self.instructions_lstm_units
+        ## 11.10.2026 ADDED High-Level mode concat to DG input size ##
+        if self.high_level and self.hl_DG_mod == "concat":
+            self.encoder_out_size += self.hl_K
 
         needs_context = self.oracle_context and (self.DG_context_mod == "multiply" or self.DG_context_mod == "sigmoid" or self.Decoder_context_mod != "None")
         if needs_context:
             self.instruction_embed_layer = nn.Linear(self.instructions_lstm_units, cfg.Hippo_n_feature)
+
+        ## 11.10.2026 ADDED High-Level mode embedding layer for multiply/sigmoid DG modulation ##
+        if self.high_level and self.hl_DG_mod in ("multiply", "sigmoid"):
+            self.hl_mode_embed_layer = nn.Linear(self.hl_K, cfg.Hippo_n_feature)
+            nn.init.orthogonal_(self.hl_mode_embed_layer.weight)
+            nn.init.ones_(self.hl_mode_embed_layer.bias)
         ###################################################################################################
 
         log.info("DMLab policy head output size: %r", self.encoder_out_size)
@@ -660,9 +680,11 @@ class HipposlamEncoder(Encoder):
             )
         elif cfg.DG_name == "batchnorm_relu":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
+            # modulate=(self.DG_context_mod == "multiply") # ADDED - PREVIOUS
+            # 11.10.2026 ADDED: modulate with hl_DG_mod as well
             self.DG_projection = DGProjection_batchnorm_relu(
                 self.encoder_out_size, cfg.Hippo_n_feature, intercept=intercept,
-                modulate=(self.DG_context_mod == "multiply") # ADDED
+                modulate=(self.DG_context_mod == "multiply" or (self.high_level and self.hl_DG_mod == "multiply"))
             )
         elif cfg.DG_name == "batchnorm_relu_fixed":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
@@ -753,6 +775,11 @@ class HipposlamEncoder(Encoder):
             return torch.int64
         return torch.float32
 
+    ## 11.10.2026 ADDED Helper to set latched high-level mode vector ##
+    def set_hl_z(self, z):
+        self.current_hl_z = z
+    ###################################################################
+
     def forward(self, obs_dict):
         # obs_cnn = obs_dict["obs"].copy()
         if self.depth_sensor:
@@ -811,7 +838,8 @@ class HipposlamEncoder(Encoder):
         DG_mod = self.DG_context_mod if self.oracle_context else "None"
         Dec_mod = self.Decoder_context_mod if self.oracle_context else "None"
         if getattr(self, 'high_level', False):
-            Dec_mod = "None"
+            # Dec_mod = "None" # PREVIOUS
+            pass # 11.10.2026 ADDED: allow decoder to use z_t for context modulation
 
         depth_out = None
         if self.depth_sensor:
@@ -819,7 +847,38 @@ class HipposlamEncoder(Encoder):
             depth_out = depth_out.view(obs_dict["obs"].size(0), -1)
                 
                 # ===== Regime selection =====
-        if DG_mod != "None" and Dec_mod == "None":
+        ## 11.10.2026 ADDED High-level mode DG modulation regime ##
+        if self.high_level and self.hl_DG_mod != "None":
+            hl_z = obs_dict.get("hl_z", getattr(self, "current_hl_z", None))
+            if hl_z is None:
+                hl_z = x.new_zeros(x.shape[0], self.hl_K)
+            else:
+                if hl_z.dim() == 1:
+                    hl_z = hl_z.unsqueeze(0)
+                if hl_z.shape[0] != x.shape[0]:
+                    hl_z = hl_z.expand(x.shape[0], -1)
+                hl_z = hl_z.to(device=x.device, dtype=x.dtype)
+
+            if self.hl_DG_mod == "multiply":
+                embedded_mode = self.hl_mode_embed_layer(hl_z)
+                tmp_out = self.DG_projection(x, context=embedded_mode)
+            elif self.hl_DG_mod == "sigmoid":
+                embedded_mode = torch.sigmoid(self.hl_mode_embed_layer(hl_z))
+                tmp_out = self.DG_projection(x) * embedded_mode
+            elif self.hl_DG_mod == "concat":
+                x_cat = torch.cat((x, hl_z), dim=1)
+                tmp_out = self.DG_projection(x_cat)
+            else:
+                tmp_out = self.DG_projection(x)
+
+            if getattr(self, "dg_only_no_bypass_instr", False):
+                if self.depth_sensor: bypass_out = depth_out
+                else: bypass_out = x
+            else:
+                if self.depth_sensor: bypass_out = depth_out
+                else: bypass_out = x
+
+        elif DG_mod != "None" and Dec_mod == "None":
                 # 1. DG-only context: instructions modulate DG, do NOT go to decoder/bypass
                 # No concat of instructions into x here: context only via embedded_instr
             if DG_mod == "multiply":
