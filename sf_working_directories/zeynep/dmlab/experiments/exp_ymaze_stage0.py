@@ -7,11 +7,11 @@ _params = ParamGrid(
         # -------------------------------------------------
         # Seeds
         ("seed", [1111, 2222, 3333, 4444, 5555]),
-        #("number_instruction_coef", [9, 200]),
+        ("number_instruction_coef", [9, 200]),
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
-        ("DG_context_mod", ["concat", "multiply", "sigmoid", "None"]),
-        ("Decoder_context_mod", ["None"]), # verify rnn_size
+        ("DG_context_mod", ["concat","multiply", "sigmoid"]), # verify rnn_size
+        ("Decoder_context_mod", ["concat", "FiLM"]), # verify rnn_size
         #("seed", [2222]),
         #("context_injection_coef", [1, 200]),
     ]
@@ -52,8 +52,8 @@ _params = ParamGrid(
 
 
 
-vstr = "100_alt"
-prj = "ymaze_stage0_oracle"
+vstr = "100alt"
+prj = "ymaze_stage0_oracle_v2"
 
 cli = (
     "--env=ymaze_hl_100_alt " # hl_100_alt has 100% reward alternating always
@@ -72,7 +72,7 @@ cli = (
     "--batch_size=2048 "
     "--num_batches_per_epoch=2 "
     "--benchmark=False "
-    "--max_grad_norm=0.0 "
+    "--max_grad_norm=1.0 "
     "--dmlab_renderer=software "
     "--decorrelate_experience_max_seconds=120 "
     "--nonlinearity=relu "
@@ -112,13 +112,13 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    "--number_instruction_coef=200 " ## increase if needed, default is 1
+    #"--number_instruction_coef=200 " ## increase if needed, default is 1
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1146 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER
+    "--rnn_size=1148 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER 1148
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 " 
     #"--ppo_clip_ratio=0.25 " 

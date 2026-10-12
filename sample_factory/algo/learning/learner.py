@@ -568,6 +568,13 @@ class BaseLearner(Configurable):
 
         # calculate policy head outside of recurrent loop
         with self.timing.add_time("forward_head"):
+            ## 11.10.2026 ADDED: pass actor recorded mode mb.hl_z to normalized_obs and encoder before forward_head ##
+            if getattr(self.cfg, "core_name", None) == "BypassSS_HighLevelRNN" and hasattr(mb, "hl_z"):
+                mb.normalized_obs["hl_z"] = mb.hl_z
+                for enc in getattr(self.actor_critic, "encoders", [getattr(self.actor_critic, "encoder", None)]):
+                    if enc is not None and hasattr(enc, "set_hl_z"):
+                        enc.set_hl_z(mb.hl_z)
+            #########################################################################################################
             head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
             if getattr(self.cfg, "core_name", None) == "BypassSS_HighLevelRNN":
                 # The environment reward belongs to the option selected by

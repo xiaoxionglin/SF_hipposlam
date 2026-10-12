@@ -71,7 +71,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     ##### ADDED ##### 
     ##      Oracle context modulation parameters (DG & Decoder)      ##
     p.add_argument("--DG_context_mod", default="None", type=str, choices=["None", "concat", "multiply", "sigmoid"], help="Whether to use context modulation in the DG layer.")
-    p.add_argument("--Decoder_context_mod", default="None", type=str, choices=["None", "enter", "FiLM", "additive"], help="Whether to use context modulation in the decoder layer.")
+    p.add_argument("--Decoder_context_mod", default="None", type=str, choices=["None", "concat", "FiLM", "additive"], help="Whether to use context modulation in the decoder layer.")
     p.add_argument("--reward_input", default=False, type=str2bool, help="Whether to use the reward input as an additional input to the encoder.")
     p.add_argument("--oracle_context", default=False, type=str2bool, help="Whether to enable instruction-driven oracle context in the encoder.")
     ##       Context Inference Module        ## 
@@ -99,6 +99,13 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--hl_train_fix_base", default=False, type=str2bool,
                    help="Freeze encoder, base core, and decoder; only train the high-level RNN.")
     p.add_argument("--context_injection_coef", default=1.0, type=float, help="Coefficient for scaling the context vector before injection into the decoder.")
+    ## 11.10.2026 ADDED High Level mode → DG modulation ##
+    p.add_argument("--hl_DG_mod", default="None", type=str,
+                   choices=["None", "multiply", "sigmoid", "concat"],
+                   help="How the high-level mode vector modulates DG projection. "
+                        "'multiply' = inside DG between linear and batchnorm; "
+                        "'sigmoid' = post-DG gating via sigmoid(embed(z)); "
+                        "'concat' = concatenate mode vector with visual features before DG projection.")
     ###################  
 
     p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")

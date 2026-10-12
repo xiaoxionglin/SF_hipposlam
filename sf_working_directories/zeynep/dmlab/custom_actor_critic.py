@@ -40,6 +40,33 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
         # Value bootstrap must follow the same mode policy as acting. A greedy
         # mode here biases the target when the actor samples at trial boundaries.
         result_dict = original_forward(*args, **kwargs)
+        values_only = kwargs.get('values_only', args[2] if len(args) > 2 else False)
+        selector = getattr(core, 'hl_learner', None)
+        # Bootstrap values should be reproducible. Actor action collection
+        # still samples unless hl_deterministic was explicitly configured.
+        previous_deterministic = selector.deterministic if selector is not None else None # PPO guesses the value of next state (bootstrapping). Force deterministic only during value-guessing step to keep math clean.
+        if selector is not None and values_only:
+            selector.deterministic = True # When passed the 64 rollout frames, make a guess and bypass the sampling of high-level mode. This is only for bootstrapping the value function, not for training the high-level RNN.
+
+        ## 11.10.2026 ADDED: propagate latched mode z_prev to encoder before forward_head ##
+        if getattr(actor_critic.cfg, 'core_name', None) == 'BypassSS_HighLevelRNN':
+            normalized_obs_dict = args[0] if len(args) > 0 else kwargs.get('normalized_obs_dict')
+            rnn_states = args[1] if len(args) > 1 else kwargs.get('rnn_states')
+            if rnn_states is not None:
+                K = actor_critic.cfg.hl_K
+                z_prev = rnn_states[:, -K:].clone()
+                if normalized_obs_dict is not None and isinstance(normalized_obs_dict, dict):
+                    normalized_obs_dict["hl_z"] = z_prev
+                for enc in getattr(actor_critic, "encoders", [getattr(actor_critic, "encoder", None)]):
+                    if enc is not None and hasattr(enc, "set_hl_z"):
+                        enc.set_hl_z(z_prev)
+        ######################################################################################
+
+        try:
+            result_dict = original_forward(*args, **kwargs)
+        finally:
+            if selector is not None:
+                selector.deterministic = previous_deterministic 
 
         if getattr(actor_critic.cfg, 'core_name', None) == 'BypassSS_HighLevelRNN':
             # This is the mode actually used by the actor's decoder at this step.
@@ -96,7 +123,12 @@ def make_hipposlam_actor_critic(cfg, obs_space, action_space) -> ActorCritic:
 
         # 1. Freeze the vision
         if hasattr(actor_critic, 'encoder'):
-            for param in actor_critic.encoder.parameters():
+            # for param in actor_critic.encoder.parameters(): # PREVIOUS
+            #     param.requires_grad = False
+            ## 11.10.2026 ADDED: Keep hl_mode_embed trainable with high-level RNN ##
+            for name, param in actor_critic.encoder.named_parameters():
+                if "hl_mode_embed" in name:
+                    continue  # Keep high-level mode modulation trainable with high-level RNN
                 param.requires_grad = False
         
         if hasattr(actor_critic, 'core'):
