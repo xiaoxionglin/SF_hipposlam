@@ -72,7 +72,8 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
             existing_extra_stats = info.get("episode_extra_stats", dict())
             #############
 
-            info["episode_extra_stats"] = dict()
+            #info["episode_extra_stats"] = dict() # this used to wipe it out empty
+            info["episode_extra_stats"] = existing_extra_stats.copy()  # this keeps the existing stats from dmlab_gym
             level_name = self.unwrapped.level_name
 
             # add extra 'z_' to the summary key to put them towards the end on tensorboard (just convenience)
@@ -94,14 +95,14 @@ class DmlabRewardShapingWrapper(gym.Wrapper):
             info["episode_extra_stats"]["custom/lowrew_hit"] = float(self.lo_hit_count)
             info["episode_extra_stats"]["custom/lowrew_miss"] = float(self.lo_miss_count)
 
-            info["episode_extra_stats"]["custom/flexibility"] = existing_extra_stats.get("custom/flexibility", 0.0)
-            info["episode_extra_stats"]["custom/instr_switch"] = existing_extra_stats.get("custom/instr_switch", 1)
+            #info["episode_extra_stats"]["custom/flexibility"] = existing_extra_stats.get("custom/flexibility", 0.0)
+            #info["episode_extra_stats"]["custom/instr_switch"] = existing_extra_stats.get("custom/instr_switch", 1)
 
-            info["episode_extra_stats"]["custom/R_trials"] = existing_extra_stats.get("custom/R_trials", 0)
-            info["episode_extra_stats"]["custom/L_trials"] = existing_extra_stats.get("custom/L_trials", 0)
+            #info["episode_extra_stats"]["custom/R_trials"] = existing_extra_stats.get("custom/R_trials", 0)
+            #info["episode_extra_stats"]["custom/L_trials"] = existing_extra_stats.get("custom/L_trials", 0)
             
             #info["episode_extra_stats"]["custom/instr_block"] = existing_extra_stats.get("custom/instr_block", 0)
-            info["episode_extra_stats"]["custom/arm_obedience"] = existing_extra_stats.get("custom/arm_obedience", 0.0)
+            #info["episode_extra_stats"]["custom/arm_obedience"] = existing_extra_stats.get("custom/arm_obedience", 0.0)
 
             # --- PACKAGE TIMELINES FOR YOUR LOCAL THESIS DATA ---
             info["hi_hit_history"] = self.hi_hit_history.copy()

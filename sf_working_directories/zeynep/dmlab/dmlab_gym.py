@@ -365,8 +365,10 @@ class DmlabGymEnv_custom(gym.Env):
             'highrew_hit', 'highrew_miss', 'lowrew_hit', 'lowrew_miss',
             'highrew_hit_total', 'highrew_miss_total',
             'lowrew_hit_total', 'lowrew_miss_total',
-            'flexibility', 'inst_block', "outcome_event", "prev_trial_reward", "chosen_arm"
-        ]
+            'flexibility', 'inst_block', 
+        ] #'outcome_event', 'prev_trial_reward', 'chosen_arm'
+
+        observation_format += ["outcome_event", "prev_trial_reward", "inst_block", "chosen_arm"]
 
         self.reward_input = reward_input
         if not self.reward_input:
@@ -389,6 +391,10 @@ class DmlabGymEnv_custom(gym.Env):
         self.current_episode_step = 0
         self._R_trials = 0
         self._L_trials = 0
+
+        # Initialize variables to track the current chosen arm, and previous trial reward
+        self.chosen_arm_history = []
+        self.prev_reward_history = []
         ###########################
 
         config = {
@@ -405,6 +411,8 @@ class DmlabGymEnv_custom(gym.Env):
         self.high_level=high_level
         if self.high_level:
             log.warning("HighLevel mode is enabled for this environment!")
+            
+            
 
         self.render_mode: Optional[str] = render_mode
 
@@ -555,18 +563,21 @@ class DmlabGymEnv_custom(gym.Env):
             ).reshape(1) 
 
         # Required for HL-RNN to know when a trial has ended and what the outcome was from obs dictionary:
+
         chosen_arm = env_obs_dict.pop("chosen_arm", [0])
+        self._current_chosen_arm = float(chosen_arm[0])  # Store the current chosen arm for internal tracking
 
         outcome_event = env_obs_dict.pop("outcome_event", [0.0])
         self._current_outcome_event = float(outcome_event[0])  # Store the current outcome event for internal tracking
-
+        
         prev_trial_reward = env_obs_dict.pop("prev_trial_reward", [0.0])
+        self._current_prev_trial_reward = float(prev_trial_reward[0])  # Store the previous trial reward for internal tracking
 
         inst_block = env_obs_dict.pop("inst_block", [0])
         self._inst_block = int(inst_block[0])  # Store the current instruction block for internal tracking
 
         if getattr(self, "high_level", False):
-            log.info("HL Enabled: Adding chosen_arm, outcome_event, prev_trial_reward, and inst_block to observation dictionary that is returned to the agent.")
+            #log.info("HL Enabled: Adding chosen_arm, outcome_event, prev_trial_reward, and inst_block to observation dictionary that is returned to the agent.")
             env_obs_dict["chosen_arm"] = np.asarray(chosen_arm, dtype=np.int32).reshape(1)
             env_obs_dict["outcome_event"] = np.asarray(outcome_event, dtype=np.float32).reshape(1)
             env_obs_dict["prev_trial_reward"] = np.asarray(prev_trial_reward, dtype=np.float32).reshape(1)
@@ -626,6 +637,10 @@ class DmlabGymEnv_custom(gym.Env):
         self.hi_miss_history = []
         self.lo_hit_history = []
         self.lo_miss_history = []
+
+        # History lists for tracking chosen arm and previous trial reward
+        self.chosen_arm_history = []
+        self.prev_reward_history = []
         # -----------------------------------------------
 
         # Debugging: Print the expected and actual observation shapes
@@ -664,6 +679,10 @@ class DmlabGymEnv_custom(gym.Env):
         info["lowrew_hit"] = getattr(self, '_temp_lo_hit', 0.0) > 0
         info["lowrew_miss"] = getattr(self, '_temp_lo_miss', 0.0) > 0
 
+        info["chosen_arm"] = getattr(self, '_current_chosen_arm', 0)
+        info["prev_trial_reward"] = getattr(self, '_current_prev_trial_reward', 0.0)
+        info["outcome_event"] = getattr(self, '_current_outcome_event', 0.0) > 0.5
+
         ## COUNT TRIALS PER BLOCKS AS THEY HAPPEN ##
         if getattr(self, "_current_outcome_event", 0.0) > 0.5:
             current_block = getattr(self, "_inst_block", 1)
@@ -671,6 +690,11 @@ class DmlabGymEnv_custom(gym.Env):
                 self._R_trials += 1
             else:
                 self._L_trials += 1
+
+            # ADDED: Record trial-by-trial choice & reward history
+            if self._current_chosen_arm > 0:
+                self.chosen_arm_history.append(self._current_chosen_arm)
+                self.prev_reward_history.append(self._current_prev_trial_reward)
 
 
         if terminated or truncated:
@@ -695,9 +719,17 @@ class DmlabGymEnv_custom(gym.Env):
 
             info["episode_extra_stats"]["custom/instr_switch"] = self._last_instruction 
 
+            ## ADDED: Record trial-by-trial choice & reward history
+            total_choices = len(self.chosen_arm_history)
+            r_choices = sum(1 for choice in self.chosen_arm_history if choice == 1)
+            info["episode_extra_stats"]["custom/R_choice_ratio"] = r_choices / total_choices if total_choices > 0 else 0.0
+
             #info["episode_extra_stats"]["custom/inst_block"] = self._inst_block
             
             # Save raw step histories locally
+            info["chosen_arm_history"] = self.chosen_arm_history.copy()
+            info["prev_reward_history"] = self.prev_reward_history.copy()
+
             info["hi_hit_history"] = self.hi_hit_history.copy()
             info["hi_miss_history"] = self.hi_miss_history.copy()
             info["lo_hit_history"] = self.lo_hit_history.copy()

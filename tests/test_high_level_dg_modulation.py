@@ -162,6 +162,12 @@ def make_test_cfg(**kwargs):
         "rnn_type": "gru",
         "decoder_mlp_layers": [32],
         "policy_initialization": "orthogonal",
+        "res_h": 72,
+        "res_w": 96,
+        "DG_lr": False,
+        "DG_temperature": False,
+        "DG_batch_q": False,
+        "DG_softmax": False,
     }
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
@@ -169,9 +175,10 @@ def make_test_cfg(**kwargs):
 
 def make_encoder_with_mock_backbone(cfg, visual_dim=32):
     """Instantiates encoder with a fast mock visual backbone."""
-    obs_space = SimpleNamespace(shape=(3, 16, 16))
+    # obs_space = SimpleNamespace(shape=(3, 16, 16)) # PREVIOUS
+    # 11.10.2026 ADDED: wrap in dict for HipposlamEncoder obs_space['obs']
+    obs_space = {"obs": SimpleNamespace(shape=(3, getattr(cfg, "res_h", 72), getattr(cfg, "res_w", 96)))}
     encoder = ModulatedEncoderTarget(cfg, obs_space)
-    # Replace basic_encoder with lightweight mock for fast synthetic test
     encoder.basic_encoder = MockVisualBackbone(in_channels=3, out_dim=visual_dim)
     return encoder
 
@@ -183,7 +190,7 @@ class TestHighLevelDGModulation(unittest.TestCase):
         in_dim = 32
         out_dim = 16
         K = 4
-        dg = DGProjection_batchnorm_relu(in_dim, out_dim, intercept=1.0, modulate=True)
+        dg = DGProjection_batchnorm_relu(in_dim, out_dim, intercept=0.0, modulate=True)
         mode_embed = nn.Linear(K, out_dim)
         nn.init.orthogonal_(mode_embed.weight)
         nn.init.ones_(mode_embed.bias)
@@ -224,22 +231,19 @@ class TestHighLevelDGModulation(unittest.TestCase):
         """Ensures encoder forward generates different representations for different modes."""
         cfg = make_test_cfg(hl_DG_mod="multiply")
         encoder = make_encoder_with_mock_backbone(cfg)
-        encoder.eval()
+        # encoder.eval()  <-- REMOVE (keep in train mode like real training)
+        obs_dict = {}
+        img = torch.randn(32, 3, 16, 16)
+        obs_dict["obs"] = img
+        obs_dict["chosen_arm"] = torch.zeros(32, 1)
+        obs_dict["outcome_event"] = torch.zeros(32, 1)
+        obs_dict["prev_trial_reward"] = torch.zeros(32, 1)
 
-        img = torch.randn(2, 3, 16, 16)
-        obs_dict = {
-            "obs": img,
-            "chosen_arm": torch.zeros(2, 1),
-            "outcome_event": torch.zeros(2, 1),
-            "prev_trial_reward": torch.zeros(2, 1),
-        }
-
-        # Run with mode 0
-        obs_dict["hl_z"] = F.one_hot(torch.tensor([0, 0]), num_classes=4).float()
+        # Mode 0: 32 zeros
+        obs_dict["hl_z"] = F.one_hot(torch.zeros(32, dtype=torch.long), num_classes=4).float()
         out_mode0 = encoder(obs_dict)
-
-        # Run with mode 1
-        obs_dict["hl_z"] = F.one_hot(torch.tensor([1, 1]), num_classes=4).float()
+        # Mode 1: 32 ones
+        obs_dict["hl_z"] = F.one_hot(torch.ones(32, dtype=torch.long), num_classes=4).float()
         out_mode1 = encoder(obs_dict)
 
         # DG features are the first 16 dimensions
@@ -264,25 +268,26 @@ class TestHighLevelDGModulation(unittest.TestCase):
         }
         # Should not raise any KeyError or crash
         out = encoder(obs_dict)
-        self.assertEqual(out.shape, (2, 19))
+        self.assertEqual(out.shape, (2, 51))
 
     def test_05_encoder_set_hl_z_method(self):
         """Verifies set_hl_z(z) method correctly influences forward pass when hl_z is omitted from dict."""
         cfg = make_test_cfg(hl_DG_mod="multiply")
         encoder = make_encoder_with_mock_backbone(cfg)
-        encoder.eval()
+        #encoder.eval()
 
         obs_dict = {
-            "obs": torch.randn(1, 3, 16, 16),
-            "chosen_arm": torch.zeros(1, 1),
-            "outcome_event": torch.zeros(1, 1),
-            "prev_trial_reward": torch.zeros(1, 1),
+            "obs": torch.randn(32, 3, 16, 16),
+            "chosen_arm": torch.zeros(32, 1),
+            "outcome_event": torch.zeros(32, 1),
+            "prev_trial_reward": torch.zeros(32, 1),
         }
 
-        encoder.set_hl_z(F.one_hot(torch.tensor([0]), num_classes=4).float())
+        # Mode 0 for all 32 samples
+        encoder.set_hl_z(F.one_hot(torch.zeros(32, dtype=torch.long), num_classes=4).float())
         out0 = encoder(obs_dict)[:, :16]
-
-        encoder.set_hl_z(F.one_hot(torch.tensor([2]), num_classes=4).float())
+        # Mode 2 for all 32 samples
+        encoder.set_hl_z(F.one_hot(torch.full((32,), 2, dtype=torch.long), num_classes=4).float())
         out2 = encoder(obs_dict)[:, :16]
 
         self.assertFalse(
@@ -299,6 +304,7 @@ class TestHighLevelDGModulation(unittest.TestCase):
         state = torch.zeros(1, core.get_core_state_size())
         num_steps = 10
         outcomes_seen = 0
+        encoder.eval()
 
         for step in range(num_steps):
             is_outcome = 1.0 if step in (3, 7) else 0.0
@@ -339,11 +345,11 @@ class TestHighLevelDGModulation(unittest.TestCase):
         encoder = make_encoder_with_mock_backbone(cfg)
 
         obs_dict = {
-            "obs": torch.randn(4, 3, 16, 16),
-            "chosen_arm": torch.zeros(4, 1),
-            "outcome_event": torch.zeros(4, 1),
-            "prev_trial_reward": torch.zeros(4, 1),
-            "hl_z": F.one_hot(torch.tensor([0, 1, 2, 3]), num_classes=4).float(),
+            "obs": torch.randn(32, 3, 16, 16),
+            "chosen_arm": torch.zeros(32, 1),
+            "outcome_event": torch.zeros(32, 1),
+            "prev_trial_reward": torch.zeros(32, 1),
+            "hl_z": F.one_hot(torch.arange(32) % 4, num_classes=4).float(),
         }
 
         encoder.zero_grad()

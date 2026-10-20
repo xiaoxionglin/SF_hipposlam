@@ -7,11 +7,11 @@ _params = ParamGrid(
         # -------------------------------------------------
         # Seeds
         ("seed", [1111, 2222, 3333, 4444, 5555]),
-        ("number_instruction_coef", [9, 200]),
+        #("number_instruction_coef", [9, 200]),
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
-        ("DG_context_mod", ["concat","multiply", "sigmoid"]), # verify rnn_size
-        ("Decoder_context_mod", ["concat", "FiLM"]), # verify rnn_size
+        #("DG_context_mod", ["None"]), # verify rnn_size
+        #("Decoder_context_mod", ["None"]), # verify rnn_size
         #("seed", [2222]),
         #("context_injection_coef", [1, 200]),
     ]
@@ -52,11 +52,11 @@ _params = ParamGrid(
 
 
 
-vstr = "100alt"
+vstr = "80_dgconcat_dgsig"
 prj = "ymaze_stage0_oracle_v2"
 
 cli = (
-    "--env=ymaze_hl_100_alt " # hl_100_alt has 100% reward alternating always
+    "--env=ymaze_instr " # hl_100_alt has 100% reward alternating always
     f"--wandb_project={prj} "
     #"--seed=42 "
     "--train_for_seconds=144000 "
@@ -112,13 +112,13 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    #"--number_instruction_coef=200 " ## increase if needed, default is 1
+    "--number_instruction_coef=200 " ## increase if needed, default is 1
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1148 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER 1148
+    "--rnn_size=1146 " # (16 * (64 + 8-1)) + (10 depth) + 2 ADD 2 ONLY IF BYPASS TO DECODER 1148
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 " 
     #"--ppo_clip_ratio=0.25 " 
@@ -127,8 +127,8 @@ cli = (
     "--save_best_every_sec=30 "
     # "--decoder_type=sr_transformer "
     "--oracle_context=True "
-    #"--DG_context_mod=sigmoid " # BE CAREFUL
-    #"--Decoder_context_mod=None " # BE CAREFUL
+    "--DG_context_mod=sigmoid " # BE CAREFUL
+    "--Decoder_context_mod=None " # BE CAREFUL
     "--reward_scale=0.1 " ## LOWERED FROM 1
     "--hl_K=0 "
     "--hl_d_H=0 "

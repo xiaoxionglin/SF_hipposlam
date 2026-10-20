@@ -6,13 +6,14 @@ _params = ParamGrid(
         # Positional encoding sweep
         # -------------------------------------------------
         # Seeds
-        ("seed", [1111, 2222, 3333, 4444, 5555]),
+        #("seed", [1111, 2222, 3333, 4444, 5555]),
         #("number_instruction_coef", [9, 200]),
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
-        #("seed", [2222]),
-        #("DG_context_mod", ["concat", "sigmoid", "multiply"]),
-        #("Decoder_context_mod", ["additive"]),
+        ("seed", [2222]),
+        ("hl_DG_mod", ["sigmoid"]),
+        ("Decoder_context_mod", ["enter", "FiLM"]),
+        ("hl_tau", [0.2, 0.4]),
         #("context_injection_coef", [1, 9, 200]),
     ]
 )
@@ -68,11 +69,11 @@ _params = ParamGrid(
 #    ]
 #)
 
-prj = "ymaze_HighLevelRNN_v2"
-vstr = "Q_noclassifier_logperK_gradclip_concat"
+prj = "ymaze_HighLevelRNN_v3"
+vstr = "1Q_deterministic"
 
 cli = (
-    "--env=ymaze_instr_hl "
+    "--env=ymaze_100_final "
     f"--wandb_project={prj} "
     # "--seed=42 "
     "--train_for_seconds=144000 "
@@ -128,13 +129,13 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    #"--number_instruction_coef=200 "
+    "--number_instruction_coef=200 " # this influences the inferred context in HL
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
     "--Hippo_L=64 "
     "--Hippo_R=8 "
-    "--rnn_size=1342 " # 1166 base + 8 trial records * (16 pre-event h + 4 mode + reward + valid)
+    "--rnn_size=1324 " # 1166 base + 8 trial records * (16 pre-event h + 4 mode + reward + valid)
     # "--exploration_loss_coeff=0.005 "
     # "--value_loss_coeff=0.3 "
     # "--ppo_clip_ratio=0.25 "
@@ -145,16 +146,17 @@ cli = (
     "--reward_input=False " # add + 1 to rnn size
     "--DG_context_mod=None "
     "--oracle_context=False " # set to true if stage1 HL_RNN will use oracle to fix z
-    "--Decoder_context_mod=None " 
-    "--hl_K=4 "
+    #"--Decoder_context_mod=enter " 
+    "--hl_K=2 "
     "--hl_d_H=16 "
-    "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
+    #"--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
     "--hl_history_len=8 "
     "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
     #"--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
     #"--hl_diversity_include_chosen_arm=True " # include the chosen arm in the classifier input for levels that return to an identical center view at outcome
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
     #"--context_injection_coef=200 "
+    #"--hl_DG_mod=gated "
 )
 
 

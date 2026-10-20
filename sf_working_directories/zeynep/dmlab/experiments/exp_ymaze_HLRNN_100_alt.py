@@ -7,12 +7,14 @@ _params = ParamGrid(
         # -------------------------------------------------
         # Seeds
         ("seed", [1111, 2222, 3333, 4444, 5555]),
-        #("number_instruction_coef", [9, 200]),
+        ("number_instruction_coef", [9, 200]),
         #("reward_scale", [0.01, 0.1, 1.0]),
         #("learning_rate", [0.00002, 0.0001]),
         #("seed", [2222]),
-        ("Decoder_context_mod", ["additive"]),
-        ("context_injection_coef", [1, 9, 200]),
+        #("DG_context_mod", ["sigmoid"]), # verify rnn_size
+        ("Decoder_context_mod", ["enter", "FiLM"]), # verify rnn_size
+        #("context_injection_coef", [9, 200]),
+        ("hl_tau", [0.2, 0.4])
     ]
 )
 
@@ -25,6 +27,7 @@ _params = ParamGrid(
 # records for high-level RNN training. See dmlab/HIGH_LEVEL_RNN_ROLLOUT_FIX.md.
 # The optional controller diversity reward is explained in
 # dmlab/HIGH_LEVEL_DIVERSITY_REWARD.md.
+# 11.10 Embed z to pre-DG
 
 # _params = ParamGrid(
 #     [
@@ -68,10 +71,10 @@ _params = ParamGrid(
 #)
 
 prj = "ymaze_HighLevelRNN_v3_100"
-vstr = "oracleZ_100_alt"
+vstr = "1Q_deterministic_Rew"
 
 cli = (
-    "--env=ymaze_hl_100_alt " # it has context if wanted to use
+    "--env=ymaze_100_alt2 " # it has context if wanted to use
     f"--wandb_project={prj} "
     # "--seed=42 "
     "--train_for_seconds=144000 "
@@ -127,7 +130,7 @@ cli = (
     "--save_best_metric=lenweighted_score "
     "--device=cpu "
     "--Hippo_n_feature=16 "
-    #"--number_instruction_coef=200 "
+    "--number_instruction_coef=200 "
     "--DG_BN_intercept=2.43 "
     "--depth_sensor=True "
     "--normalize_input=False "
@@ -143,17 +146,18 @@ cli = (
     # "--decoder_type=sr_transformer "
     "--reward_input=False " # add + 1 to rnn size
     "--DG_context_mod=None "
-    "--oracle_context=True " # set to true if stage1 HL_RNN will use oracle to fix z
+    "--oracle_context=False " # set to true if stage1 HL_RNN will use oracle to fix z
     #"--Decoder_context_mod=None " 
     "--hl_K=2 " # MAKE THIS 4 FOR LEARNING Z, 2 FOR ORACLE Z. If 2, then rnn is 1324
     "--hl_d_H=16 "
-    "--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
+    #"--hl_tau=1.0 " # current behavior; sweep only after checking outcome-reward scale and mode exploration
     "--hl_history_len=8 "
     "--hl_is_policy=False " # one-step Q regression on the mode that actually earned each trial reward
     #"--hl_diversity_reward_coef=0.01 " # at most 0.01 per completed trial, for controller PPO only
     #"--hl_diversity_include_chosen_arm=True " # include the chosen arm in the classifier input for levels that return to an identical center view at outcome
     "--reward_scale=0.1 " # default 1 LOWERED BECAUSE OF TOO HIGH VALUE LOSS
     #"--context_injection_coef=200 "
+    "--hl_DG_mod=sigmoid " 
 )
 
 

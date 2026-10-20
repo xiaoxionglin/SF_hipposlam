@@ -362,6 +362,7 @@ class Runner(EventLoopObject, Configurable):
                 R_mean = int(np.mean(R_trials_stats)) if len(R_trials_stats) > 0 else 0
                 L_mean = int(np.mean(L_trials_stats)) if len(L_trials_stats) > 0 else 0
                 total_tracked = R_mean + L_mean
+                distribution_str = "[0/0 High at R | 0/0 High at L]" # Fallback default
                 if total_tracked > 0:
                     distribution_str = f"[{R_mean}/{total_tracked} High at R | {L_mean}/{total_tracked} High at L]"
                 # --------------------------

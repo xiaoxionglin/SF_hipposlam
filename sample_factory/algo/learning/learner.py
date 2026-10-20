@@ -575,7 +575,7 @@ class BaseLearner(Configurable):
                     if enc is not None and hasattr(enc, "set_hl_z"):
                         enc.set_hl_z(mb.hl_z)
             # Propagate the recorded high-level mode into the encoder.
-            head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
+            #head_outputs = self.actor_critic.forward_head(mb.normalized_obs)
             if getattr(self.cfg, "hl_dg_from_prev_z", False):
                 # Actor states were saved before each action. Their final K entries
                 # are the mode that conditioned the actor's previous-frame DG.

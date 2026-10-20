@@ -39,7 +39,7 @@ def HighLevel_LossWrapper(actor_critic: ActorCritic) -> ActorCritic:
         core = getattr(actor_critic, 'core', getattr(actor_critic, 'actor_core', None))
         # Value bootstrap must follow the same mode policy as acting. A greedy
         # mode here biases the target when the actor samples at trial boundaries.
-        result_dict = original_forward(*args, **kwargs)
+        #result_dict = original_forward(*args, **kwargs)
         values_only = kwargs.get('values_only', args[2] if len(args) > 2 else False)
         selector = getattr(core, 'hl_learner', None)
         # Bootstrap values should be reproducible. Actor action collection

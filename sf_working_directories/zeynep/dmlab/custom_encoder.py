@@ -644,7 +644,7 @@ class HipposlamEncoder(Encoder):
             self.instruction_embed_layer = nn.Linear(self.instructions_lstm_units, cfg.Hippo_n_feature)
 
         ## 11.10.2026 ADDED High-Level mode embedding layer for multiply/sigmoid DG modulation ##
-        if self.high_level and self.hl_DG_mod in ("multiply", "sigmoid"):
+        if self.high_level and self.hl_DG_mod in ("gated", "multiply", "sigmoid"):
             self.hl_mode_embed_layer = nn.Linear(self.hl_K, cfg.Hippo_n_feature)
             nn.init.orthogonal_(self.hl_mode_embed_layer.weight)
             nn.init.ones_(self.hl_mode_embed_layer.bias)
@@ -717,8 +717,18 @@ class HipposlamEncoder(Encoder):
             self.high_level = True
             self.reward_input = False
 
-            if not self.hl_dg_from_prev_z:
-                self.dg_only_no_bypass_instr = True
+            #if not self.hl_dg_from_prev_z:
+            #    self.dg_only_no_bypass_instr = True
+            self.dg_only_no_bypass_instr = True # ADDED 13.10.2026 - HighLevel core should not have bypass or instruction input to DG
+
+        # --- SimGaY Gated DG Modulation (High-Level Only) ---
+        self.hl_DG_mod = getattr(cfg, "hl_DG_mod", "None")
+        if self.high_level and self.hl_DG_mod == "gated":
+            self.dg_gate_layer = nn.Linear(self.hl_K, cfg.Hippo_n_feature)
+            # Initialize to zero so the initial multiplier is exactly 1.0 (no visual distortion)
+            nn.init.zeros_(self.dg_gate_layer.weight)
+            nn.init.zeros_(self.dg_gate_layer.bias)
+        # ----------------------------------------------------
 
         if hasattr(cfg, "depth_sensor"):
            log.info(f"denpth_sensor {cfg.depth_sensor}")
@@ -847,19 +857,44 @@ class HipposlamEncoder(Encoder):
         hl_dg = getattr(self, "hl_dg_from_prev_z", False)
         DG_mod = self.DG_context_mod if (self.oracle_context or hl_dg) else "None"
         Dec_mod = self.Decoder_context_mod if (self.oracle_context or hl_dg) else "None"
-        if getattr(self, "high_level", False):
-            # 11.10.2026 ADDED: allow decoder to use z_t for context modulation
-            pass
 
         depth_out = None
         if self.depth_sensor:
             depth_out = self.depth_encoder(obs_dict["obs"][:, -1:, :, :])
             depth_out = depth_out.view(obs_dict["obs"].size(0), -1)
-                
-                # ===== Regime selection =====
-        ## 11.10.2026 ADDED High-level mode DG modulation regime ##
+
+        ## 13.10.2026 safely handle batch size changed
         if self.high_level and self.hl_DG_mod != "None":
-            hl_z = obs_dict.get("hl_z", getattr(self, "current_hl_z", None))
+            hl_z = None
+            if previous_mode is not None:
+                hl_z = previous_mode
+            elif isinstance(obs_dict, dict) and "hl_z" in obs_dict:
+                hl_z = obs_dict["hl_z"]
+            elif getattr(self, "current_hl_z", None) is not None:
+                hl_z = getattr(self, "current_hl_z")
+
+            if hl_z is None:
+                hl_z = x.new_zeros(x.shape[0], self.hl_K)
+            else:
+                if hl_z.dim() == 1:
+                    hl_z = hl_z.unsqueeze(0)
+                if hl_z.shape[0] == 1 and x.shape[0] > 1:
+                    hl_z = hl_z.expand(x.shape[0], -1)
+                elif hl_z.shape[0] != x.shape[0]:
+                    if hl_z.shape[0] > x.shape[0]:
+                        hl_z = hl_z[: x.shape[0]]
+                    else:
+                        hl_z = x.new_zeros(x.shape[0], self.hl_K)
+                hl_z = hl_z.to(device=x.device, dtype=x.dtype)
+            
+            # --- Frame-0 fallback for Oracle mode so it doesn't get stuck with zeros ---
+            if (hl_z is None or (self.oracle_context and hl_z.sum() == 0)) and "inst_block" in obs_dict:
+                raw = obs_dict["inst_block"].squeeze(1) - 1
+                hl_z = torch.nn.functional.one_hot(
+                    torch.clamp(raw, 0, self.hl_K - 1).long(), num_classes=self.hl_K
+                ).float()
+            # ---------------------------------------------------------------------------
+
             if hl_z is None:
                 hl_z = x.new_zeros(x.shape[0], self.hl_K)
             else:
@@ -869,18 +904,48 @@ class HipposlamEncoder(Encoder):
                     hl_z = hl_z.expand(x.shape[0], -1)
                 hl_z = hl_z.to(device=x.device, dtype=x.dtype)
 
-            if self.hl_DG_mod == "multiply":
-                embedded_mode = self.hl_mode_embed_layer(hl_z)
+            if hl_z.dim() == 2 and hl_z.shape[-1] > 1:
+                instr = hl_z.argmax(dim=-1, keepdim=True) + 1
+            else:
+                instr = hl_z
+
+            mode_encoded = (torch.nn.functional.one_hot(torch.clamp(instr.squeeze(1) - 1, 0, self.hl_K - 1).long(), num_classes=self.hl_K) * self.number_instruction_coef).to(device=x.device, dtype=x.dtype)
+
+            # --- DG Modulation Schemes ---
+            if self.hl_DG_mod == "gated":
+                # SimGaY formula: DG(x) * (1.0 + tanh(gate))
+                #gate = torch.tanh(self.dg_gate_layer(hl_z))
+                gate = torch.tanh(self.dg_gate_layer(mode_encoded))
+                tmp_out = self.DG_projection(x) * (1.0 + gate)
+
+            elif self.hl_DG_mod == "multiply":
+                #embedded_mode = self.hl_mode_embed_layer(hl_z)
+                embedded_mode = self.hl_mode_embed_layer(mode_encoded)
                 tmp_out = self.DG_projection(x, context=embedded_mode)
+
             elif self.hl_DG_mod == "sigmoid":
-                embedded_mode = torch.sigmoid(self.hl_mode_embed_layer(hl_z))
+                #embedded_mode = torch.sigmoid(self.hl_mode_embed_layer(hl_z))
+                embedded_mode = torch.sigmoid(self.hl_mode_embed_layer(mode_encoded))
                 tmp_out = self.DG_projection(x) * embedded_mode
+
             elif self.hl_DG_mod == "concat":
-                x_cat = torch.cat((x, hl_z), dim=1)
+                if hl_z.dim() == 2 and hl_z.shape[-1] > 1:
+                    instr = hl_z.argmax(dim=-1, keepdim=True) + 1
+                else:
+                    instr = hl_z
+
+                mode_encoded = (
+                    torch.nn.functional.one_hot(
+                        torch.clamp(instr.squeeze(1) - 1, 0, self.hl_K - 1).long(), 
+                        num_classes=self.hl_K
+                    ) * self.number_instruction_coef
+                ).to(device=x.device, dtype=x.dtype)
+
+                x_cat = torch.cat((x, mode_encoded), dim=1)
                 tmp_out = self.DG_projection(x_cat)
+
             else:
                 tmp_out = self.DG_projection(x)
-
             if getattr(self, "dg_only_no_bypass_instr", False):
                 if self.depth_sensor: bypass_out = depth_out
                 else: bypass_out = x
@@ -895,8 +960,10 @@ class HipposlamEncoder(Encoder):
                 embedded_instr = self.instruction_embed_layer(last_outputs)
                 tmp_out = self.DG_projection(x, context=embedded_instr)
             elif DG_mod == "sigmoid":
+                #x_cat = torch.cat((x, last_outputs), dim=1)
                 embedded_instr = self.instruction_embed_layer(last_outputs)
                 embedded_instr = torch.sigmoid(embedded_instr)
+                #tmp_out = self.DG_projection(torch_cat) * embedded_instr
                 tmp_out = self.DG_projection(x) * embedded_instr
             elif DG_mod == "concat":
                 # Concatenate the instructions with the input
