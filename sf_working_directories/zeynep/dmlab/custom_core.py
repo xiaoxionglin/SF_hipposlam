@@ -595,20 +595,34 @@ class HighLevelRNNWrapperCore(ModelCore):
         self.history_len = getattr(cfg, "hl_history_len", 8) # get the last 8 completed trials to update the high-level state
         if self.history_len < 1:
             raise ValueError("hl_history_len must be at least one completed trial")
-        self.event_width = self.d_H + self.K + 2  # pre-event h, chosen z, reward, valid flag
+
+        self.representations = getattr(cfg, "hl_representations", False)
+        self.decoder = None
+
+        self.d_rep = getattr(cfg, "hl_d_rep", 64)
+
+        if self.representations:
+            self.event_width = self.d_H + self.K + 2 + (2* self.d_rep)  # pre-event h, chosen z, reward, valid flag = 16 + 2 + 2 + 128 = 148
+        else:
+            self.event_width = self.d_H + self.K + 2  # pre-event h, chosen z, reward, valid flag
+
         self.history_size = self.history_len * self.event_width
         self.oracle = getattr(cfg, "oracle_context", False)
         
         # NEW: Check if we are doing Policy Gradient or Q-Learning
         self.is_policy = getattr(cfg, "hl_is_policy", False)
         
-        base_input_size = input_size - 3 
+        base_input_size = input_size - 4 
         if self.oracle:
             base_input_size -= 1  
             
         self.base_core = SimpleSequenceWithBypassCore(cfg, input_size=base_input_size)
         self.base_state_size = self.base_core.total_output_size
-        self.history_start = self.base_state_size + self.d_H
+
+        self.rep_size = (2 * self.d_rep) if self.representations else 0
+        self.history_start = self.base_state_size + self.d_H + self.rep_size
+        self.total_state_size = (self.base_state_size + self.d_H + self.rep_size + self.history_size + self.K)
+        #self.history_start = self.base_state_size + self.d_H
         
         self.high_level_rnn_stage1 = HighLevelContextRNN_Stage1(K=self.K, d_H=self.d_H)
         
@@ -616,12 +630,13 @@ class HighLevelRNNWrapperCore(ModelCore):
         hl_tau = getattr(cfg, "hl_tau", 1.0)
         if hl_tau <= 0:
             raise ValueError("hl_tau must be positive")
+        
         self.hl_learner = HighLevelContextRNN_Learner(
             K=self.K, d_H=self.d_H, tau=hl_tau, is_policy=self.is_policy,
-            deterministic=getattr(cfg, "hl_deterministic", False),
+            deterministic=getattr(cfg, "hl_deterministic", False), representations=self.representations, d_rep=self.d_rep
         ) 
 
-        self.total_state_size = self.base_state_size + self.d_H + self.history_size + self.K
+        #self.total_state_size = self.base_state_size + self.d_H + self.history_size + self.K
         self.total_output_size = self.base_core.total_output_size + self.K
         configured_size = getattr(cfg, "rnn_size", None)
         if configured_size is not None and configured_size != self.total_state_size:
@@ -637,12 +652,25 @@ class HighLevelRNNWrapperCore(ModelCore):
     def get_out_size(self):
         return self.total_output_size
 
-    def append_event(self, history, h_before, z_before, reward, event_mask):
+    def set_decoder(self, decoder):
+        self.decoder = decoder
+
+    def append_event(self, history, h_before, z_before, reward, event_mask, e_trigger: Tensor = None, e_outcome: Tensor = None):
         """Keep completed trials for learner unrolling; this is not a policy input."""
-        entry = torch.cat((h_before.detach(), z_before.detach(), reward[:, None],
-                           torch.ones_like(reward[:, None])), dim=-1)
+        valid_flag = torch.ones_like(reward[:, None])
+
+        if self.representations:
+            if e_trigger is None or e_outcome is None:
+                raise ValueError("e_trigger and e_outcome must be provided when representations are enabled")
+            entry = torch.cat((h_before.detach(), z_before.detach(), reward[:, None], e_trigger.detach(), e_outcome.detach(),
+                               valid_flag), dim=-1)
+        else:
+            entry = torch.cat((h_before.detach(), z_before.detach(), reward[:, None],
+                            valid_flag), dim=-1)
+            
         shifted = torch.cat((history[:, self.event_width:], entry), dim=-1) # Shift history to the left and append new entry
         valid_outcome = event_mask & (z_before.sum(dim=-1) > 0.5)
+
         return torch.where(valid_outcome[:, None], shifted, history) # Return the updated history, only if the outcome is valid
 
     def scores_from_history(self, history, fallback_h):
@@ -654,11 +682,22 @@ class HighLevelRNNWrapperCore(ModelCore):
         batch = torch.arange(events.size(0), device=events.device)
         h = torch.where(valid.any(dim=1, keepdim=True), 
                         events[batch, first, :self.d_H], fallback_h) # use the first valid trial's h as the starting point, or fallback_h if no valid trials
+        
         for k in range(self.history_len):
             event = events[:, k]
             z = event[:, self.d_H:self.d_H + self.K]
             reward = event[:, self.d_H + self.K]
-            h = self.hl_learner.update_state(valid[:, k], reward, h, z) # step HLRNN forward one trial at a time, using the saved z and reward from history
+            if self.representations:
+                # Unpack two 64-dim landmark representations, slice from the event tensor
+                trig_start = self.d_H + self.K + 1 
+                trig_end = trig_start + self.d_rep
+                out_end = trig_end + self.d_rep
+                e_trigger = event[:, trig_start:trig_end] # the next 64 numbers are the trigger representation
+                e_outcome = event[:, trig_end:out_end] # the next 64 numbers are the outcome representation
+
+                h = self.hl_learner.update_state(valid[:, k], reward, h, z, e_trigger, e_outcome) # step HLRNN forward one trial at a time, using the saved z and reward from history
+            else:
+                h = self.hl_learner.update_state(valid[:, k], reward, h, z) # step HLRNN forward one trial at a time, using the saved z and reward from history
         return self.hl_learner.head(h) # Calculate current Q-values for the current frame.
 
     def forward(self, head_output, rnn_states):
@@ -670,6 +709,16 @@ class HighLevelRNNWrapperCore(ModelCore):
 
         base_states = rnn_states[:, :self.base_state_size]
         h_high_prev = rnn_states[:, self.base_state_size : self.base_state_size + self.d_H]
+
+        if self.representations:    
+            trig_idx = self.base_state_size + self.d_H
+            out_idx = trig_idx + self.d_rep
+            e_trig_prev = rnn_states[:, trig_idx:out_idx]
+            e_out_prev = rnn_states[:, out_idx:out_idx + self.d_rep]
+        else:
+            e_trig_prev = None
+            e_out_prev = None
+
         history_prev = rnn_states[:, self.history_start:self.history_start + self.history_size]
         z_prev = rnn_states[:, -self.K:]
 
@@ -677,6 +726,7 @@ class HighLevelRNNWrapperCore(ModelCore):
             # === INFERENCE PASS ===
             if self.oracle:
                 base_head_output = head_output[:, :-4] 
+                # didnt add chosen_arm_pulse in encoder, add and fix here
                 inst_block = head_output[:, -4].long() 
                 chosen_arm = head_output[:, -3].long() 
                 outcome_mask = head_output[:, -2].bool()
@@ -686,21 +736,40 @@ class HighLevelRNNWrapperCore(ModelCore):
                     outcome_mask, prev_trial_reward, h_high_prev, z_prev, inst_block
                 )
             else:
-                base_head_output = head_output[:, :-3] 
+                base_head_output = head_output[:, :-4]
+                chosen_arm_pulse = head_output[:, -4].long() 
                 chosen_arm = head_output[:, -3].long() 
                 outcome_mask = head_output[:, -2].bool()
                 prev_trial_reward = head_output[:, -1]
 
-                h_high_new, z_new, _, _, _ = self.hl_learner(
-                    outcome_mask, prev_trial_reward, h_high_prev, z_prev, chosen_arm
-                )          
+                if self.representations:
+                    h_high_new, z_new, _, _, _ = self.hl_learner(
+                        outcome_mask, prev_trial_reward, h_high_prev, z_prev, chosen_arm, e_trig_prev, e_out_prev
+                    )      
+                    history_new = self.append_event(history_prev, h_high_prev, z_prev,
+                                            prev_trial_reward, outcome_mask, e_trig_prev, e_out_prev)
+                else:
+                    h_high_new, z_new, _, _, _ = self.hl_learner(
+                        outcome_mask, prev_trial_reward, h_high_prev, z_prev, chosen_arm
+                    )          
+                    history_new = self.append_event(history_prev, h_high_prev, z_prev,
+                                                    prev_trial_reward, outcome_mask)
 
             base_core_out, base_states_new = self.base_core(base_head_output, base_states)
 
             out_total = torch.cat([base_core_out, z_new], dim=-1)
-            history_new = self.append_event(history_prev, h_high_prev, z_prev,
-                                            prev_trial_reward, outcome_mask)
-            new_rnn_states = torch.cat([base_states_new, h_high_new, history_new, z_new], dim=-1)
+
+            if self.representations:
+                h_dec_1 = self.decoder.mlp[0](out_total).detach() # current representation of the decoder's first layer, used for updating the event representations
+
+                is_endpoint = (chosen_arm_pulse > 0)
+                e_out_new  = torch.where(is_endpoint[:, None],  h_dec_1, e_out_prev)
+                e_trig_new = torch.where(outcome_mask[:, None], h_dec_1, e_trig_prev)
+
+                new_rnn_states = torch.cat([base_states_new, h_high_new, e_trig_new, e_out_new, history_new, z_new], dim=-1)
+            else:
+                new_rnn_states = torch.cat([base_states_new, h_high_new, history_new, z_new], dim=-1)
+            
 
             self.last_hl_loss = torch.tensor(0.0, device=head_output.device)
             self.last_log_dict = None  
@@ -733,6 +802,10 @@ class HighLevelRNNWrapperCore(ModelCore):
                 z_indices_seq = []
                 rewards_seq = []
                 mask_seq = []
+
+            if self.representations:
+                e_trig_t = e_trig_prev
+                e_out_t = e_out_prev
             
             for t in range(T):
                 if self.oracle:
@@ -745,7 +818,8 @@ class HighLevelRNNWrapperCore(ModelCore):
                         outcome_mask_t, prev_trial_reward_t, h_high_t, z_t, inst_block_t
                     )
                 else:
-                    base_head_output_t = head_output[t, :, :-3]
+                    base_head_output_t = head_output[t, :, :-4]
+                    chosen_arm_pulse_t = head_output[t, :, -4].long()
                     chosen_arm_t = head_output[t, :, -3].long()
                     outcome_mask_t = head_output[t, :, -2].bool()
                     prev_trial_reward_t = head_output[t, :, -1]
@@ -763,20 +837,44 @@ class HighLevelRNNWrapperCore(ModelCore):
 
                     # 2. Update reward history, then use the actor's mode for
                     # the decoder and for the next event's reward assignment.
-                    history_t = self.append_event(history_t, h_high_t, z_t,
-                                                  prev_trial_reward_t, outcome_mask_t)
-                    h_high_t = self.hl_learner.update_state(
-                        outcome_mask_t, prev_trial_reward_t, h_high_t, z_t
-                    )
+                    if self.representations:
+                        history_t = self.append_event(
+                            history_t, h_high_t, z_t, prev_trial_reward_t, outcome_mask_t,
+                            e_trigger=e_trig_t, e_outcome=e_out_t
+                        )
+                        h_high_t = self.hl_learner.update_state(
+                            outcome_mask_t, prev_trial_reward_t, h_high_t, z_t,
+                            e_trigger=e_trig_t, e_outcome=e_out_t
+                        )
+                    else:
+                        history_t = self.append_event(
+                            history_t, h_high_t, z_t, prev_trial_reward_t, outcome_mask_t
+                        )
+                        h_high_t = self.hl_learner.update_state(
+                            outcome_mask_t, prev_trial_reward_t, h_high_t, z_t
+                        )
+
                     z_t = actor_z_seq[t] # overwrite the mode with the actor's actual choice from the past. 
 
                 base_core_out_t, base_states_t = self.base_core(base_head_output_t, base_states_t)
 
                 out_total_t = torch.cat([base_core_out_t, z_t], dim=-1)
+
+                if self.representations:
+                    h_dec_1_t = self.decoder.mlp[0](out_total_t).detach()
+
+                    is_endpoint_t = (chosen_arm_pulse_t > 0)
+                    e_out_t = torch.where(is_endpoint_t[:, None], h_dec_1_t, e_out_t)
+                    e_trig_t = torch.where(outcome_mask_t[:, None], h_dec_1_t, e_trig_t)
+
                 out_total_list.append(out_total_t)
 
             out_total_seq = torch.stack(out_total_list, dim=0)
-            new_rnn_states = torch.cat([base_states_t, h_high_t, history_t, z_t], dim=-1)
+
+            if self.representations:
+                new_rnn_states = torch.cat([base_states_t, h_high_t, e_trig_t, e_out_t, history_t, z_t], dim=-1)
+            else:
+                new_rnn_states = torch.cat([base_states_t, h_high_t, history_t, z_t], dim=-1)
 
             # Process Loss ONLY if NOT oracle!
             if not self.oracle:

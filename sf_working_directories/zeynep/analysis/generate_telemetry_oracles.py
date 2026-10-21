@@ -222,6 +222,14 @@ experiments = [
     },
 ]
 
+experiments = [{"expname": "42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05",
+                "train_dir":"/work/classic/fr_ze12-data/ymaze_CTRL/noINSTR/run2_grid/train_dir/noINSTR/noINSTR_",
+                 "DG_context_mod": "None",
+                 "Decoder_context_mod": "None",
+                 "reward_scale": "1.0",
+                 "learning_rate": "0.00002"
+                 }]
+
 
 # Separate directory to save all telemetry results (outside the checkpoint folder)
 output_telemetry_dir = "/work/classic/fr_ze12-data2/telemetry_plots"
@@ -272,7 +280,7 @@ for exp_info in experiments:
         "--oracle_context", "True",
         "--DG_context_mod", dg_context_mod,
         "--Decoder_context_mod", decoder_context_mod,
-        "--rnn_size", "1148",
+        "--rnn_size", "1146",
         "--core_name", "BypassSS",
         "--reward_scale", str(reward_scale),
         "--learning_rate", str(learning_rate),
@@ -294,7 +302,7 @@ for exp_info in experiments:
         "oracle_context": True,
         "DG_context_mod": dg_context_mod,
         "Decoder_context_mod": decoder_context_mod,
-        "rnn_size": 1148,
+        "rnn_size": 1146,
         "core_name": "BypassSS",
         "reward_scale": float(reward_scale),
         "learning_rate": float(learning_rate),

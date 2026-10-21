@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib as mpl
 mpl.use("Agg")  # Prevents headless X11 GUI issues
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 # ==============================================================================
 # 1. PUBLICATION STANDARD STYLING (figure_making_functions.ipynb)
@@ -26,11 +27,14 @@ mpl.rcParams["savefig.bbox"] = "tight"
 # ==============================================================================
 # 2. PATHS & EPISODE PARAMETERS
 # ==============================================================================
-csv_path = (
-"/work/classic/fr_ze12-data2/outputs/telemetry_plots/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid/telemetry/pose_20261013_171929.csv")
-output_dir = "/work/classic/fr_ze12-data2/ymaze_CTRL/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid"
+#csv_path = (
+#    "/work/classic/fr_ze12-data2/outputs/telemetry_plots/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid/telemetry/pose_20261013_171929.csv"
+#)
+#output_dir = "/work/classic/fr_ze12-data2/ymaze_CTRL/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid"
 
-#output_dir = os.path.dirname(csv_path.replace("fr_ze12-data", "fr_ze12-data2"))
+csv_path = ("/work/classic/fr_ze12-data2/outputs/telemetry_plots/42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05/telemetry/pose_20261021_160031.csv")
+output_dir = "/work/classic/fr_ze12-data2/ymaze_CTRL/42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05"
+
 pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
 print("Starting choice streak analysis...", flush=True)
@@ -128,6 +132,8 @@ choices = trial_df["chose_high_arm"].to_numpy()
 rewarded = trial_df["rewarded"].to_numpy()
 raw_contexts = trial_df["context"].to_numpy()
 
+overall_acc = np.mean(choices) * 100
+
 def compute_streaks(c_arr):
     streaks, curr = [], 0
     for c in c_arr:
@@ -182,6 +188,7 @@ for i, b in enumerate(block_info):
     print(f"Block {b['block_num']:<2} | {b['start_trial']:>2}-{b['end_trial']:<6} | Context {b['context']} | {status:<16} | {b['accuracy']:>6.1f}%    | {b['max_streak']} trials", flush=True)
 
 print("-" * 72, flush=True)
+print(f"Overall Accuracy: {overall_acc:.1f}%\n", flush=True)
 
 # ==============================================================================
 # 5. COMPACT PUBLICATION FIGURE 
@@ -202,39 +209,60 @@ def add_decorations(ax):
         line_style = "--" if trans["flipped"] else ":"
         ax.axvline(trans["boundary_trial"], color=line_col, linestyle=line_style, lw=0.75, zorder=2)
 
-# Panel a: Trial raster
+# Panel a: Trial raster 
 ax1 = axes[0]
 add_decorations(ax1)
+
+# Display block accuracy directly above each block
 for b in block_info:
     mid_x = (b["start_trial"] + b["end_trial"]) / 2
-    #ax1.text(mid_x, 1.15, f"B{b['block_num']}", ha="center", va="bottom", fontsize=6.5, color="#555555")
+    ax1.text(mid_x, 0.30, f"{b['accuracy']:.0f}%", ha="center", va="bottom", fontsize=4.5, color="#555555")
 
-ax1.step(trial_indices, choices, where="mid", color="#555555", lw=0.7, alpha=0.4, zorder=1)
+#ax1.step(trial_indices, choices, where="mid", color="#555555", lw=0.7, alpha=0.4, zorder=1)
 rew_mask = (rewarded == 1)
 unrew_mask = (rewarded == 0)
-ax1.scatter(trial_indices[rew_mask], choices[rew_mask], color="#27ae60", s=2, label="Hit", zorder=3)
-ax1.scatter(trial_indices[unrew_mask], choices[unrew_mask], facecolors="none", edgecolors="#c0392b", s=2, lw=0.8, label="Miss", zorder=3)
+s1 = ax1.scatter(trial_indices[rew_mask], choices[rew_mask], color="#27ae60", s=2, label="Reward +10", zorder=3)
+s2 = ax1.scatter(trial_indices[unrew_mask], choices[unrew_mask], facecolors="none", edgecolors="#c0392b", s=2, lw=0.8, label="No Reward", zorder=3)
+
+# Highlight color patches for the legend
+patch_c1 = mpatches.Patch(facecolor="#3498db", alpha=0.35, edgecolor="none", label="Block R")
+patch_c2 = mpatches.Patch(facecolor="#e67e22", alpha=0.35, edgecolor="none", label="Block L")
 
 ax1.set_xticks(xticks)
 ax1.set_xticklabels([])
 ax1.set_yticks([0, 1])
-ax1.set_yticklabels(["Low", "High"])
+ax1.set_xticks(xticks)
+ax1.set_xticklabels(xticks)
+ax1.set_yticklabels(["Low arm", "High arm"])
+ax1.set_xlabel("Trial")
 ax1.set_xlim(0.5, n_trials + 0.5)
-ax1.set_title("a  Trial choices", loc="left", fontsize=8.5, pad=2)
-ax1.legend(frameon=False, bbox_to_anchor=[1.02, 1], loc="upper left", handletextpad=0.2, borderaxespad=0.2)
+
+# Left: title; Right: overall accuracy
+ax1.set_title("a. Trial choices", loc="left", fontsize=8.5, pad=2)
+#ax1.text(n_trials + 0.5, 1.3, f"Overall accuracy: {overall_acc:.1f}%", fontsize=7, color="#555555")
+
+ax1.legend(
+    handles=[patch_c1, patch_c2, s1, s2],
+    frameon=False,
+    bbox_to_anchor=[1.02, 1],
+    loc="upper left",
+    handletextpad=0.3,
+    borderaxespad=0.2,
+    markerscale=2.5,
+)
 ax1.spines[["top", "right"]].set_visible(False)
 
 # Panel b: Cumulative choices
 ax2 = axes[1]
 add_decorations(ax2)
-ax2.plot(trial_indices, np.cumsum(choices), color="#2980b9", lw=1.1, label="High arm")
+ax2.plot(trial_indices, np.cumsum(choices), color="#2980b9", lw=1.1, label=f"High arm \n(Accuracy: {overall_acc:.0f}%)")
 ax2.plot(trial_indices, np.cumsum(1 - choices), color="#7f8c8d", lw=1.1, linestyle="--", label="Low arm")
 ax2.set_xticks(xticks)
 ax2.set_xlim(0.5, n_trials + 0.5)
 ax2.set_xlabel("Trial")
 ax2.set_ylabel("Choices")
-ax2.set_title("b  Cumulative choices", loc="left", fontsize=8.5, pad=2)
-ax2.legend(frameon=False, bbox_to_anchor=[1.02, 1], loc="upper left", handletextpad=0.2, borderaxespad=0.2)
+ax2.set_title("b. Cumulative choices", loc="left", fontsize=8.5, pad=2)
+ax2.legend(frameon=False, bbox_to_anchor=[1.02, 1], loc="upper left", handletextpad=0.2, borderaxespad=0.2, fontsize=7.5)
 ax2.spines[["top", "right"]].set_visible(False)
 
 # Panel c: Consecutive streaks histogram
@@ -245,9 +273,9 @@ bins = np.arange(0.5, max_s + 1.5, 1)
 ax3.hist(streaks, bins=bins, color="#27ae60", edgecolor="none", rwidth=0.75)
 med = np.median(streaks)
 ax3.axvline(med, color="#e67e22", linestyle="--", lw=0.9, label=f"Median ({int(med)})")
-ax3.set_xlabel("Streak length")
+ax3.set_xlabel("Sequence length")
 ax3.set_ylabel("Count")
-ax3.set_title("c  Streak distribution", loc="left", fontsize=8.5, pad=2)
+ax3.set_title("c. Length distribution", loc="left", fontsize=8.5, pad=2)
 ax3.legend(frameon=False, bbox_to_anchor=[1.02, 1], loc="upper left", handletextpad=0.2, borderaxespad=0.2)
 ax3.spines[["top", "right"]].set_visible(False)
 

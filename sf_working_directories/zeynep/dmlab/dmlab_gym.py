@@ -368,7 +368,7 @@ class DmlabGymEnv_custom(gym.Env):
             'flexibility', 'inst_block', 
         ] #'outcome_event', 'prev_trial_reward', 'chosen_arm'
 
-        observation_format += ["outcome_event", "prev_trial_reward", "inst_block", "chosen_arm"]
+        observation_format += ["outcome_event", "prev_trial_reward", "inst_block", "chosen_arm", "chosen_arm_pulse"]
 
         self.reward_input = reward_input
         if not self.reward_input:
@@ -411,7 +411,7 @@ class DmlabGymEnv_custom(gym.Env):
         self.high_level=high_level
         if self.high_level:
             log.warning("HighLevel mode is enabled for this environment!")
-            
+            # observation_format += ["outcome_event", "prev_trial_reward", "inst_block", "chosen_arm", "chosen_arm_pulse"]
             
 
         self.render_mode: Optional[str] = render_mode
@@ -515,6 +515,13 @@ class DmlabGymEnv_custom(gym.Env):
                 shape=(1,),
                 dtype=np.int32,
             ) # 1 means RIGHT 2 means LEFT 0 means NONE
+
+            self.observation_space.spaces["chosen_arm_pulse"] = gym.spaces.Box(
+                low=0,
+                high=2,
+                shape=(1,),
+                dtype=np.int32,
+            ) # 1 means RIGHT 2 means LEFT 0 means NONE
         ###########
         
         # if self.depth_sensor:
@@ -567,6 +574,9 @@ class DmlabGymEnv_custom(gym.Env):
         chosen_arm = env_obs_dict.pop("chosen_arm", [0])
         self._current_chosen_arm = float(chosen_arm[0])  # Store the current chosen arm for internal tracking
 
+        chosen_arm_pulse = env_obs_dict.pop("chosen_arm_pulse", [0])
+        self._current_chosen_arm_pulse = float(chosen_arm_pulse[0])
+
         outcome_event = env_obs_dict.pop("outcome_event", [0.0])
         self._current_outcome_event = float(outcome_event[0])  # Store the current outcome event for internal tracking
         
@@ -582,6 +592,7 @@ class DmlabGymEnv_custom(gym.Env):
             env_obs_dict["outcome_event"] = np.asarray(outcome_event, dtype=np.float32).reshape(1)
             env_obs_dict["prev_trial_reward"] = np.asarray(prev_trial_reward, dtype=np.float32).reshape(1)
             env_obs_dict["inst_block"] = np.asarray(inst_block, dtype=np.int32).reshape(1)
+            env_obs_dict["chosen_arm_pulse"] = np.asarray(chosen_arm_pulse, dtype=np.int32).reshape(1)
             
         ##########################################
 

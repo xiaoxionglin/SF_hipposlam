@@ -408,15 +408,22 @@ class HighLevelContextRNN_Learner(nn.Module):
     based on the 'is_policy' flag.
     """
     def __init__(self, K: int = 4, d_H: int = 16, tau: float = 1.0, is_policy: bool = False,
-                 deterministic: bool = False):
+                 deterministic: bool = False, representations: bool = False, d_rep: int = 64):
         super().__init__()
         self.K   = K
         self.d_H = d_H
         self.tau = tau
         self.is_policy = is_policy
         self.deterministic = deterministic
+        self.representations = representations  # If True, the model will get representations from decoder 1st layer
+        self.d_rep = d_rep  # Dimension of the representation vector
 
-        self.rnn_cell = nn.RNNCell(input_size=K + 1, hidden_size=d_H, nonlinearity='tanh')
+        if self.representations:
+            input_dim = K + 1 + (2 * self.d_rep)  # z_prev + prev_reward + 2 * representation size = 2 + 1 + 128 = 131
+        else:
+            input_dim = K + 1  # z_prev + prev_reward
+
+        self.rnn_cell = nn.RNNCell(input_size=input_dim, hidden_size=d_H, nonlinearity='tanh')
         
         # This acts as BOTH the QHead and the PolicyHead
         self.head = nn.Linear(d_H, K) 
@@ -436,9 +443,9 @@ class HighLevelContextRNN_Learner(nn.Module):
         z_onehot = F.one_hot(z_index, num_classes=self.K).float()
         return z_onehot, z_index
 
-    def forward(self, outcome_mask, prev_trial_reward, h_high, z_prev, chosen_arm):
+    def forward(self, outcome_mask, prev_trial_reward, h_high, z_prev, chosen_arm, e_trigger=None, e_outcome=None):
         # 1. Update State
-        h_high_new = self.update_state(outcome_mask, prev_trial_reward, h_high, z_prev)
+        h_high_new = self.update_state(outcome_mask, prev_trial_reward, h_high, z_prev, e_trigger, e_outcome)
 
         # 2. Get Outputs (Q-Scores OR Logits)
         outputs = self.head(h_high_new)
@@ -464,9 +471,16 @@ class HighLevelContextRNN_Learner(nn.Module):
 
         return h_high_new, z_new, outputs, new_state, log_dict
 
-    def update_state(self, outcome_mask, prev_trial_reward, h_high, z_prev):
+    def update_state(self, outcome_mask, prev_trial_reward, h_high, z_prev, e_trigger=None, e_outcome=None):
         """Update reward history without choosing a new mode (used during replay)."""
-        rnn_in      = torch.cat([z_prev, prev_trial_reward[:,None]], dim=-1)
+        if self.representations:
+            if e_trigger is None or e_outcome is None:
+                raise ValueError("representations=True requires both e_trigger and e_outcome")
+            
+            rnn_in = torch.cat([z_prev, prev_trial_reward[:, None], e_trigger, e_outcome], dim=-1)
+        else:
+            rnn_in = torch.cat([z_prev, prev_trial_reward[:, None]], dim=-1)
+
         h_candidate = self.rnn_cell(rnn_in, h_high)
         h_high_new = torch.where(outcome_mask[:, None], h_candidate, h_high)
         return h_high_new
