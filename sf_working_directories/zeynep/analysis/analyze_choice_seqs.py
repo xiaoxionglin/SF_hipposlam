@@ -1,12 +1,14 @@
 import json
 import os
 import pathlib
+
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
-import matplotlib as mpl
+
 mpl.use("Agg")  # Prevents headless X11 GUI issues
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 
 # ==============================================================================
 # 1. PUBLICATION STANDARD STYLING (figure_making_functions.ipynb)
@@ -27,12 +29,12 @@ mpl.rcParams["savefig.bbox"] = "tight"
 # ==============================================================================
 # 2. PATHS & EPISODE PARAMETERS
 # ==============================================================================
-#csv_path = (
+# csv_path = (
 #    "/work/classic/fr_ze12-data2/outputs/telemetry_plots/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid/telemetry/pose_20261013_171929.csv"
-#)
-#output_dir = "/work/classic/fr_ze12-data2/ymaze_CTRL/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid"
+# )
+# output_dir = "/work/classic/fr_ze12-data2/ymaze_CTRL/08_encoderonly_norew_INSTR_see_2222_l.rat_2e-05_D.c.mod_sigmoid"
 
-csv_path = ("/work/classic/fr_ze12-data2/outputs/telemetry_plots/42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05/telemetry/pose_20261021_160031.csv")
+csv_path = "/work/classic/fr_ze12-data2/outputs/telemetry_plots/42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05/telemetry/pose_20261021_160031.csv"
 output_dir = "/work/classic/fr_ze12-data2/ymaze_CTRL/42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05"
 
 pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -92,19 +94,20 @@ for idx, info_val in enumerate(info_vals):
                     except (ValueError, TypeError):
                         pass
 
-        trials.append({
-            "trial_idx": trial_counter,
-            "frame": int(frame_vals[idx]),
-            "context": ctx,
-            "chose_high_arm": chose_high,
-            "rewarded": rewarded,
-            "outcome": (
-                "High-Rew Hit (+10)" if hi_hit else
-                "High-Rew Miss (0)" if hi_miss else
-                "Low-Rew Hit (+10)" if lo_hit else
-                "Low-Rew Miss (0)"
-            ),
-        })
+        trials.append(
+            {
+                "trial_idx": trial_counter,
+                "frame": int(frame_vals[idx]),
+                "context": ctx,
+                "chose_high_arm": chose_high,
+                "rewarded": rewarded,
+                "outcome": (
+                    "High-Rew Hit (+10)"
+                    if hi_hit
+                    else "High-Rew Miss (0)" if hi_miss else "Low-Rew Hit (+10)" if lo_hit else "Low-Rew Miss (0)"
+                ),
+            }
+        )
 
 trial_df = pd.DataFrame(trials)
 total_extracted = len(trial_df)
@@ -134,6 +137,7 @@ raw_contexts = trial_df["context"].to_numpy()
 
 overall_acc = np.mean(choices) * 100
 
+
 def compute_streaks(c_arr):
     streaks, curr = [], 0
     for c in c_arr:
@@ -147,6 +151,7 @@ def compute_streaks(c_arr):
         streaks.append(curr)
     return np.array(streaks) if streaks else np.array([0])
 
+
 block_info = []
 for b in range(num_blocks):
     b_start = b * BLOCK_SIZE
@@ -156,17 +161,21 @@ for b in range(num_blocks):
     b_acc = np.mean(b_choices) * 100
     b_streaks = compute_streaks(b_choices)
 
-    block_info.append({
-        "block_num": b + 1,
-        "start_trial": b_start + 1,
-        "end_trial": b_end,
-        "context": b_ctx,
-        "accuracy": b_acc,
-        "max_streak": np.max(b_streaks),
-    })
+    block_info.append(
+        {
+            "block_num": b + 1,
+            "start_trial": b_start + 1,
+            "end_trial": b_end,
+            "context": b_ctx,
+            "accuracy": b_acc,
+            "max_streak": np.max(b_streaks),
+        }
+    )
 
 transitions = []
-print(f"{'Block':<7} | {'Trials':<11} | {'Context':<8} | {'Status':<16} | {'Accuracy':<10} | {'Max Streak'}", flush=True)
+print(
+    f"{'Block':<7} | {'Trials':<11} | {'Context':<8} | {'Status':<16} | {'Accuracy':<10} | {'Max Streak'}", flush=True
+)
 print("-" * 72, flush=True)
 
 for i, b in enumerate(block_info):
@@ -175,29 +184,35 @@ for i, b in enumerate(block_info):
     else:
         prev_ctx = block_info[i - 1]["context"]
         curr_ctx = b["context"]
-        flipped = (prev_ctx != curr_ctx)
+        flipped = prev_ctx != curr_ctx
         status = f"INVERTED ({prev_ctx}->{curr_ctx})" if flipped else f"UNCHANGED ({curr_ctx}->{curr_ctx})"
-        transitions.append({
-            "boundary_trial": b["start_trial"] - 0.5,
-            "trial_num": b["start_trial"] - 1,
-            "flipped": flipped,
-            "from_ctx": prev_ctx,
-            "to_ctx": curr_ctx,
-        })
+        transitions.append(
+            {
+                "boundary_trial": b["start_trial"] - 0.5,
+                "trial_num": b["start_trial"] - 1,
+                "flipped": flipped,
+                "from_ctx": prev_ctx,
+                "to_ctx": curr_ctx,
+            }
+        )
 
-    print(f"Block {b['block_num']:<2} | {b['start_trial']:>2}-{b['end_trial']:<6} | Context {b['context']} | {status:<16} | {b['accuracy']:>6.1f}%    | {b['max_streak']} trials", flush=True)
+    print(
+        f"Block {b['block_num']:<2} | {b['start_trial']:>2}-{b['end_trial']:<6} | Context {b['context']} | {status:<16} | {b['accuracy']:>6.1f}%    | {b['max_streak']} trials",
+        flush=True,
+    )
 
 print("-" * 72, flush=True)
 print(f"Overall Accuracy: {overall_acc:.1f}%\n", flush=True)
 
 # ==============================================================================
-# 5. COMPACT PUBLICATION FIGURE 
+# 5. COMPACT PUBLICATION FIGURE
 # ==============================================================================
 fig, axes = plt.subplots(3, 1, figsize=(3, 3), dpi=300)
 
 trial_indices = np.arange(1, n_trials + 1)
 ctx_colors = {1: "#3498db", 2: "#e67e22"}
 xticks = sorted(list(set([1] + [b * BLOCK_SIZE for b in range(1, num_blocks + 1)] + [n_trials])))
+
 
 def add_decorations(ax):
     for b in block_info:
@@ -209,7 +224,8 @@ def add_decorations(ax):
         line_style = "--" if trans["flipped"] else ":"
         ax.axvline(trans["boundary_trial"], color=line_col, linestyle=line_style, lw=0.75, zorder=2)
 
-# Panel a: Trial raster 
+
+# Panel a: Trial raster
 ax1 = axes[0]
 add_decorations(ax1)
 
@@ -218,11 +234,20 @@ for b in block_info:
     mid_x = (b["start_trial"] + b["end_trial"]) / 2
     ax1.text(mid_x, 0.30, f"{b['accuracy']:.0f}%", ha="center", va="bottom", fontsize=4.5, color="#555555")
 
-#ax1.step(trial_indices, choices, where="mid", color="#555555", lw=0.7, alpha=0.4, zorder=1)
-rew_mask = (rewarded == 1)
-unrew_mask = (rewarded == 0)
+# ax1.step(trial_indices, choices, where="mid", color="#555555", lw=0.7, alpha=0.4, zorder=1)
+rew_mask = rewarded == 1
+unrew_mask = rewarded == 0
 s1 = ax1.scatter(trial_indices[rew_mask], choices[rew_mask], color="#27ae60", s=2, label="Reward +10", zorder=3)
-s2 = ax1.scatter(trial_indices[unrew_mask], choices[unrew_mask], facecolors="none", edgecolors="#c0392b", s=2, lw=0.8, label="No Reward", zorder=3)
+s2 = ax1.scatter(
+    trial_indices[unrew_mask],
+    choices[unrew_mask],
+    facecolors="none",
+    edgecolors="#c0392b",
+    s=2,
+    lw=0.8,
+    label="No Reward",
+    zorder=3,
+)
 
 # Highlight color patches for the legend
 patch_c1 = mpatches.Patch(facecolor="#3498db", alpha=0.35, edgecolor="none", label="Block R")
@@ -239,7 +264,7 @@ ax1.set_xlim(0.5, n_trials + 0.5)
 
 # Left: title; Right: overall accuracy
 ax1.set_title("a. Trial choices", loc="left", fontsize=8.5, pad=2)
-#ax1.text(n_trials + 0.5, 1.3, f"Overall accuracy: {overall_acc:.1f}%", fontsize=7, color="#555555")
+# ax1.text(n_trials + 0.5, 1.3, f"Overall accuracy: {overall_acc:.1f}%", fontsize=7, color="#555555")
 
 ax1.legend(
     handles=[patch_c1, patch_c2, s1, s2],
@@ -262,7 +287,9 @@ ax2.set_xlim(0.5, n_trials + 0.5)
 ax2.set_xlabel("Trial")
 ax2.set_ylabel("Choices")
 ax2.set_title("b. Cumulative choices", loc="left", fontsize=8.5, pad=2)
-ax2.legend(frameon=False, bbox_to_anchor=[1.02, 1], loc="upper left", handletextpad=0.2, borderaxespad=0.2, fontsize=7.5)
+ax2.legend(
+    frameon=False, bbox_to_anchor=[1.02, 1], loc="upper left", handletextpad=0.2, borderaxespad=0.2, fontsize=7.5
+)
 ax2.spines[["top", "right"]].set_visible(False)
 
 # Panel c: Consecutive streaks histogram

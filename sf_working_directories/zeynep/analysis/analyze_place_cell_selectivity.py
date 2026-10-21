@@ -25,12 +25,12 @@ from typing import Dict, List, Optional, Tuple
 
 import h5py
 import matplotlib as mpl
+
 mpl.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
-
+from matplotlib.ticker import MaxNLocator
 
 # Set publication style
 mpl.rcParams["font.sans-serif"] = "DejaVu Sans"
@@ -47,10 +47,10 @@ CONDITION_ORDER = [
 ]
 
 CATEGORY_COLORS = {
-    "Left Selective": "#2b5c8f",       # Deep blue
-    "Right Selective": "#800020",      # Bordeaux / dark red
-    "Both / Non-selective": "#2e7d32", # Green
-    "Silent / Inactive": "#cccccc",    # Neutral gray
+    "Left Selective": "#2b5c8f",  # Deep blue
+    "Right Selective": "#800020",  # Bordeaux / dark red
+    "Both / Non-selective": "#2e7d32",  # Green
+    "Silent / Inactive": "#cccccc",  # Neutral gray
 }
 
 
@@ -89,7 +89,6 @@ RUNS_CONFIG: List[Dict] = [
         "expname": "26_encoderonly_norew_INSTR_see_5555_l.rat_2e-05_D.c.mod_sigmoid_20260907_161454_787947",
         "train_dir": "/work/classic/fr_ze12-data/ymaze_CTRL/norew_INSTR/new_modulate/encoderonly/run1_grid/train_dir/encoderonly_norew_INSTR/encoderonly_norew_INSTR_",
     },
-
     # 3. Decoder + DG: Concat+Sigmoid
     {
         "setup": "Decoder + DG: Concat+Sigmoid",
@@ -121,7 +120,6 @@ RUNS_CONFIG: List[Dict] = [
         "expname": "84_sigmoid_norew_INSTR_see_5555_n.i.coe_200_r.sca_0.1_l.rat_2e-05_20260823_155030_501136",
         "train_dir": "/work/classic/fr_ze12-data/ymaze_CTRL/norew_INSTR/new_modulate/sigmoid_run2_grid/train_dir/sigmoid_norew_INSTR/sigmoid_norew_INSTR_",
     },
-
     # 4. Decoder
     {
         "setup": "Decoder",
@@ -156,7 +154,9 @@ RUNS_CONFIG: List[Dict] = [
 ]
 
 
-def resolve_telemetry_files(train_dir: str, expname: str, telemetry_base_dir: str = "/work/classic/fr_ze12-data2/telemetry_plots") -> Tuple[Optional[str], Optional[str]]:
+def resolve_telemetry_files(
+    train_dir: str, expname: str, telemetry_base_dir: str = "/work/classic/fr_ze12-data2/telemetry_plots"
+) -> Tuple[Optional[str], Optional[str]]:
     """Locates the latest pose_*.csv and activations_*.h5 files for a run."""
     # 1. Check in separate telemetry_base_dir
     candidate_dirs = [
@@ -213,7 +213,11 @@ def extract_context_series(pddata: pd.DataFrame) -> pd.Series:
                 for key in ["context", "INSTR", "instruction", "goal"]:
                     if key in first_dict:
                         return pddata["info"].apply(
-                            lambda s: json.loads(s).get(key) if isinstance(s, str) else (s.get(key) if isinstance(s, dict) else 1)
+                            lambda s: (
+                                json.loads(s).get(key)
+                                if isinstance(s, str)
+                                else (s.get(key) if isinstance(s, dict) else 1)
+                            )
                         )
         except Exception:
             pass
@@ -272,9 +276,17 @@ def analyze_single_run_selectivity(
     min_len = min(len(pddata), len(core_act))
     if min_len == 0:
         return {
-            "n_left": 0, "n_right": 0, "n_both": 0, "n_silent": hippo_n_features,
-            "pct_left": 0.0, "pct_right": 0.0, "pct_both": 0.0, "pct_silent": 100.0,
-            "left_neurons": [], "right_neurons": [], "both_neurons": [],
+            "n_left": 0,
+            "n_right": 0,
+            "n_both": 0,
+            "n_silent": hippo_n_features,
+            "pct_left": 0.0,
+            "pct_right": 0.0,
+            "pct_both": 0.0,
+            "pct_silent": 100.0,
+            "left_neurons": [],
+            "right_neurons": [],
+            "both_neurons": [],
             "silent_neurons": list(range(hippo_n_features)),
             "si_values": np.zeros(hippo_n_features),
             "classifications": ["Silent / Inactive"] * hippo_n_features,
@@ -332,7 +344,9 @@ def analyze_single_run_selectivity(
 
     for i in range(hippo_n_features):
         if np.any(mask1):
-            act1 = np.histogramdd((pddata.loc[mask1, "x"], pddata.loc[mask1, "y"]), bins, weights=sids[mask1, i], density=False)[0]
+            act1 = np.histogramdd(
+                (pddata.loc[mask1, "x"], pddata.loc[mask1, "y"]), bins, weights=sids[mask1, i], density=False
+            )[0]
             rate_map1 = np.divide(act1, occu1, out=np.zeros_like(act1), where=occu1 > 0)
             r1_mean = float(np.mean(sids[mask1, i]))
             p1_peak = float(np.max(rate_map1))
@@ -342,7 +356,9 @@ def analyze_single_run_selectivity(
             p1_peak = 0.0
 
         if np.any(mask2):
-            act2 = np.histogramdd((pddata.loc[mask2, "x"], pddata.loc[mask2, "y"]), bins, weights=sids[mask2, i], density=False)[0]
+            act2 = np.histogramdd(
+                (pddata.loc[mask2, "x"], pddata.loc[mask2, "y"]), bins, weights=sids[mask2, i], density=False
+            )[0]
             rate_map2 = np.divide(act2, occu2, out=np.zeros_like(act2), where=occu2 > 0)
             r2_mean = float(np.mean(sids[mask2, i]))
             p2_peak = float(np.max(rate_map2))
@@ -375,15 +391,17 @@ def analyze_single_run_selectivity(
             both_neurons.append(i)
 
         classifications.append(cat)
-        neuron_stats.append({
-            "feature_idx": i,
-            "r1_mean": r1_mean,
-            "r2_mean": r2_mean,
-            "p1_peak": p1_peak,
-            "p2_peak": p2_peak,
-            "SI": si,
-            "category": cat,
-        })
+        neuron_stats.append(
+            {
+                "feature_idx": i,
+                "r1_mean": r1_mean,
+                "r2_mean": r2_mean,
+                "p1_peak": p1_peak,
+                "p2_peak": p2_peak,
+                "SI": si,
+                "category": cat,
+            }
+        )
 
     # Summary counts and percentages
     n_left = len(left_neurons)
@@ -449,26 +467,30 @@ def run_full_statistical_analysis(
 
         print(f"[{idx:02d}] Processing {setup_name} (seed={seed})...")
         res = analyze_single_run_selectivity(csv_p, h5_p, si_threshold=si_threshold)
-        print(f"      -> Left: {res['n_left']} ({res['pct_left']:.1f}%), Right: {res['n_right']} ({res['pct_right']:.1f}%), Both: {res['n_both']} ({res['pct_both']:.1f}%), Silent: {res['n_silent']} ({res['pct_silent']:.1f}%)")
+        print(
+            f"      -> Left: {res['n_left']} ({res['pct_left']:.1f}%), Right: {res['n_right']} ({res['pct_right']:.1f}%), Both: {res['n_both']} ({res['pct_both']:.1f}%), Silent: {res['n_silent']} ({res['pct_silent']:.1f}%)"
+        )
 
-        run_records.append({
-            "Setup": setup_name,
-            "Seed": seed,
-            "Expname": expname,
-            "Left_Count": res["n_left"],
-            "Right_Count": res["n_right"],
-            "Both_Count": res["n_both"],
-            "Silent_Count": res["n_silent"],
-            "Left_Pct": res["pct_left"],
-            "Right_Pct": res["pct_right"],
-            "Both_Pct": res["pct_both"],
-            "Silent_Pct": res["pct_silent"],
-            "Selective_Pct": res["pct_left"] + res["pct_right"],
-            "Left_Neurons": str(res["left_neurons"]),
-            "Right_Neurons": str(res["right_neurons"]),
-            "Both_Neurons": str(res["both_neurons"]),
-            "Silent_Neurons": str(res["silent_neurons"]),
-        })
+        run_records.append(
+            {
+                "Setup": setup_name,
+                "Seed": seed,
+                "Expname": expname,
+                "Left_Count": res["n_left"],
+                "Right_Count": res["n_right"],
+                "Both_Count": res["n_both"],
+                "Silent_Count": res["n_silent"],
+                "Left_Pct": res["pct_left"],
+                "Right_Pct": res["pct_right"],
+                "Both_Pct": res["pct_both"],
+                "Silent_Pct": res["pct_silent"],
+                "Selective_Pct": res["pct_left"] + res["pct_right"],
+                "Left_Neurons": str(res["left_neurons"]),
+                "Right_Neurons": str(res["right_neurons"]),
+                "Both_Neurons": str(res["both_neurons"]),
+                "Silent_Neurons": str(res["silent_neurons"]),
+            }
+        )
 
         si_matrix.append(res["si_values"])
         row_labels.append(f"{setup_name} (seed {seed})")
@@ -502,20 +524,22 @@ def run_full_statistical_analysis(
         s_m, s_sem = get_mean_sem(sub["Silent_Pct"])
         tot_m, tot_sem = get_mean_sem(sub["Selective_Pct"])
 
-        summary_records.append({
-            "Setup": setup,
-            "Seeds": n_seeds,
-            "Left_Pct_Mean": l_m,
-            "Left_Pct_SEM": l_sem,
-            "Right_Pct_Mean": r_m,
-            "Right_Pct_SEM": r_sem,
-            "Both_Pct_Mean": b_m,
-            "Both_Pct_SEM": b_sem,
-            "Silent_Pct_Mean": s_m,
-            "Silent_Pct_SEM": s_sem,
-            "Selective_Pct_Mean": tot_m,
-            "Selective_Pct_SEM": tot_sem,
-        })
+        summary_records.append(
+            {
+                "Setup": setup,
+                "Seeds": n_seeds,
+                "Left_Pct_Mean": l_m,
+                "Left_Pct_SEM": l_sem,
+                "Right_Pct_Mean": r_m,
+                "Right_Pct_SEM": r_sem,
+                "Both_Pct_Mean": b_m,
+                "Both_Pct_SEM": b_sem,
+                "Silent_Pct_Mean": s_m,
+                "Silent_Pct_SEM": s_sem,
+                "Selective_Pct_Mean": tot_m,
+                "Selective_Pct_SEM": tot_sem,
+            }
+        )
 
     df_summary = pd.DataFrame(summary_records)
     summary_csv_path = os.path.join(output_dir, "summary_by_condition.csv")
@@ -552,10 +576,45 @@ def plot_stacked_percentages(df_summary: pd.DataFrame, output_dir: str):
     right_sems = df_summary["Right_Pct_SEM"].values
 
     # Horizontal Stacking
-    p1 = ax.barh(y, left_means, height, label="Left Selective", color=CATEGORY_COLORS["Left Selective"], edgecolor="white", linewidth=0.8)
-    p2 = ax.barh(y, right_means, height, left=left_means, label="Right Selective", color=CATEGORY_COLORS["Right Selective"], edgecolor="white", linewidth=0.8)
-    p3 = ax.barh(y, both_means, height, left=left_means + right_means, label="Both / Non-selective", color=CATEGORY_COLORS["Both / Non-selective"], edgecolor="white", linewidth=0.8)
-    p4 = ax.barh(y, silent_means, height, left=left_means + right_means + both_means, label="Silent / Inactive", color=CATEGORY_COLORS["Silent / Inactive"], edgecolor="white", linewidth=0.8)
+    p1 = ax.barh(
+        y,
+        left_means,
+        height,
+        label="Left Selective",
+        color=CATEGORY_COLORS["Left Selective"],
+        edgecolor="white",
+        linewidth=0.8,
+    )
+    p2 = ax.barh(
+        y,
+        right_means,
+        height,
+        left=left_means,
+        label="Right Selective",
+        color=CATEGORY_COLORS["Right Selective"],
+        edgecolor="white",
+        linewidth=0.8,
+    )
+    p3 = ax.barh(
+        y,
+        both_means,
+        height,
+        left=left_means + right_means,
+        label="Both / Non-selective",
+        color=CATEGORY_COLORS["Both / Non-selective"],
+        edgecolor="white",
+        linewidth=0.8,
+    )
+    p4 = ax.barh(
+        y,
+        silent_means,
+        height,
+        left=left_means + right_means + both_means,
+        label="Silent / Inactive",
+        color=CATEGORY_COLORS["Silent / Inactive"],
+        edgecolor="white",
+        linewidth=0.8,
+    )
 
     ax.set_title("Place Cell Selectivity by Condition", fontsize=11, pad=10, fontweight="medium")
     ax.set_xlabel("Neuron Proportion (%)", fontsize=9.5)
@@ -566,8 +625,8 @@ def plot_stacked_percentages(df_summary: pd.DataFrame, output_dir: str):
     ax.tick_params(axis="both", labelsize=8.5)
 
     # Style
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('white')
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
     for spine in ["bottom", "left"]:
@@ -608,8 +667,8 @@ def plot_si_heatmap(si_matrix: np.ndarray, row_labels: List[str], output_dir: st
     cbar.set_label("Selectivity Index (SI)\n[Right <- 0 -> Left]", fontsize=8)
     cbar.ax.tick_params(labelsize=7.5)
 
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('white')
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
     fig.tight_layout()
     svg_path = os.path.join(output_dir, "place_cell_si_heatmap.svg")
     pdf_path = os.path.join(output_dir, "place_cell_si_heatmap.pdf")
@@ -628,7 +687,9 @@ def plot_si_heatmap(si_matrix: np.ndarray, row_labels: List[str], output_dir: st
 # ==============================================================================
 def main():
     parser = argparse.ArgumentParser(description="Analyze place cell selectivity across 20 experimental runs.")
-    parser.add_argument("--output_dir", type=str, default="place_cell_analysis_results", help="Directory to save figures and CSVs.")
+    parser.add_argument(
+        "--output_dir", type=str, default="place_cell_analysis_results", help="Directory to save figures and CSVs."
+    )
     parser.add_argument("--si_thresh", type=float, default=0.2, help="Threshold for selectivity index (default: 0.2).")
     args = parser.parse_args()
 

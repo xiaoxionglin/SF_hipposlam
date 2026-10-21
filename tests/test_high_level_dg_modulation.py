@@ -19,22 +19,17 @@ or:
     pytest -v tests/test_high_level_dg_modulation.py
 """
 
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from sample_factory.algo.utils.shared_buffers import policy_output_shapes
-from sf_working_directories.zeynep.dmlab.custom_actor_critic import (
-    HighLevel_LossWrapper,
-)
+from sf_working_directories.zeynep.dmlab.custom_actor_critic import HighLevel_LossWrapper
 from sf_working_directories.zeynep.dmlab.custom_core import HighLevelRNNWrapperCore
-from sf_working_directories.zeynep.dmlab.custom_encoder import (
-    DGProjection_batchnorm_relu,
-    HipposlamEncoder,
-)
+from sf_working_directories.zeynep.dmlab.custom_encoder import DGProjection_batchnorm_relu, HipposlamEncoder
 
 
 class MockVisualBackbone(nn.Module):
@@ -64,6 +59,7 @@ class MockVisualBackbone(nn.Module):
 if hasattr(HipposlamEncoder, "set_hl_z"):
     ModulatedEncoderTarget = HipposlamEncoder
 else:
+
     class PrototypeModulatedEncoder(HipposlamEncoder):
         """Prototype wrapper adding hl_DG_mod functionality for pre-implementation testing."""
 
@@ -274,7 +270,7 @@ class TestHighLevelDGModulation(unittest.TestCase):
         """Verifies set_hl_z(z) method correctly influences forward pass when hl_z is omitted from dict."""
         cfg = make_test_cfg(hl_DG_mod="multiply")
         encoder = make_encoder_with_mock_backbone(cfg)
-        #encoder.eval()
+        # encoder.eval()
 
         obs_dict = {
             "obs": torch.randn(32, 3, 16, 16),
@@ -321,7 +317,7 @@ class TestHighLevelDGModulation(unittest.TestCase):
             }
 
             # Extract latched mode from recurrent state (last K elements)
-            z_prev = state[:, -cfg.hl_K:].clone()
+            z_prev = state[:, -cfg.hl_K :].clone()
             encoder.set_hl_z(z_prev)
             obs["hl_z"] = z_prev
 
@@ -334,7 +330,7 @@ class TestHighLevelDGModulation(unittest.TestCase):
             # Check core output: shift-register features + latched mode z
             self.assertEqual(core_out.shape[1], core.get_out_size())
             # Active mode is in the last K elements of the core output
-            z_active = core_out[:, -cfg.hl_K:]
+            z_active = core_out[:, -cfg.hl_K :]
             self.assertEqual(z_active.shape, (1, cfg.hl_K))
 
         self.assertEqual(outcomes_seen, 2, "Test did not simulate the expected outcome events")

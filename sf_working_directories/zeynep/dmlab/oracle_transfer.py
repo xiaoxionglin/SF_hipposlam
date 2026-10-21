@@ -7,7 +7,6 @@ import torch
 
 from sample_factory.utils.utils import log
 
-
 SUPPORTED_DG = {"concat", "multiply", "sigmoid"}
 SUPPORTED_DECODER = {"enter", "FiLM", "additive"}
 
@@ -55,7 +54,9 @@ def prepare_oracle_transfer(cfg):
     if source.get("env") is not None and source["env"] != cfg.env:
         if not (source["env"].startswith("ymaze") and cfg.env.startswith("ymaze")):
             raise ValueError(f"Incompatible oracle environment: source {source['env']!r}, target {cfg.env!r}")
-        log.warning("Transferring controller across ymaze environments: source '%s' -> target '%s'", source["env"], cfg.env)
+        log.warning(
+            "Transferring controller across ymaze environments: source '%s' -> target '%s'", source["env"], cfg.env
+        )
 
     expected = {
         "core_name": "BypassSS",
@@ -74,16 +75,41 @@ def prepare_oracle_transfer(cfg):
         raise ValueError(f"Unsupported oracle Decoder_context_mod={source.get('Decoder_context_mod')!r}")
 
     structural = (
-        "encoder_conv_architecture", "encoder_conv_mlp_layers", "encoder_name",
-        "encoder_type", "encoder_subtype",
-        "decoder_mlp_layers", "DG_name", "DG_BN_intercept", "DG_lr", "DG_temperature",
-        "DG_batch_q", "DG_softmax", "DG_detect", "DG_novelty",
-        "Hippo_n_feature", "Hippo_L", "Hippo_R", "res_h", "res_w",
-        "depth_sensor", "with_number_instruction", "number_instruction_coef", "context_injection_coef",
-        "DG_context_mod", "Decoder_context_mod", "dmlab_reduced_action_set",
-        "dmlab_navigation_action_set", "dmlab_extended_action_set", "env_frameskip",
-        "nonlinearity", "normalize_input", "normalize_input_keys",
-        "obs_scale", "obs_subtract_mean", "use_jit",
+        "encoder_conv_architecture",
+        "encoder_conv_mlp_layers",
+        "encoder_name",
+        "encoder_type",
+        "encoder_subtype",
+        "decoder_mlp_layers",
+        "DG_name",
+        "DG_BN_intercept",
+        "DG_lr",
+        "DG_temperature",
+        "DG_batch_q",
+        "DG_softmax",
+        "DG_detect",
+        "DG_novelty",
+        "Hippo_n_feature",
+        "Hippo_L",
+        "Hippo_R",
+        "res_h",
+        "res_w",
+        "depth_sensor",
+        "with_number_instruction",
+        "number_instruction_coef",
+        "context_injection_coef",
+        "DG_context_mod",
+        "Decoder_context_mod",
+        "dmlab_reduced_action_set",
+        "dmlab_navigation_action_set",
+        "dmlab_extended_action_set",
+        "env_frameskip",
+        "nonlinearity",
+        "normalize_input",
+        "normalize_input_keys",
+        "obs_scale",
+        "obs_subtract_mean",
+        "use_jit",
     )
     for key in structural:
         if key in source:
@@ -100,8 +126,15 @@ def prepare_oracle_transfer(cfg):
     cfg.DG_context_mod = "sigmoid"
     cfg.Decoder_context_mod = "enter"
     cfg.decoder_type = "mlp"
-    for key in ("oracle_init_checkpoint", "core_name", "oracle_context", "hl_dg_from_prev_z",
-                "hl_K", "actor_critic_share_weights", "decoder_type"):
+    for key in (
+        "oracle_init_checkpoint",
+        "core_name",
+        "oracle_context",
+        "hl_dg_from_prev_z",
+        "hl_K",
+        "actor_critic_share_weights",
+        "decoder_type",
+    ):
         cfg.cli_args[key] = getattr(cfg, key)
 
     if cfg.oracle_freeze_controller and getattr(cfg, "hl_diversity_reward_coef", 0.0) > 0:
@@ -110,13 +143,18 @@ def prepare_oracle_transfer(cfg):
     # The high-level wrapper stores the fixed CA3 register, depth bypass, the
     # two-dimensional oracle-like bypass, high state, trial history, and z.
     base_size = cfg.Hippo_n_feature * (cfg.Hippo_L + cfg.Hippo_R - 1)
-    base_size += (10 if cfg.depth_sensor else 0) # do not add +2
+    base_size += 10 if cfg.depth_sensor else 0  # do not add +2
     event_width = cfg.hl_d_H + cfg.hl_K + 2
     cfg.rnn_size = base_size + cfg.hl_d_H + cfg.hl_history_len * event_width + cfg.hl_K
     cfg.cli_args["rnn_size"] = cfg.rnn_size
-    log.warning("Oracle transfer: %s (DG=%s, decoder=%s, scale=%s, rnn_size=%s)",
-                checkpoint, cfg.DG_context_mod, cfg.Decoder_context_mod,
-                cfg.number_instruction_coef, cfg.rnn_size)
+    log.warning(
+        "Oracle transfer: %s (DG=%s, decoder=%s, scale=%s, rnn_size=%s)",
+        checkpoint,
+        cfg.DG_context_mod,
+        cfg.Decoder_context_mod,
+        cfg.number_instruction_coef,
+        cfg.rnn_size,
+    )
     return source
 
 
@@ -128,10 +166,18 @@ def load_oracle_controller(actor_critic, checkpoint):
     if not isinstance(source, dict):
         raise ValueError(f"Oracle checkpoint has no model state dictionary: {checkpoint}")
     target = actor_critic.state_dict()
-    prefixes = ("obs_normalizer.", "encoder.", "core.base_core.", "decoder.",
-                "action_parameterization.", "critic_linear.", "returns_normalizer.")
+    prefixes = (
+        "obs_normalizer.",
+        "encoder.",
+        "core.base_core.",
+        "decoder.",
+        "action_parameterization.",
+        "critic_linear.",
+        "returns_normalizer.",
+    )
     source_only = sorted(
-        key for key in source
+        key
+        for key in source
         if key.startswith(prefixes)
         and key not in target
         and not (key.startswith("encoder.instruction_embed_layer.") and "encoder.hl_mode_embed_layer.weight" in target)
@@ -195,7 +241,7 @@ def load_oracle_controller(actor_critic, checkpoint):
             ):
                 base_dim = value.shape[1] - 2  # 1146 (CA3 + Depth)
                 # Keep base features, drop Context 0 (at index base_dim), keep Context 1 & 2
-                old = torch.cat([old[:, :base_dim], old[:, base_dim + 1:]], dim=1)
+                old = torch.cat([old[:, :base_dim], old[:, base_dim + 1 :]], dim=1)
                 converted.append(f"{key} (dropped slot 0, kept active contexts 1 & 2 -> {value.shape[1]})")
 
             # Case 2: encoder.instruction_embed_layer.weight (16, 3) -> (16, 2)
@@ -221,9 +267,13 @@ def load_oracle_controller(actor_critic, checkpoint):
                     old = old[:, :2]
                     converted.append(f"{key} (kept active contexts 0 & 1)")
                 else:
-                    raise ValueError(f"Incompatible oracle tensor {key}: source {tuple(old.shape)}, target {tuple(value.shape)}")
+                    raise ValueError(
+                        f"Incompatible oracle tensor {key}: source {tuple(old.shape)}, target {tuple(value.shape)}"
+                    )
             else:
-                raise ValueError(f"Incompatible oracle tensor {key}: source {tuple(old.shape)}, target {tuple(value.shape)}")
+                raise ValueError(
+                    f"Incompatible oracle tensor {key}: source {tuple(old.shape)}, target {tuple(value.shape)}"
+                )
         copied[key] = old
 
     missing, unexpected = actor_critic.load_state_dict(copied, strict=False)
@@ -235,7 +285,11 @@ def load_oracle_controller(actor_critic, checkpoint):
     )
     if unexpected or any(not key.startswith(allowed_missing_prefixes) for key in missing):
         raise ValueError(f"Unexpected transfer state: missing={missing}, unexpected={unexpected}")
-    log.warning("Initialized %d controller tensors from %s; conversions: %s. "
-                "High-level learner, optimizer, and progress start fresh.",
-                len(copied), checkpoint, converted if converted else "none")
+    log.warning(
+        "Initialized %d controller tensors from %s; conversions: %s. "
+        "High-level learner, optimizer, and progress start fresh.",
+        len(copied),
+        checkpoint,
+        converted if converted else "none",
+    )
     return copied, converted

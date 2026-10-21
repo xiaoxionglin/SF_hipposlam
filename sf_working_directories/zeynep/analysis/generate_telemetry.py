@@ -57,8 +57,8 @@ cli = [
     mapname,  # pick any DM‑Lab level you have
     "--experiment",
     expname,
-    #"--encoder_load_path",
-    #"/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
+    # "--encoder_load_path",
+    # "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
     "--train_dir",
     train_dir,  # anything writable
     "--max_num_frames",
@@ -74,20 +74,27 @@ cli = [
     "--with_pos_obs",
     "True",
     "--no_render",  # <-- skip human window; avoid X11 on servers
-    "--oracle_context", "True",
-    "--DG_context_mod", "sigmoid",
-    "--Decoder_context_mod", "enter",
-    "--rnn_size", "1149",
-    "--core_name", "BypassSS",
-    "--reward_scale", "0.1",
-    "--learning_rate", "0.00002",
+    "--oracle_context",
+    "True",
+    "--DG_context_mod",
+    "sigmoid",
+    "--Decoder_context_mod",
+    "enter",
+    "--rnn_size",
+    "1149",
+    "--core_name",
+    "BypassSS",
+    "--reward_scale",
+    "0.1",
+    "--learning_rate",
+    "0.00002",
 ]
 
 cli_dict = {
     "algo": "APPO",
     "env": mapname,
     "experiment": expname,
-    #"encoder_load_path": "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
+    # "encoder_load_path": "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
     "train_dir": train_dir,
     "max_num_frames": "50000",
     "num_envs": "8",
@@ -154,11 +161,11 @@ actor_critic.model_to_device(device)
 
 #################### register hook
 layers_to_log = [
-    #"encoder.basic_encoder.mlp_layers.0",
+    # "encoder.basic_encoder.mlp_layers.0",
     "encoder.DG_projection.linear",
     "core",
     "decoder.mlp.0",
-    "decoder.mlp.2"
+    "decoder.mlp.2",
 ]  # <- example; edit to taste
 
 # 2B. activation buffer
@@ -225,7 +232,7 @@ with torch.no_grad():
     while not max_frames_reached(num_frames):
         # log.info(f'Done Frames: {num_frames}')
         # log.debug(f'Generating Actions from Observation')
-        
+
         # maybe not normalize. check its consıstent wıth the traınıng code
         normalized_obs = prepare_and_normalize_obs(actor_critic, obs)
 
@@ -264,11 +271,7 @@ with torch.no_grad():
             # log.debug(f'Writing Information')
 
             for agent_i in range(env.num_agents):
-              current_context = (
-                  int(obs["INSTR"][agent_i].item())
-                  if "INSTR" in obs
-                  else int(obs["INSTR"][0].item())
-              )
+                current_context = int(obs["INSTR"][agent_i].item()) if "INSTR" in obs else int(obs["INSTR"][0].item())
 
             for agent_i in range(env.num_agents):
                 pose_records.append(
@@ -378,9 +381,9 @@ env.close()
 
 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 orig_dir = pathlib.Path(experiment_dir(cfg=cfg))
-#save_dir = pathlib.Path(str(orig_dir).replace("fr_ze12-data", "fr_ze12-data2"))
+# save_dir = pathlib.Path(str(orig_dir).replace("fr_ze12-data", "fr_ze12-data2"))
 telemetry = orig_dir / "telemetry"
-#telemetry = save_dir / "telemetry"
+# telemetry = save_dir / "telemetry"
 _ensure_parent(telemetry)
 pose_path = telemetry / f"pose_{ts}.parquet"
 

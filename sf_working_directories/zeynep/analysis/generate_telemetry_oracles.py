@@ -88,7 +88,6 @@ experiments = [
         "reward_scale": "0.01",
         "learning_rate": "0.00002",
     },
-
     # -----------------------------------------------------------------------
     # 2. DG: Concat (5 seeds)
     # -----------------------------------------------------------------------
@@ -132,7 +131,6 @@ experiments = [
         "reward_scale": "0.01",
         "learning_rate": "0.00002",
     },
-
     # -----------------------------------------------------------------------
     # 3. Decoder + DG: Concat+Sigmoid (5 seeds)
     # -----------------------------------------------------------------------
@@ -176,7 +174,6 @@ experiments = [
         "reward_scale": "0.1",
         "learning_rate": "0.00002",
     },
-
     # -----------------------------------------------------------------------
     # 4. Decoder (5 seeds)
     # -----------------------------------------------------------------------
@@ -222,13 +219,16 @@ experiments = [
     },
 ]
 
-experiments = [{"expname": "42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05",
-                "train_dir":"/work/classic/fr_ze12-data/ymaze_CTRL/noINSTR/run2_grid/train_dir/noINSTR/noINSTR_",
-                 "DG_context_mod": "None",
-                 "Decoder_context_mod": "None",
-                 "reward_scale": "1.0",
-                 "learning_rate": "0.00002"
-                 }]
+experiments = [
+    {
+        "expname": "42_noINSTR_see_5555_r.sca_1.0_l.rat_2e-05",
+        "train_dir": "/work/classic/fr_ze12-data/ymaze_CTRL/noINSTR/run2_grid/train_dir/noINSTR/noINSTR_",
+        "DG_context_mod": "None",
+        "Decoder_context_mod": "None",
+        "reward_scale": "1.0",
+        "learning_rate": "0.00002",
+    }
+]
 
 
 # Separate directory to save all telemetry results (outside the checkpoint folder)
@@ -244,7 +244,9 @@ for exp_info in experiments:
 
     target_dir_1 = pathlib.Path(output_telemetry_dir) / expname / "telemetry"
     target_dir_2 = pathlib.Path(train_dir) / expname / "telemetry"
-    if (target_dir_1.exists() and any(target_dir_1.glob("*.csv"))) or (target_dir_2.exists() and any(target_dir_2.glob("*.csv"))):
+    if (target_dir_1.exists() and any(target_dir_1.glob("*.csv"))) or (
+        target_dir_2.exists() and any(target_dir_2.glob("*.csv"))
+    ):
         log.info(f"Skipping {expname}: telemetry already exists.")
         continue
 
@@ -260,8 +262,8 @@ for exp_info in experiments:
         mapname,  # pick any DM‑Lab level you have
         "--experiment",
         expname,
-        #"--encoder_load_path",
-        #"/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
+        # "--encoder_load_path",
+        # "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
         "--train_dir",
         train_dir,  # anything writable
         "--max_num_frames",
@@ -277,20 +279,27 @@ for exp_info in experiments:
         "--with_pos_obs",
         "True",
         "--no_render",  # <-- skip human window; avoid X11 on servers
-        "--oracle_context", "True",
-        "--DG_context_mod", dg_context_mod,
-        "--Decoder_context_mod", decoder_context_mod,
-        "--rnn_size", "1146",
-        "--core_name", "BypassSS",
-        "--reward_scale", str(reward_scale),
-        "--learning_rate", str(learning_rate),
+        "--oracle_context",
+        "True",
+        "--DG_context_mod",
+        dg_context_mod,
+        "--Decoder_context_mod",
+        decoder_context_mod,
+        "--rnn_size",
+        "1146",
+        "--core_name",
+        "BypassSS",
+        "--reward_scale",
+        str(reward_scale),
+        "--learning_rate",
+        str(learning_rate),
     ]
 
     cli_dict = {
         "algo": "APPO",
         "env": mapname,
         "experiment": expname,
-        #"encoder_load_path": "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
+        # "encoder_load_path": "/home/fr/fr_js1764/clean_install_mamba/best_000025288_203030528_reward_94.185.pth",
         "train_dir": train_dir,
         "max_num_frames": "50000",
         "num_envs": "8",
@@ -309,7 +318,6 @@ for exp_info in experiments:
     }
 
     cfg = parse_dmlab_args(evaluation=True, argv=cli)
-
 
     if "encoderonly" in expname:
         cfg.rnn_size = "1146"
@@ -333,7 +341,9 @@ for exp_info in experiments:
     cfg.oracle_context = True
 
     eval_env_frameskip: int = cfg.env_frameskip
-    assert cfg.env_frameskip % eval_env_frameskip == 0, f"{cfg.env_frameskip=} must be divisible by {eval_env_frameskip=}"
+    assert (
+        cfg.env_frameskip % eval_env_frameskip == 0
+    ), f"{cfg.env_frameskip=} must be divisible by {eval_env_frameskip=}"
     render_action_repeat: int = cfg.env_frameskip // eval_env_frameskip
     cfg.env_frameskip = cfg.eval_env_frameskip = eval_env_frameskip
     log.debug(f"Using frameskip {cfg.env_frameskip} and {render_action_repeat=} for evaluation")
@@ -346,7 +356,9 @@ for exp_info in experiments:
     # elif cfg.no_render:
     render_mode = None
 
-    env = make_env_func_batched(cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode)
+    env = make_env_func_batched(
+        cfg, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0), render_mode=render_mode
+    )
     env_info = extract_env_info(env, cfg)
 
     if hasattr(env.unwrapped, "reset_on_init"):
@@ -363,11 +375,11 @@ for exp_info in experiments:
 
     #################### register hook
     layers_to_log = [
-        #"encoder.basic_encoder.mlp_layers.0",
+        # "encoder.basic_encoder.mlp_layers.0",
         "encoder.DG_projection.linear",
         "core",
         "decoder.mlp.0",
-        "decoder.mlp.2"
+        "decoder.mlp.2",
     ]  # <- example; edit to taste
 
     # 2B. activation buffer
@@ -469,9 +481,7 @@ for exp_info in experiments:
 
                 for agent_i in range(env.num_agents):
                     current_context = (
-                        int(obs["INSTR"][agent_i].item())
-                        if "INSTR" in obs
-                        else int(obs["INSTR"][0].item())
+                        int(obs["INSTR"][agent_i].item()) if "INSTR" in obs else int(obs["INSTR"][0].item())
                     )
 
                 for agent_i in range(env.num_agents):
@@ -561,7 +571,9 @@ for exp_info in experiments:
                                 avg_true_objective_str += ", "
                             avg_true_objective_str += f"#{agent_i}: {avg_true_obj:.3f}"
 
-                    log.info("Avg episode rewards: %s, true rewards: %s", avg_episode_rewards_str, avg_true_objective_str)
+                    log.info(
+                        "Avg episode rewards: %s, true rewards: %s", avg_episode_rewards_str, avg_true_objective_str
+                    )
                     log.info(
                         "Avg episode reward: %.3f, avg true_objective: %.3f",
                         np.mean([np.mean(episode_rewards[i]) for i in range(env.num_agents)]),
@@ -584,7 +596,7 @@ for exp_info in experiments:
         h.remove()
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    #telemetry = pathlib.Path(experiment_dir(cfg=cfg)) / "telemetry"
+    # telemetry = pathlib.Path(experiment_dir(cfg=cfg)) / "telemetry"
     telemetry = pathlib.Path(output_telemetry_dir) / expname / "telemetry"
     telemetry.mkdir(parents=True, exist_ok=True)
     _ensure_parent(telemetry)
