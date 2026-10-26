@@ -91,9 +91,7 @@ def test_layer2_lstm_baseline_keeps_inputs_and_trains_projection_and_lstm(tmp_pa
     expected_depth = actor.encoder.depth_encoder(obs["obs"][:, -1:]).flatten(1)
     torch.testing.assert_close(head[:, 64:74], expected_depth)
     torch.testing.assert_close(head[:, 74:77], torch.tensor([0.0, 0.0, 1.0]).expand(batch, -1))
-    torch.testing.assert_close(
-        head[:, 77:], torch.nn.functional.one_hot(obs["INSTR"].flatten() - 1, 5).float()
-    )
+    torch.testing.assert_close(head[:, 77:], torch.nn.functional.one_hot(obs["INSTR"].flatten() - 1, 5).float())
     if mode == "sparse":
         assert (head[:, :64] == 0).float().mean() > 0.8
         assert (head[:, :64] > 0).any()
@@ -143,9 +141,7 @@ def test_dense_projection_removes_only_the_sparse_activation():
 
 
 def test_legacy_architecture_defaults_are_unchanged(tmp_path):
-    cfg = parse_dmlab_args(
-        ["--env=openfield_map2_fixed_loc3", "--experiment=legacy", f"--train_dir={tmp_path}"]
-    )
+    cfg = parse_dmlab_args(["--env=openfield_map2_fixed_loc3", "--experiment=legacy", f"--train_dir={tmp_path}"])
     assert cfg.layer2_lstm_baseline == "off"
     assert cfg.encoder_conv_architecture == "convnet_impala"
     assert cfg.distance_learning and cfg.online_spatial_telemetry
