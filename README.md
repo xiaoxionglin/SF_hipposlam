@@ -19,9 +19,9 @@ It is also available as a [standalone ZIP](exports/intrmotiv_prediction_starter_
   - the appropriate wheel depends on your environment, try [`magic dmlab wheel`](https://drive.google.com/file/d/1YEXjm06f79KY5LB4NZ0e4xce3j1dcuxf/view?usp=drive_link), or the wheel from sample factory
 - pip uninstall numpy
 - pip install dm_env
-- (fork samplefactory)
-- clone samplefactory
-- cd samplefactory
+- (fork `this repo`)
+- clone `your fork` or `this repo`
+- cd `the name of your fork` (you should be at the same level as this README.md file)
 - pip install -e .\[dev,mujoco,atari,vizdoom\] -> arguments depend on which environment, we do not need any
 - pip install torchvision
   - some functions need it, like default resnet18
