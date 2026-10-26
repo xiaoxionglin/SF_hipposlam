@@ -20,7 +20,6 @@ from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.utils import log
-from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
 
 XBOUND = (100.0, 2000.0)
 YBOUND = (100.0, 2000.0)
@@ -165,6 +164,9 @@ def load_policy_env(
     checkpoint_path: pathlib.Path | None = None,
 ):
     """Load one frozen policy and matching DMLab environment for offline probes."""
+    # Checkpoint-only audits can import this module without the DMLab/model stack.
+    from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import parse_dmlab_args, register_dmlab_components
+
     register_dmlab_components()
     cfg = parse_dmlab_args(evaluation=True, argv=cli_for_run(run_dir, max_num_frames, deterministic))
     cfg.cli_args = {

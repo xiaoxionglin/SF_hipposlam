@@ -1,4 +1,4 @@
-name: docs 
+name: docs
 on:
   push:
     branches:
@@ -6,23 +6,22 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v2
+      - uses: actions/setup-python@v7
         with:
-          python-version: 3.9
+          python-version: "3.10"
+          cache: pip
       - name: install dependencies
         run: |
-          pip install mkdocs-material
-          pip install mkdocs-minify-plugin
-          pip install mkdocs-redirects
-          pip install mkdocs-git-revision-date-localized-plugin
-          pip install mkdocs-git-committers-plugin-2
-          pip install mkdocs-git-authors-plugin
-          pip install -e .
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . mkdocs-material mkdocs-minify-plugin mkdocs-redirects mkdocs-git-revision-date-localized-plugin mkdocs-git-committers-plugin-2 mkdocs-git-authors-plugin
       - name: generate config params doc
-        run: bash ./docs/cfg-params.sh
+        run: bash -e ./docs/cfg-params.sh
       - name: deploy the website
-        run: mkdocs gh-deploy --force
+        run: python -m mkdocs gh-deploy --force

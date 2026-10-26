@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import torch
@@ -54,3 +56,22 @@ def test_production_is_full_paired_matrix_with_declared_metrics_and_contrasts():
 def test_checkpoint_buffer_lookup_requires_one_exact_suffix():
     model = {"core.policy_graph.active_goal_mask": torch.tensor([False, True])}
     assert _model_buffer(model, "policy_graph.active_goal_mask").tolist() == [False, True]
+
+
+def test_checkpoint_audit_import_does_not_require_environment_dependencies():
+    script = """
+import importlib.abc
+import sys
+
+class BlockEnvironmentImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'deepmind_lab', 'torchvision'}:
+            raise ImportError('Checkpoint audit imported optional dependency: ' + fullname)
+        return None
+
+sys.meta_path.insert(0, BlockEnvironmentImports())
+from hpc_runs.audit_ca3_predictive_active_goals_preflight import _model_buffer
+from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
+assert callable(_model_buffer) and callable(load_checkpoint_dict)
+"""
+    subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[1], check=True)
