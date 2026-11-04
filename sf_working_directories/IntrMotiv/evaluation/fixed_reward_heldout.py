@@ -74,8 +74,12 @@ def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_cell, horiz
         "start_x": float(start[0]),
         "start_y": float(start[1]),
         "start_region": start_region(*start[:2]),
-        "terminal_x": float(end[0]),
-        "terminal_y": float(end[1]),
+        # Sample Factory returns the next reset observation on termination.
+        # Its position is not the previous episode's terminal position; this
+        # PPO evaluator has no certified pre-reset terminal-pose channel.
+        "terminal_x": "" if terminal else float(end[0]),
+        "terminal_y": "" if terminal else float(end[1]),
+        "terminal_pose_valid": not terminal,
         "physical_success": total_reward > 0,
         "external_reward": total_reward,
         "decisions_to_termination": decision,
