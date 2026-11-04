@@ -1,6 +1,6 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.14.1` (ignore nested online-spatial artifact folders during exact run discovery)
+- Implementation: `1.15.0` (qualify explicit DG plasticity, scratch, and frozen-worker transfer controls)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 verified 1.14.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/global_defaults_v114/hpc_runs/intrmotiv_study/`
@@ -8,6 +8,17 @@
 - NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.15.0 explicit transfer-plasticity qualification
+
+`transfer_audit` retains the strict frozen-source check and now derives DG
+ownership from explicit freeze, calibration, PPO-gradient, and encoder-gradient
+settings. It checks weights separately from BatchNorm moments, once-only random
+calibration, fresh scratch modules, exact frozen workers, and observed zero or
+nonzero gradient paths. The main intrinsic DG loss requires
+`encoder_grad_coeff=0` for a PPO-only or normalization-only control;
+`extra_encoder_losses=False` alone does not disable it. The expanded cue-transfer
+study is the reference. Original StudySpecs and hashes remain unchanged.
 
 ## 1.14.1 run discovery with online-spatial artifacts
 
