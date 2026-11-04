@@ -2599,7 +2599,7 @@ or qualification for a cluster run.</p>
 </tr>
 <tr>
 <td><a href="../sf_xxl/dmlab/"><code>sf_xxl/dmlab/</code></a></td>
-<td>Existing HippoSLAM/world-model entry point. Its <code>train_hipposlam.py</code> currently imports the <strong>default</strong> model/parser; do not infer the selected implementation from the entry-point folder alone.</td>
+<td>Existing HippoSLAM/world-model entry points. <code>train_hipposlam.py</code> imports the <strong>default</strong> model/parser; <code>train_dmlab.py</code> imports <strong>jannek</strong>. Check the executable's imports when choosing a model.</td>
 </tr>
 <tr>
 <td><a href="../sf_examples/simgay/README.md"><code>sf_examples/simgay/</code></a></td>
@@ -2637,7 +2637,7 @@ and state keys continue to work. Whole encoders and cores are not interchangeabl
 </tr>
 <tr>
 <td><strong>GeoMem</strong></td>
-<td>Its existing categorical DG implementation matches IntrMotiv. <code>CategoricalDGEncoder</code> can now import <code>sf_shared.dg</code> lazily; the supervised sensory runner exposes the same choice. The local backend remains available without installing SF. Its APPO adapter already uses IntrMotiv components; its restricted sequence core is not a substitute for the full research core.</td>
+<td>Its existing categorical DG implementation matches IntrMotiv. <code>CategoricalDGEncoder</code> can now import <code>sf_shared.dg</code> lazily; the supervised sensory runner and built-in APPO representation expose the same choice. The local backend remains available without installing SF. Its APPO adapter already uses IntrMotiv components; its restricted sequence core is not a substitute for the full research core.</td>
 </tr>
 <tr>
 <td><strong>MorphSCA</strong></td>
@@ -2690,9 +2690,9 @@ model, environment and scientific configuration. Enable one change at a time.</p
 </tr>
 <tr>
 <td>Shared DG in GeoMem</td>
-<td>Python: <code>projection_backend="sf_shared"</code>; supervised CLI: <code>--dg-projection-backend sf_shared</code></td>
-<td><code>local</code></td>
-<td>Shared backend needs this SF checkout on Python's path. Local backend has no new dependency. Checkpoint metadata records the selection.</td>
+<td>Python: <code>projection_backend="sf_shared"</code>; supervised CLI: <code>--dg-projection-backend sf_shared</code>; built-in APPO representation: <code>--shared_dg_projection=True</code></td>
+<td><code>local</code>, or APPO <code>False</code></td>
+<td>Shared backend needs this SF package installed. Local backend has no new dependency. Custom APPO representation factories require the flag to remain False. Encoder exports and full actor state dictionaries load strictly in both directions.</td>
 </tr>
 <tr>
 <td>Capped inverse depth</td>
@@ -2772,13 +2772,29 @@ Importing these modules does not load DMLab, TorchVision or a training entry
 point. Depth additionally uses the existing Sample Factory encoder base.
 Consumers should import what they use rather than create another package-wide
 registry or copy the shared source.</p>
+<p>Install from this repository with <code>python -m pip install .</code>, or use
+<code>python -m pip install '.[analysis]'</code> for Matplotlib-based saved-output rendering.
+The wheel includes the reusable study workflow, runtime transport dependencies,
+study schema and the two default geometry maps. Study-specific launch scripts,
+source snapshots and result bundles remain in the source checkout. An installed
+wheel is not a copy of the whole research workspace.</p>
+<p>The versioned <code>exports/intrmotiv_prediction_starter/</code> directory is a frozen
+distribution. Its contents must match its original manifest and ZIP byte for
+byte; formatters exclude it. Make future changes as a new versioned export
+instead of rewriting the published payload or its recorded hashes.</p>
 <h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">&para;</a></h2>
 <p>Focused tests cover exact shared/legacy outputs, gradients, running statistics,
 state keys, old-checkpoint loading, explicit false parsing, optimizer restart,
 partly/wholly skipped PPO updates, workflow provenance and scientific metric
 invariants. SimGaY tests retain golden environment/event sequences, independent
 actuator randomness, training isolation and manager checkpoint validation.
-GeoMem compares prediction and one optimizer step across both backends.</p>
+GeoMem compares prediction and one optimizer step across both backends, checks
+the APPO parser's actual selection, and loads encoder exports and full actor
+checkpoints across both implementations.</p>
+<p>CI builds a wheel and checks it from a temporary directory with source checkout
+and editable-install paths removed. The probe verifies runtime imports, CLI help,
+the packaged schema and both default geometry loaders. Frozen-export tests also
+check file hashes, ZIP integrity and its complete member inventory.</p>
 <p>The pre-existing StudySpecs keep their fingerprints and rendered rows. These
 checks do not deploy the code to NEMO2, rerun scientific experiments, demonstrate
 GPU parity, or qualify altered scientific conditions for production.</p>
@@ -2808,7 +2824,7 @@ and update this guide when ownership changes.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 4, 2026 01:53:28 UTC">November 4, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 4, 2026 02:31:43 UTC">November 4, 2026</span>
   </span>
 
     
