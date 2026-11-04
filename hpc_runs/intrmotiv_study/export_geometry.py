@@ -5,8 +5,8 @@ explicitly so this command cannot silently export an older installed level.
 """
 
 import argparse
-import json
 from hashlib import sha256
+import json
 from pathlib import Path
 
 from .geometry import entity_record

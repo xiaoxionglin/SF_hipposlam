@@ -80,6 +80,19 @@ class StudySpecTests(unittest.TestCase):
             with self.assertRaises(SpecError):
                 discover_run_directories(self.study, root)
 
+    def test_online_spatial_artifact_named_like_run_is_not_duplicate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for run in self.study.expand_runs():
+                container = root / f"{run.name}_"
+                actual = container / f"00_{run.name}"
+                actual.mkdir(parents=True)
+                (actual / "config.json").write_text("{}")
+                (container / "analysis" / "online_spatial" / "unbatched" / run.name).mkdir(parents=True)
+            found = discover_run_directories(self.study, root)
+            self.assertEqual(len(found), self.study.expected_runs)
+            self.assertTrue(all(path.name.startswith("00_") for path in found.values()))
+
     def test_real_factorial_study_expands_to_unique_runs(self):
         runs = self.study.expand_runs()
         self.assertEqual(self.study.expected_runs, 36)
@@ -90,7 +103,7 @@ class StudySpecTests(unittest.TestCase):
         self.assertIn("--seed=8", runs[0].args)
         self.assertEqual(self.study.raw["schema"], SCHEMA_ID)
         self.assertEqual(self.study.declared_workflow_version, "1.0.0")
-        self.assertEqual(WORKFLOW_VERSION, "1.14.0")
+        self.assertEqual(WORKFLOW_VERSION, "1.14.1")
         self.assertEqual(len(self.study.fingerprint), 64)
 
     def test_machine_readable_schema_is_valid_json(self):

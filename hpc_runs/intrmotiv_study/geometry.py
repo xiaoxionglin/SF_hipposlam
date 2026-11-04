@@ -6,10 +6,10 @@ These helpers never supply model inputs or training rewards.
 
 from __future__ import annotations
 
-import json
 from collections import deque
 from functools import lru_cache
 from hashlib import sha256
+import json
 from pathlib import Path
 
 import numpy as np
@@ -26,16 +26,8 @@ _DIRECTIONS = (
 )
 _DECALS = tuple(f"decal/lab_games/dec_img_style01_{index:03d}" for index in range(1, 11))
 _COLORS = (
-    "#E6194B",
-    "#3CB44B",
-    "#4363D8",
-    "#F58231",
-    "#911EB4",
-    "#42D4F4",
-    "#F032E6",
-    "#BFEF45",
-    "#FABED4",
-    "#469990",
+    "#E6194B", "#3CB44B", "#4363D8", "#F58231", "#911EB4",
+    "#42D4F4", "#F032E6", "#BFEF45", "#FABED4", "#469990",
 )
 
 
@@ -122,7 +114,11 @@ def cue_sites(entity: str, *, cue_layout_seed: int) -> list[dict]:
                 continue
             for direction, floor_dr, floor_dc in _DIRECTIONS:
                 floor_row, floor_col = wall_row - floor_dr, wall_col - floor_dc
-                if 0 <= floor_row < len(rows) and 0 <= floor_col < len(rows[0]) and grid[floor_row, floor_col] != "*":
+                if (
+                    0 <= floor_row < len(rows)
+                    and 0 <= floor_col < len(rows[0])
+                    and grid[floor_row, floor_col] != "*"
+                ):
                     candidates.append((wall_row, wall_col, floor_row, floor_col, direction))
     chosen = []
     used_walls, used_floors = set(), set()
@@ -143,17 +139,15 @@ def cue_sites(entity: str, *, cue_layout_seed: int) -> list[dict]:
     for index, (wall_row, wall_col, floor_row, floor_col, direction) in enumerate(chosen):
         cue_type = "decal" if index < 10 else "color"
         type_index = index if index < 10 else index - 10
-        sites.append(
-            {
-                "cue_id": f"{'D' if cue_type == 'decal' else 'C'}{type_index + 1:02d}",
-                "cue_type": cue_type,
-                "asset": _DECALS[type_index] if cue_type == "decal" else _COLORS[type_index],
-                "wall_rc": [wall_row, wall_col],
-                "floor_rc": [floor_row, floor_col],
-                "floor_yx": [len(rows) - 2 - floor_row, floor_col - 1],
-                "orientation": direction,
-            }
-        )
+        sites.append({
+            "cue_id": f"{'D' if cue_type == 'decal' else 'C'}{type_index + 1:02d}",
+            "cue_type": cue_type,
+            "asset": _DECALS[type_index] if cue_type == "decal" else _COLORS[type_index],
+            "wall_rc": [wall_row, wall_col],
+            "floor_rc": [floor_row, floor_col],
+            "floor_yx": [len(rows) - 2 - floor_row, floor_col - 1],
+            "orientation": direction,
+        })
     return sites
 
 
@@ -187,7 +181,9 @@ def landmark_entity_record(
         "cue_layout_seed": int(cue_layout_seed),
         "cue_mode": cue_mode,
         "cue_sites": sites,
-        "cue_layout_sha256": sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        "cue_layout_sha256": sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
         "neutral_wall_rgb": [112, 112, 112],
     }
 
@@ -217,8 +213,7 @@ def load_landmark_geometry(
 ) -> dict:
     records = json.loads(Path(manifest).read_text())["maps"]
     matches = [
-        record
-        for record in records
+        record for record in records
         if record["map_seed"] == seed
         and record["wall_removal_probability"] == opening
         and record.get("entity_shape") == [rows, cols]
@@ -229,11 +224,9 @@ def load_landmark_geometry(
         raise ValueError("Landmark geometry manifest must contain exactly one matching map")
     record = matches[0]
     verified = landmark_entity_record(
-        record["entity_layer"],
-        map_seed=seed,
+        record["entity_layer"], map_seed=seed,
         wall_removal_probability=opening,
-        cue_layout_seed=cue_layout_seed,
-        cue_mode=cue_mode,
+        cue_layout_seed=cue_layout_seed, cue_mode=cue_mode
     )
     if verified != record:
         raise ValueError("Landmark geometry manifest differs from its verified source")
@@ -292,17 +285,15 @@ def verify_cue_manifest(manifest, record):
         fields = line.split("\t")
         if len(fields) != 8:
             raise ValueError("Malformed DMLab cue manifest row")
-        observed.append(
-            {
-                "cue_id": fields[0],
-                "cue_type": fields[1],
-                "asset": fields[2],
-                "wall_rc": [int(fields[3]), int(fields[4])],
-                "floor_rc": [int(fields[5]), int(fields[6])],
-                "floor_yx": [entity_height - 2 - int(fields[5]), int(fields[6]) - 1],
-                "orientation": fields[7],
-            }
-        )
+        observed.append({
+            "cue_id": fields[0],
+            "cue_type": fields[1],
+            "asset": fields[2],
+            "wall_rc": [int(fields[3]), int(fields[4])],
+            "floor_rc": [int(fields[5]), int(fields[6])],
+            "floor_yx": [entity_height - 2 - int(fields[5]), int(fields[6]) - 1],
+            "orientation": fields[7],
+        })
     if observed != record["cue_sites"]:
         raise ValueError("Loaded DMLab cue layout differs from the archived contract")
 
@@ -323,21 +314,19 @@ def geometry_payload(record):
     }
     if record.get("schema") == GEOMETRY_SCHEMA_V2:
         sites = record["cue_sites"]
-        payload.update(
-            {
-                "geometry_entity_shape": np.asarray(record["entity_shape"], dtype=np.int16),
-                "geometry_cue_layout_seed": np.asarray(record["cue_layout_seed"]),
-                "geometry_cue_mode": np.asarray(record["cue_mode"]),
-                "geometry_cue_layout_sha256": np.asarray(record["cue_layout_sha256"]),
-                "geometry_cue_ids": np.asarray([site["cue_id"] for site in sites]),
-                "geometry_cue_types": np.asarray([site["cue_type"] for site in sites]),
-                "geometry_cue_assets": np.asarray([site["asset"] for site in sites]),
-                "geometry_cue_wall_rc": np.asarray([site["wall_rc"] for site in sites], dtype=np.int16),
-                "geometry_cue_floor_yx": np.asarray([site["floor_yx"] for site in sites], dtype=np.int16),
-                "geometry_cue_orientations": np.asarray([site["orientation"] for site in sites]),
-                "geometry_cue_rendered": np.full(len(sites), record["cue_mode"] == "rich", dtype=bool),
-            }
-        )
+        payload.update({
+            "geometry_entity_shape": np.asarray(record["entity_shape"], dtype=np.int16),
+            "geometry_cue_layout_seed": np.asarray(record["cue_layout_seed"]),
+            "geometry_cue_mode": np.asarray(record["cue_mode"]),
+            "geometry_cue_layout_sha256": np.asarray(record["cue_layout_sha256"]),
+            "geometry_cue_ids": np.asarray([site["cue_id"] for site in sites]),
+            "geometry_cue_types": np.asarray([site["cue_type"] for site in sites]),
+            "geometry_cue_assets": np.asarray([site["asset"] for site in sites]),
+            "geometry_cue_wall_rc": np.asarray([site["wall_rc"] for site in sites], dtype=np.int16),
+            "geometry_cue_floor_yx": np.asarray([site["floor_yx"] for site in sites], dtype=np.int16),
+            "geometry_cue_orientations": np.asarray([site["orientation"] for site in sites]),
+            "geometry_cue_rendered": np.full(len(sites), record["cue_mode"] == "rich", dtype=bool),
+        })
     return payload
 
 
@@ -353,12 +342,16 @@ def geometry_record_from_payload(payload):
         return entity_record(
             entity,
             map_seed=map_seed,
-            wall_removal_probability=float(np.asarray(payload["geometry_wall_removal_probability"]).item()),
+            wall_removal_probability=float(
+                np.asarray(payload["geometry_wall_removal_probability"]).item()
+            ),
         )
     return landmark_entity_record(
         entity,
         map_seed=map_seed,
-        wall_removal_probability=float(np.asarray(payload["geometry_wall_removal_probability"]).item()),
+        wall_removal_probability=float(
+            np.asarray(payload["geometry_wall_removal_probability"]).item()
+        ),
         cue_layout_seed=int(np.asarray(payload["geometry_cue_layout_seed"]).item()),
         cue_mode=str(np.asarray(payload["geometry_cue_mode"]).item()),
     )
@@ -448,12 +441,8 @@ def _grid_distances(mask, starts):
         while queue:
             y, x = queue.popleft()
             for nxt in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                if (
-                    0 <= nxt[0] < mask.shape[0]
-                    and 0 <= nxt[1] < mask.shape[1]
-                    and mask[nxt]
-                    and not np.isfinite(result[index][nxt])
-                ):
+                if (0 <= nxt[0] < mask.shape[0] and 0 <= nxt[1] < mask.shape[1]
+                        and mask[nxt] and not np.isfinite(result[index][nxt])):
                     result[index][nxt] = result[index][y, x] + 1
                     queue.append(nxt)
     return result
@@ -495,7 +484,11 @@ def _minimum_cost_assignment(cost):
             for candidate in range(1, cols + 1):
                 if used[candidate]:
                     continue
-                reduced = matrix[current_row - 1, candidate - 1] - row_potential[current_row] - col_potential[candidate]
+                reduced = (
+                    matrix[current_row - 1, candidate - 1]
+                    - row_potential[current_row]
+                    - col_potential[candidate]
+                )
                 if reduced < minimum[candidate]:
                     minimum[candidate] = reduced
                     predecessor[candidate] = column
@@ -519,7 +512,8 @@ def _minimum_cost_assignment(cost):
             column = previous
             if column == 0:
                 break
-    pairs = [(int(matched_row[column] - 1), column - 1) for column in range(1, cols + 1) if matched_row[column]]
+    pairs = [(int(matched_row[column] - 1), column - 1)
+             for column in range(1, cols + 1) if matched_row[column]]
     if transposed:
         pairs = [(column, row) for row, column in pairs]
     pairs.sort()
@@ -545,9 +539,8 @@ def cue_spatial_metrics(rate_maps, occupancy, record):
         peak_flat = int(np.argmax(np.where(valid_bins, maps[unit], -np.inf)))
         peaks.append(np.unravel_index(peak_flat, mask.shape))
     cue_distances = _grid_distances(mask, cue_yx)
-    cost = np.asarray(
-        [[cue_distances[cue][peak] for unit, peak in enumerate(peaks)] for cue in range(len(cue_yx))], dtype=np.float32
-    )
+    cost = np.asarray([[cue_distances[cue][peak] for unit, peak in enumerate(peaks)]
+                       for cue in range(len(cue_yx))], dtype=np.float32)
     assignments = []
     matched_within_one = 0
     assigned_cues, assigned_units = set(), set()
@@ -560,43 +553,30 @@ def cue_spatial_metrics(rate_maps, occupancy, record):
             assigned_units.add(unit)
             matched_within_one += int(distance <= 1 and visited[cue_index])
             site = record["cue_sites"][cue_index]
-            assignments.append(
-                {
-                    "cue_id": site["cue_id"],
-                    "cue_type": site["cue_type"],
-                    "cue_visited": int(visited[cue_index]),
-                    "unit_id": unit,
-                    "peak_distance_cells": distance,
-                    "within_one_cell": int(distance <= 1),
-                    "cue_activation": float(maps[unit, cue_yx[cue_index, 0], cue_yx[cue_index, 1]]),
-                }
-            )
+            assignments.append({
+                "cue_id": site["cue_id"],
+                "cue_type": site["cue_type"],
+                "cue_visited": int(visited[cue_index]),
+                "unit_id": unit,
+                "peak_distance_cells": distance,
+                "within_one_cell": int(distance <= 1),
+                "cue_activation": float(maps[unit, cue_yx[cue_index, 0], cue_yx[cue_index, 1]]),
+            })
     for cue_index, site in enumerate(record["cue_sites"]):
         if cue_index not in assigned_cues:
-            assignments.append(
-                {
-                    "cue_id": site["cue_id"],
-                    "cue_type": site["cue_type"],
-                    "cue_visited": int(visited[cue_index]),
-                    "unit_id": -1,
-                    "peak_distance_cells": float("nan"),
-                    "within_one_cell": 0,
-                    "cue_activation": float("nan"),
-                }
-            )
+            assignments.append({
+                "cue_id": site["cue_id"], "cue_type": site["cue_type"],
+                "cue_visited": int(visited[cue_index]), "unit_id": -1,
+                "peak_distance_cells": float("nan"), "within_one_cell": 0,
+                "cue_activation": float("nan"),
+            })
     for unit in active_units:
         if int(unit) not in assigned_units:
-            assignments.append(
-                {
-                    "cue_id": "",
-                    "cue_type": "unmatched_unit",
-                    "cue_visited": 0,
-                    "unit_id": int(unit),
-                    "peak_distance_cells": float("nan"),
-                    "within_one_cell": 0,
-                    "cue_activation": float("nan"),
-                }
-            )
+            assignments.append({
+                "cue_id": "", "cue_type": "unmatched_unit", "cue_visited": 0,
+                "unit_id": int(unit), "peak_distance_cells": float("nan"),
+                "within_one_cell": 0, "cue_activation": float("nan"),
+            })
     nearest = [float(np.min(cue_distances[:, peak[0], peak[1]])) for peak in peaks]
     denominator = min(len(cue_yx), len(active_units), int(visited.sum()))
     summary = {
@@ -610,9 +590,10 @@ def cue_spatial_metrics(rate_maps, occupancy, record):
     for cue_type in ("decal", "color"):
         selected = np.asarray([site["cue_type"] == cue_type for site in record["cue_sites"]])
         summary[f"cue_{cue_type}_site_visit_fraction"] = float(visited[selected].mean())
-        summary[f"cue_{cue_type}_peak_match_count"] = int(
-            sum(row["within_one_cell"] and row["cue_visited"] and row["cue_type"] == cue_type for row in assignments)
-        )
+        summary[f"cue_{cue_type}_peak_match_count"] = int(sum(
+            row["within_one_cell"] and row["cue_visited"] and row["cue_type"] == cue_type
+            for row in assignments
+        ))
     assignments.sort(key=lambda row: (row["cue_id"] == "", row["cue_id"], row["unit_id"]))
     return summary, assignments
 
@@ -645,15 +626,9 @@ def validate_geometry_payload(payload):
     elif schema == GEOMETRY_SCHEMA_V2:
         cue_required = (
             "geometry_entity_shape",
-            "geometry_cue_layout_seed",
-            "geometry_cue_mode",
-            "geometry_cue_layout_sha256",
-            "geometry_cue_ids",
-            "geometry_cue_types",
-            "geometry_cue_assets",
-            "geometry_cue_wall_rc",
-            "geometry_cue_floor_yx",
-            "geometry_cue_orientations",
+            "geometry_cue_layout_seed", "geometry_cue_mode", "geometry_cue_layout_sha256",
+            "geometry_cue_ids", "geometry_cue_types", "geometry_cue_assets",
+            "geometry_cue_wall_rc", "geometry_cue_floor_yx", "geometry_cue_orientations",
             "geometry_cue_rendered",
         )
         if any(key not in payload for key in cue_required):
@@ -661,7 +636,9 @@ def validate_geometry_payload(payload):
         record = landmark_entity_record(
             str(np.asarray(payload["geometry_entity_layer"]).item()),
             map_seed=int(np.asarray(payload["geometry_map_seed"]).item()),
-            wall_removal_probability=float(np.asarray(payload["geometry_wall_removal_probability"]).item()),
+            wall_removal_probability=float(
+                np.asarray(payload["geometry_wall_removal_probability"]).item()
+            ),
             cue_layout_seed=int(np.asarray(payload["geometry_cue_layout_seed"]).item()),
             cue_mode=str(np.asarray(payload["geometry_cue_mode"]).item()),
         )
@@ -675,8 +652,11 @@ def validate_geometry_payload(payload):
         raise ValueError("Spatial bounds differ from geometry bounds")
     accessible_shape = np.asarray(record["accessible_mask"]).shape
     if len(accessible_shape) != 2 or accessible_shape[0] != accessible_shape[1]:
-        raise ValueError("The scalar spatial grain contract requires a square accessible mask")
+        raise ValueError(
+            "The scalar spatial grain contract requires a square accessible mask"
+        )
     if "grain" in payload and int(np.asarray(payload["grain"])) != accessible_shape[0]:
         raise ValueError(
-            "Geometry requires a cell-aligned " f"{accessible_shape[0]}x{accessible_shape[1]} spatial grid"
+            "Geometry requires a cell-aligned "
+            f"{accessible_shape[0]}x{accessible_shape[1]} spatial grid"
         )
