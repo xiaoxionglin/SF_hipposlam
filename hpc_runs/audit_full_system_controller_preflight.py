@@ -14,8 +14,8 @@ from hpc_runs.intrmotiv_offpolicy.sf_transport import updates_due
 
 
 def load_runtime_checkpoint(path):
-    # Reuse the evaluator's exact allowlist for original NumPy scalar metadata.
-    from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
+    # Reuse the shared exact allowlist for original NumPy scalar metadata.
+    from sf_shared.checkpoints import load_checkpoint_dict
 
     return load_checkpoint_dict(path, torch.device("cpu"))
 

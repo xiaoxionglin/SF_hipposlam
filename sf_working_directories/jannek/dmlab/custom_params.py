@@ -32,7 +32,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--simple_sequence",
         default=False,
-        type=bool,
+        type=str2bool,
         help="simple sequence, simply shrinking feature dimensions and expanding features to include their history",
     )
     p.add_argument(
@@ -47,9 +47,9 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--DG_lr", default=None, type=float, help="Dentate Gyrus Pattern separation learning rate")
     p.add_argument("--DG_temperature", default=None, type=float, help="Dentate Gyrus output temperature")
     p.add_argument(
-        "--DG_batch_q", default=None, type=bool, help="Dentate Gyrus batch quantile, momentum 0.2, quantile 0.98"
+        "--DG_batch_q", default=None, type=str2bool, help="Dentate Gyrus batch quantile, momentum 0.2, quantile 0.98"
     )
-    p.add_argument("--DG_softmax", default=None, type=bool, help="Dentate Gyrus softmax")
+    p.add_argument("--DG_softmax", default=None, type=str2bool, help="Dentate Gyrus softmax")
     p.add_argument(
         "--DG_name", default=None, type=str, help="model name for the last encoder layer, i.e. Dentate Gyrus"
     )
@@ -64,12 +64,18 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--fix_encoder_when_load",
         default=True,
-        type=bool,
+        type=str2bool,
         help="when loading an encoder, fix its weights at initialization",
     )
-    p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")
+    p.add_argument("--depth_sensor", default=False, type=str2bool, help="having extra depth sensor")
     p.add_argument(
-        "--dmlab_reduced_action_set", default=False, type=bool, help="reduced action set to facilitate learning"
+        "--depth_sensor_inverse",
+        default=False,
+        type=str2bool,
+        help="Use capped inverse depth 10/max(raw depth code,1); False preserves sampled input",
+    )
+    p.add_argument(
+        "--dmlab_reduced_action_set", default=False, type=str2bool, help="reduced action set to facilitate learning"
     )
     p.add_argument(
         "--with_number_instruction", default=True, type=str2bool, help="instruction input is number, e.g. 1-3"
@@ -94,7 +100,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--rec_distances",
         default=None,
-        type=bool,
+        type=str2bool,
         help="Record the distance between the propagation of each individual sequence",
     )
     p.add_argument(

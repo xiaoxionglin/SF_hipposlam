@@ -3965,6 +3965,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 ), "V-trace requires to recurrence and rollout to be equal"
 
             num_sgd_steps = 0
+            skipped_minibatches = 0
+            recover_empty = bool(getattr(self.cfg, "recover_empty_ppo_minibatches", False))
             stats_and_summaries: Optional[AttrDict] = None
             recruitment_applied = False
 
@@ -3990,6 +3992,10 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
                 force_summaries = False
                 minibatches = self._get_minibatches(batch_size, experience_size)
+                if recover_empty:
+                    # Count only executed updates in this epoch. Stale zero slots
+                    # must not enter early stopping or advance the LR scheduler.
+                    epoch_actor_losses = []
 
             for batch_num in range(len(minibatches)):
                 with torch.no_grad(), timing.add_time("minibatch_init"):
@@ -4000,6 +4006,12 @@ class DistanceLearnerReward(BaseDistanceRecorder):
 
                     # enable syntactic sugar that allows us to access dict's keys as object attributes
                     mb = AttrDict(mb)
+
+                if recover_empty and int(mb.valids.sum().item()) < 2:
+                    # Guard before the forward pass: an unsupported minibatch
+                    # must not mutate DG statistics, optimizer state or counters.
+                    skipped_minibatches += 1
+                    continue
 
                 with timing.add_time("calculate_losses"):
                     iterative_phase = self._iterative_phase()
@@ -4035,7 +4047,10 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     else:
                         loss = decoder_loss + encoder_loss
 
-                    epoch_actor_losses[batch_num] = float(actor_loss)
+                    if recover_empty:
+                        epoch_actor_losses.append(float(actor_loss))
+                    else:
+                        epoch_actor_losses[batch_num] = float(actor_loss)
 
                     high_loss = 30.0
                     if torch.abs(decoder_loss) > high_loss:
@@ -4161,6 +4176,8 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                     self.policy_versions_tensor[self.policy_id] = self.train_step
 
             # end of an epoch
+            if recover_empty and not epoch_actor_losses:
+                continue
             if self.lr_scheduler.invoke_after_each_epoch():
                 self.curr_lr = self.lr_scheduler.update(self.curr_lr, recent_kls)
 
@@ -4177,6 +4194,11 @@ class DistanceLearnerReward(BaseDistanceRecorder):
                 break
 
             prev_epoch_actor_loss = new_epoch_actor_loss
+
+        if recover_empty and skipped_minibatches:
+            log.warning("Skipped %d PPO minibatches with fewer than two valid decisions", skipped_minibatches)
+        if recover_empty and num_sgd_steps == 0:
+            return None
 
         if not recruitment_applied:
             self._apply_dg_recruitment(gpu_buffer)
@@ -5404,6 +5426,12 @@ class OnlineSpatialDefaultLearner(DefaultLearner):
 def make_hipposlam_learner(
     cfg: Config, env_info: EnvInfo, policy_versions_tensor: Tensor, policy_id: PolicyID, param_server: ParameterServer
 ) -> BaseLearner:
+    if getattr(cfg, "recover_empty_ppo_minibatches", False) and (
+        getattr(cfg, "controller_learning", "ppo") != "ppo" or not cfg.distance_learning or cfg.double_value
+    ):
+        raise ValueError(
+            "recover_empty_ppo_minibatches requires controller_learning=ppo, distance_learning=True and double_value=False"
+        )
     if getattr(cfg, "controller_learning", "ppo") != "ppo":
         # Stored-state production passed all six fresh and real-restart gates.
         # Keep unreleased reconstruction behind its original guard.

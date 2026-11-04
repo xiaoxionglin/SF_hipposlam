@@ -13,6 +13,7 @@ from sample_factory.model.encoder import ConvEncoder, Encoder, ResnetEncoder
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.typing import Config, ObsSpace
 from sample_factory.utils.utils import log
+from sf_shared.depth import SampledDepthEncoder
 from sf_working_directories.jannek.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
 from sf_working_directories.jannek.dmlab.dmlab_model import DmlabEncoder
 
@@ -475,30 +476,10 @@ class DGProjectionWithRunningQuantile(nn.Module):
 ##### Actual Encoders For This Project #####
 
 
-class DepthEncoder(Encoder):
-    def __init__(self, cfg, size=10):
-        super().__init__(cfg)
+class DepthEncoder(SampledDepthEncoder):
+    """Compatibility adapter retaining this experiment family's public class."""
 
-        input_ch = 1
-        log.debug("Num input channels for depth encoder: %d", input_ch)
-
-        if cfg.encoder_conv_architecture == "resnet_impala" or cfg.encoder_conv_architecture == "pretrained_resnet":
-            # configuration from the IMPALA paper
-            resnet_conf = [[16, 2], [32, 2], [32, 2]]
-        else:
-            raise NotImplementedError(f"Unknown resnet architecture {cfg.encoder_conv_architecture}")
-
-        curr_input_channels = input_ch
-        self.downsample = nn.Upsample(size=(1, 10))
-
-        self.encoder_out_size = size
-
-    def forward(self, obs: Tensor):
-        x = self.downsample(obs)
-        return x
-
-    def get_out_size(self) -> int:
-        return self.encoder_out_size
+    supported_architectures = ("resnet_impala", "pretrained_resnet")
 
 
 class FixedMobileNetSmallEncoder(Encoder):

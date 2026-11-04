@@ -18,7 +18,7 @@ def run():
     parent_dir, parent_checkpoint = row["run_dir"], row["checkpoint"]
     extra = []
     if row["family"] == "ddqn":
-        from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
+        from sf_shared.checkpoints import load_checkpoint_dict
 
         with torch.serialization.safe_globals([type(Path("."))]):
             child = load_checkpoint_dict(Path(row["checkpoint"]), torch.device("cpu"))

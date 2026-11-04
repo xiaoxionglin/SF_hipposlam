@@ -25,6 +25,12 @@ def hipposlam_override_defaults(parser: argparse.ArgumentParser) -> None:
 
 def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p = parser
+    p.add_argument(
+        "--recover_empty_ppo_minibatches",
+        default=False,
+        type=str2bool,
+        help="Skip PPO minibatches with fewer than two valid decisions (distance_learning=True, double_value=False, controller_learning=ppo); false preserves strict failure behavior.",
+    )
     # Study identity is tracking metadata only. The canonical StudySpec workflow
     # emits these fields so dashboards can group by one seed-independent key.
     p.add_argument("--study_id", default=None, type=str)
@@ -59,7 +65,7 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--simple_sequence",
         default=False,
-        type=bool,
+        type=str2bool,
         help="simple sequence, simply shrinking feature dimensions and expanding features to include their history",
     )
     p.add_argument(
@@ -100,12 +106,18 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument("--fixed_task_target_id", default=0, type=int)
     p.add_argument("--fixed_task_goal_init", default="nominated", choices=["nominated", "uniform", "uniform_jitter"])
 
+    p.add_argument(
+        "--shared_dg_projection",
+        default=False,
+        type=str2bool,
+        help="Use the shared DG projection implementation; False preserves the legacy implementation",
+    )
     p.add_argument("--DG_lr", default=None, type=float, help="Dentate Gyrus Pattern separation learning rate")
     p.add_argument("--DG_temperature", default=None, type=float, help="Dentate Gyrus output temperature")
     p.add_argument(
-        "--DG_batch_q", default=None, type=bool, help="Dentate Gyrus batch quantile, momentum 0.2, quantile 0.98"
+        "--DG_batch_q", default=None, type=str2bool, help="Dentate Gyrus batch quantile, momentum 0.2, quantile 0.98"
     )
-    p.add_argument("--DG_softmax", default=None, type=bool, help="Dentate Gyrus softmax")
+    p.add_argument("--DG_softmax", default=None, type=str2bool, help="Dentate Gyrus softmax")
     p.add_argument(
         "--DG_name", default=None, type=str, help="model name for the last encoder layer, i.e. Dentate Gyrus"
     )
@@ -120,10 +132,10 @@ def add_hipposlam_env_args(parser: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--fix_encoder_when_load",
         default=True,
-        type=bool,
+        type=str2bool,
         help="when loading an encoder, fix its weights at initialization",
     )
-    p.add_argument("--depth_sensor", default=False, type=bool, help="having extra depth sensor")
+    p.add_argument("--depth_sensor", default=False, type=str2bool, help="having extra depth sensor")
     p.add_argument(
         "--depth_sensor_inverse",
         default=True,

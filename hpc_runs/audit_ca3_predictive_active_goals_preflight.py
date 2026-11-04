@@ -11,7 +11,7 @@ import torch
 
 from hpc_runs.audit_full_system_controller_preflight import audit as audit_controller
 from hpc_runs.audit_navigation8_algorithm_screen_preflight import _events
-from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
+from sf_shared.checkpoints import load_checkpoint_dict
 
 READOUT_TAGS = (
     "intrmotiv/ca3_readout/enabled",
