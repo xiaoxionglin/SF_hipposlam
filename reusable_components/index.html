@@ -19,7 +19,7 @@
     
     
       
-        <title>Shared components and project boundaries - Sample Factory Documentation</title>
+        <title>Shared code: what changed and how to use it - Sample Factory Documentation</title>
       
     
     
@@ -70,7 +70,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#shared-components-and-project-boundaries" class="md-skip">
+        <a href="#shared-code-what-changed-and-how-to-use-it" class="md-skip">
           Skip to content
         </a>
       
@@ -106,7 +106,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Shared components and project boundaries
+              Shared code: what changed and how to use it
             
           </span>
         </div>
@@ -2489,6 +2489,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-code-belongs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2522,6 +2533,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#usage-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#install-and-choose-an-interpreter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install and choose an interpreter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#select-the-shared-dg-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Select the shared DG implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inspect-an-existing-checkpoint-on-cpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect an existing checkpoint on CPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#try-the-standalone-simgay-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Try the standalone SimGaY manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#analyze-saved-study-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analyze saved study outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#checkpoints-and-dependency-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2537,6 +2620,17 @@
     <span class="md-ellipsis">
       
         Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development-checks-and-github-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development checks and GitHub warnings
       
     </span>
   </a>
@@ -2563,7 +2657,12 @@
   
 
 
-<h1 id="shared-components-and-project-boundaries">Shared components and project boundaries<a class="headerlink" href="#shared-components-and-project-boundaries" title="Permanent link">&para;</a></h1>
+<h1 id="shared-code-what-changed-and-how-to-use-it">Shared code: what changed and how to use it<a class="headerlink" href="#shared-code-what-changed-and-how-to-use-it" title="Permanent link">&para;</a></h1>
+<p>Use this file as the practical guide to the 4 November 2026 organization and
+reuse work. Start with <a href="#what-changed">what changed</a>, follow the
+<a href="#usage-examples">usage examples</a>, and consult <a href="#enable-and-roll-back">enable and roll back</a>
+before changing an existing experiment. <a href="#development-checks-and-github-warnings">Development checks</a>
+explain how to avoid repeated formatting failures.</p>
 <p>SF_hipposlam owns the shared training implementation. Project repositories own
 their questions, StudySpecs, evidence and reports. Reuse a small component from
 here instead of copying an entire experiment directory into another project.</p>
@@ -2572,6 +2671,59 @@ here instead of copying an entire experiment directory into another project.</p>
 It preserves existing defaults and makes new runtime behavior opt-in. Local
 compatibility tests establish implementation parity, not scientific performance
 or qualification for a cluster run.</p>
+<h2 id="what-changed">What changed<a class="headerlink" href="#what-changed" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Why it helps</th>
+<th>Delivery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shared DG projection, sampled-depth adapters and CPU checkpoint loader in <code>sf_shared</code></td>
+<td>Projects can reuse the implementation without copying a whole encoder or importing the environment just to inspect a checkpoint.</td>
+<td><a href="https://github.com/xiaoxionglin/SF_hipposlam/pull/3">SF PR 3</a>, merge <code>667b887a</code></td>
+</tr>
+<tr>
+<td>Explicit behavior switches, real boolean parsing and separate SimGaY manager entry point</td>
+<td>New options are selectable; old model/checkpoint paths remain usable.</td>
+<td>SF PR 3</td>
+</tr>
+<tr>
+<td>Study workflow discovery and saved-map analysis in one package</td>
+<td>Shared infrastructure stays with SF while study definitions and scientific evidence stay with their projects.</td>
+<td>SF PR 3, workflow version <code>1.15.0</code></td>
+</tr>
+<tr>
+<td>Required workflow modules, schema and geometry maps included in wheels</td>
+<td>A normal installation now contains dependencies previously visible only in a source checkout.</td>
+<td><a href="https://github.com/xiaoxionglin/SF_hipposlam/pull/4">SF PR 4</a>, merge <code>55f6f306</code></td>
+</tr>
+<tr>
+<td>Frozen starter files restored and protected by hash/inventory tests</td>
+<td>Formatting cannot silently change an already distributed version.</td>
+<td>SF PR 4; original ZIP and manifest retained</td>
+</tr>
+<tr>
+<td>GeoMem backend choice connected to its built-in APPO representation</td>
+<td><code>--shared_dg_projection=True</code> now selects the shared implementation instead of being ignored.</td>
+<td><a href="https://github.com/xiaoxionglin/GeoMem/commit/bb736abb6302d5109b41d8d0b7726d649b9c3729">GeoMem commit <code>bb736ab</code></a></td>
+</tr>
+</tbody>
+</table>
+<p>The workspace organization pass also clarified project entry points, moved
+compseq's six authored scripts into <code>authoring/</code>, retained the two Office
+workbooks in <code>local-copies/</code>, and removed duplicated GeoMem thesis prose while
+preserving paper-specific priorities. On the original host, the complete
+file-move and ownership record is
+<code>~/Desktop/Projects/docs/audits/2026-11-04-organization.md</code>; the workspace entry
+point is <code>~/Desktop/Projects/README.md</code>. These local files are outside this Git
+repository. SAB and historical scientific results were excluded from changes;
+the paper-controls checkout retained its scientific code and results.</p>
+<p>SF's default branch is <strong><code>master</code></strong>. GeoMem's is <strong><code>main</code></strong>. A check passing on
+one branch says nothing about a different branch's head commit.</p>
 <h2 id="where-code-belongs">Where code belongs<a class="headerlink" href="#where-code-belongs" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2762,6 +2914,79 @@ changes with unchanged legacy behavior; they do not have redundant runtime
 implementations. For a structural regression, revert the corresponding Git
 commit or use the pre-integration revision. Do not overwrite an experiment's
 saved provenance to make it look as if it ran with another implementation.</p>
+<h2 id="usage-examples">Usage examples<a class="headerlink" href="#usage-examples" title="Permanent link">&para;</a></h2>
+<h3 id="install-and-choose-an-interpreter">Install and choose an interpreter<a class="headerlink" href="#install-and-choose-an-interpreter" title="Permanent link">&para;</a></h3>
+<p>Use the environment set up by the <a href="../README.md">installation guide</a>, then run
+this from the SF_hipposlam repository root:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[analysis]'</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>-m<span class="w"> </span>sf_examples.simgay.train<span class="w"> </span>--help
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python<span class="w"> </span>-m<span class="w"> </span>hpc_runs.intrmotiv_study<span class="w"> </span>--help
+</code></pre></div>
+<p>The editable installation follows this checkout's code. Omit <code>-e</code> for a normal
+installation. <code>analysis</code> adds Matplotlib for figure rendering; it does not
+install DeepMind Lab or deploy anything to a cluster. Use the same interpreter
+for installation, tests and execution.</p>
+<h3 id="select-the-shared-dg-implementation">Select the shared DG implementation<a class="headerlink" href="#select-the-shared-dg-implementation" title="Permanent link">&para;</a></h3>
+<p>For an existing IntrMotiv training command, add <code>--shared_dg_projection=True</code>.
+Keep its other experiment arguments and use a new output directory. To compare
+with the retained implementation, repeat from the same source checkpoint with
+<code>--shared_dg_projection=False</code>. This changes code ownership, not the intended
+DG computation; it does not automatically select a different learning rule.</p>
+<p>GeoMem exposes the same choice in two workflows. From GeoMem's
+<code>geomem-experiments/</code> directory, after following its installation instructions:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Full APPO path; starts training when invoked.</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>experiments.geomem.train<span class="w"> </span>--experiment<span class="o">=</span>shared_dg_trial<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--shared_dg_projection<span class="o">=</span>True
+</code></pre></div>
+<p>Use <code>False</code> to restore the local APPO projection. For the independent supervised
+sensory-prediction runner, this small example also starts training:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>experiments/minigrid_sensory_prediction.py<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--dg-projection-backend<span class="w"> </span>sf_shared<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--train-episodes<span class="w"> </span><span class="m">4</span><span class="w"> </span>--test-episodes<span class="w"> </span><span class="m">2</span><span class="w"> </span>--max-steps<span class="w"> </span><span class="m">24</span><span class="w"> </span>--epochs<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--output-dir<span class="w"> </span>figures/shared_dg_smoke
+</code></pre></div>
+<p>Choose a new output directory and use <code>--dg-projection-backend local</code> to roll
+back. See
+<a href="https://github.com/xiaoxionglin/GeoMem/blob/main/geomem-experiments/experiments/geomem/README.md">GeoMem's APPO guide</a>
+and <a href="https://github.com/xiaoxionglin/GeoMem/blob/main/geomem-experiments/experiments/minigrid_sensory_prediction.md">sensory-prediction guide</a>
+for their different objectives and dependencies. The shared backend requires
+this SF fork to be importable; custom APPO representation factories must keep
+<code>--shared_dg_projection=False</code>.</p>
+<h3 id="inspect-an-existing-checkpoint-on-cpu">Inspect an existing checkpoint on CPU<a class="headerlink" href="#inspect-an-existing-checkpoint-on-cpu" title="Permanent link">&para;</a></h3>
+<p>Replace the path below with an actual IntrMotiv checkpoint:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sf_shared.checkpoints</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_checkpoint_dict</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">checkpoint</span> <span class="o">=</span> <span class="n">load_checkpoint_dict</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"path/to/checkpoint.pth"</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">"cpu"</span><span class="p">))</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">checkpoint</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+</code></pre></div>
+<p>This reads the checkpoint using CPU memory mapping without constructing an
+environment or starting training. It returns the saved dictionary; it does not
+instantiate the model or change its parameters. See the dependency notes below
+for the retained loader semantics.</p>
+<h3 id="try-the-standalone-simgay-manager">Try the standalone SimGaY manager<a class="headerlink" href="#try-the-standalone-simgay-manager" title="Permanent link">&para;</a></h3>
+<p>This short wiring check starts training and writes a new result directory:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>sf_examples.simgay.train<span class="w"> </span>--output<span class="w"> </span>train_dir/simgay_smoke<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--session-batches<span class="w"> </span><span class="m">1</span><span class="w"> </span>--num-envs<span class="w"> </span><span class="m">2</span><span class="w"> </span>--eval-every<span class="w"> </span><span class="m">1</span><span class="w"> </span>--eval-sessions<span class="w"> </span><span class="m">2</span>
+</code></pre></div>
+<p>Choose a fresh <code>--output</code> path on each invocation. The short run is not a
+learning-performance evaluation. Add <code>--actuator-success-rate 0.8</code> for the noisy
+actuator condition and retain it when evaluating that condition. See the
+<a href="../sf_examples/simgay/README.md">manager guide</a> for checkpoint initialization,
+frozen evaluation and the task/model defaults.</p>
+<h3 id="analyze-saved-study-outputs">Analyze saved study outputs<a class="headerlink" href="#analyze-saved-study-outputs" title="Permanent link">&para;</a></h3>
+<p>In these commands, replace <code>STUDY</code>, <code>BATCH_ROOT</code> and <code>NEW_OUTPUT_DIR</code> with your
+study JSON, training-batch directory and a fresh analysis directory:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>-m<span class="w"> </span>hpc_runs.intrmotiv_study<span class="w"> </span>validate<span class="w"> </span>STUDY
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>python<span class="w"> </span>-m<span class="w"> </span>hpc_runs.intrmotiv_study<span class="w"> </span>collect-online<span class="w"> </span>STUDY<span class="w"> </span>BATCH_ROOT<span class="w"> </span>NEW_OUTPUT_DIR<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--run-discovery-mode<span class="w"> </span>training
+</code></pre></div>
+<p><code>training</code> avoids mistaking generated analysis directories for training runs.
+Use <code>--run-discovery-mode legacy</code> for the original discovery behavior. Neither
+command submits jobs or modifies the study definition. Graph rendering and
+NumPy-only concentration analysis are described in the
+<a href="../hpc_runs/intrmotiv_study/README.md">workflow guide</a>.</p>
 <h2 id="checkpoints-and-dependency-boundaries">Checkpoints and dependency boundaries<a class="headerlink" href="#checkpoints-and-dependency-boundaries" title="Permanent link">&para;</a></h2>
 <p><code>sf_shared.checkpoints.load_checkpoint_dict</code> is the existing CPU/mmap offline
 loader. Its historical import from IntrMotiv <code>evaluation.place_fields</code> still
@@ -2802,6 +3027,39 @@ GPU parity, or qualify altered scientific conditions for production.</p>
 selectable when behavior changes, and test the saved configurations/checkpoints
 that the affected projects actually use. Keep provenance beside the component
 and update this guide when ownership changes.</p>
+<h2 id="development-checks-and-github-warnings">Development checks and GitHub warnings<a class="headerlink" href="#development-checks-and-github-warnings" title="Permanent link">&para;</a></h2>
+<p>Run these from the SF repository root before pushing Python changes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pre-commit
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pre_commit<span class="w"> </span>install
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>python<span class="w"> </span>-m<span class="w"> </span>pre_commit<span class="w"> </span>run<span class="w"> </span>--all-files
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>git<span class="w"> </span>diff<span class="w"> </span>--check
+</code></pre></div>
+<p>The hooks use the versions and exclusions in <code>.pre-commit-config.yaml</code>.
+Black/isort can modify files on their first run, which is reported as failure.
+Review <code>git diff</code>, stage only the intended files, rerun the hooks, and commit
+the resulting formatting before pushing. Running a formatter only in CI cannot
+save those changes back to the branch. Use the configured hooks so the frozen
+starter export stays excluded.</p>
+<p>For changes to these reusable components, the focused source-checkout checks are:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span>tests/test_shared_dg.py<span class="w"> </span>tests/test_frozen_exports.py<span class="w"> </span>tests/test_simgay_*.py
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span>hpc_runs/test_*.py
+</code></pre></div>
+<p>Use the project's test environment with pytest installed. Wheel packaging changes
+also need the installed-wheel check in <code>.github/workflows/test-ci.yml</code>; passing
+tests in an editable checkout alone cannot show that the wheel contains every
+required module or data file.</p>
+<p>When a GitHub failure email arrives, open its run and check the <strong>branch and
+commit</strong> before comparing it with a successful check. On 4 November, run
+<a href="https://github.com/xiaoxionglin/SF_hipposlam/actions/runs/41760343291"><code>41760343291</code></a>
+failed Black/isort on the separate <code>codex/cue-transfer-20261104</code> branch. The
+merged <code>master</code> revision <code>55f6f306</code> passed all four post-merge checks. A formatting
+patch against cue-transfer <code>1cf64679</code> was prepared, passed the hooks plus 292
+tests and 11 subtests, and was handed to its owning chat. That handoff is not a
+claim that the branch repair has been pushed; check the branch's latest run.</p>
+<p>The follow-up integration validation itself passed 380 SF/workflow/export tests,
+10 GeoMem tests, installed-wheel checks and the PR checks. None of these counts
+establishes scientific performance, GPU parity or deployment of the changes to
+NEMO2.</p>
 
 
 
@@ -2824,7 +3082,7 @@ and update this guide when ownership changes.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 4, 2026 02:31:43 UTC">November 4, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="November 4, 2026 02:50:45 UTC">November 4, 2026</span>
   </span>
 
     
