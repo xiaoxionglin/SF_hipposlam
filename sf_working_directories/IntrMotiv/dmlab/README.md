@@ -38,6 +38,31 @@ The detailed learner metrics remain available under
 `train/reward_for_advantage_*`, `train/intrinsic_reward_*`, and
 `train/env_reward_*`.
 
+## Matched task-cue transfer initialization
+
+For a controlled comparison of flat task conditioning, use
+`--fixed_task_conditioning=True --fixed_task_goal_init=matched_cues` and vary
+only `--fixed_task_goal_mixture=True|False`. Both modes start from identical,
+seeded near-uniform effective task vectors and the same fresh FiLM parameters.
+The mixture stores log probabilities and applies softmax; the unrestricted
+mode stores those initial probabilities directly and may subsequently leave
+the simplex. Five-cue tasks use one independently initialized vector per cue.
+This opt-in mode leaves all historical initialization settings unchanged.
+
+To isolate worker reuse, cross this switch with `--transfer_scope=dg|policy`
+using the same source checkpoint, `--transfer_freeze_dg=True`, and
+`--transfer_freeze_worker=False`. Policy transfer replaces the decoder and
+action head with source weights; both scopes keep a fresh reward critic and
+optimizer. Use external PPO reward, disable graph transfer and HRL, and retain
+`hrl_goal_conditioning=target_id_film` with immediate target timing. The task
+vector's gradient remains live with `--ppo_dg_gradient=stop`; DG weights and
+BatchNorm statistics stay frozen.
+
+Matched initialization does not match optimization geometry: softmax changes
+the effective task-vector gradient and constrains its future values. Report
+this as a task-conditioning parameterization comparison, not as proof that
+the simplex constraint alone caused an outcome difference.
+
 ## Matched layer2 ResNet + LSTM baseline
 
 Use `--layer2_lstm_baseline=sparse` or `--layer2_lstm_baseline=dense` on an

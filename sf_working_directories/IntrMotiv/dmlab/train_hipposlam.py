@@ -408,6 +408,8 @@ def maybe_overwrite_rnn_size(cfg):
         raise ValueError("transfer_graph requires policy transfer and an HRL graph")
     if getattr(cfg, "fixed_task_goal_mixture", False) and not fixed_task_conditioning:
         raise ValueError("fixed_task_goal_mixture requires fixed_task_conditioning")
+    if getattr(cfg, "fixed_task_goal_init", "nominated") == "matched_cues" and not fixed_task_conditioning:
+        raise ValueError("matched_cues initialization requires fixed_task_conditioning")
     if getattr(cfg, "env", "") == "openfield_map2_cued_reward5":
         if int(getattr(cfg, "reward_instruction_count", 0)) != 5 or not cfg.with_number_instruction:
             raise ValueError("The five-site reward level requires five number-instruction channels")

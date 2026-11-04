@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from sf_working_directories.IntrMotiv.dmlab.controller_snapshot import ControllerSnapshot
-from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import TargetFiLMDecoder
+from sf_working_directories.IntrMotiv.dmlab.custom_actor_critic import TargetFiLMDecoder, controller_core_view
 from sf_working_directories.IntrMotiv.dmlab.custom_core import SimpleSequenceWithBypassCore
 from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DGProjection_batchnorm_relu
 from sf_working_directories.IntrMotiv.dmlab.custom_learner import (
@@ -114,6 +114,108 @@ def test_fresh_flat_goal_effects_are_distinct_and_reward_gradient_reaches_mixtur
     cfg.fixed_task_goal_mixture = False
     source_core = SimpleSequenceWithBypassCore(cfg, 5)
     assert torch.count_nonzero(TargetFiLMDecoder(source_core).target_modulation) == 0
+
+
+def _matched_cue_actor_parts(mixture, seed=42):
+    cfg = _core_config()
+    cfg.seed = seed
+    cfg.Hippo_n_feature = 64
+    cfg.reward_instruction_count = 5
+    cfg.fixed_task_goal_mixture = mixture
+    cfg.fixed_task_goal_init = "matched_cues"
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        core = SimpleSequenceWithBypassCore(cfg, 71)  # 64 DG, 2 bypass, 5 task cues
+        decoder = TargetFiLMDecoder(core)
+        return nn.ModuleDict(
+            {
+                "core": core,
+                "decoder": decoder,
+                "action": nn.Linear(decoder.get_out_size(), 8),
+                "critic": nn.Linear(decoder.get_out_size(), 1),
+            }
+        )
+
+
+@pytest.mark.parametrize("worker_init", ["fresh", "transferred"])
+def test_matched_cues_preserve_initial_policy_and_reward_gradient_paths(worker_init):
+    actors = [_matched_cue_actor_parts(mixture) for mixture in (True, False)]
+    if worker_init == "transferred":
+        source = _matched_cue_actor_parts(True, seed=123)
+        for actor in actors:
+            # The existing policy-transfer contract copies the worker/action
+            # head, while task vectors and reward critic retain fresh state.
+            for name in ("decoder", "action"):
+                actor[name].load_state_dict(source[name].state_dict())
+
+    mixture, unrestricted = actors
+    cue = torch.eye(5).repeat(2, 1)
+    effective = [actor["core"].fixed_task_condition(cue) for actor in actors]
+    assert torch.equal(effective[0], effective[1])
+    assert torch.allclose(effective[0].sum(-1), torch.ones(10))
+    assert torch.allclose(effective[0], torch.full_like(effective[0], 1 / 64), atol=0.001)
+    assert not torch.equal(effective[0][0], effective[0][1])
+    for name in ("decoder", "action", "critic"):
+        for key, value in mixture[name].state_dict().items():
+            assert torch.equal(value, unrestricted[name].state_dict()[key])
+    assert mixture["decoder"].target_modulation.norm() > 0
+
+    generator = torch.Generator().manual_seed(7)
+    head = torch.cat((torch.rand(10, 66, generator=generator), cue), dim=-1)
+    outputs = []
+    for actor in actors:
+        core = actor["core"]
+        output, _ = core(head, torch.zeros(10, core.total_state_size))
+        hidden = actor["decoder"](controller_core_view(output, core.core_output_size, "stop"))
+        logits, values = actor["action"](hidden), actor["critic"](hidden)
+        outputs.append((logits.detach(), values.detach()))
+        loss = torch.nn.functional.cross_entropy(logits, torch.arange(10) % 8) + values.square().mean()
+        loss.backward()
+        assert (core.fixed_task_target.grad.abs().sum(-1) > 0).all()
+        assert actor["decoder"].target_modulation.grad.abs().sum() > 0
+        assert actor["decoder"].state_layer[0].weight.grad.abs().sum() > 0
+        assert actor["action"].weight.grad.abs().sum() > 0
+    assert torch.equal(outputs[0][0], outputs[1][0])
+    assert torch.equal(outputs[0][1], outputs[1][1])
+
+
+@pytest.mark.parametrize("mixture", [True, False])
+def test_matched_cues_preserve_current_cue_in_packed_replay(mixture):
+    core = _matched_cue_actor_parts(mixture)["core"]
+    generator = torch.Generator().manual_seed(8)
+    cues = torch.nn.functional.one_hot(torch.tensor([[0, 1], [2, 3], [4, 0]]), 5).float()
+    sequence = torch.cat((torch.rand(3, 2, 66, generator=generator), cues), dim=-1)
+    initial = torch.zeros(2, core.total_state_size)
+    state = initial.clone()
+    expected = []
+    for head in sequence:
+        output, state = core(head, state)
+        expected.append(output)
+    packed = torch.nn.utils.rnn.pack_padded_sequence(sequence, [3, 3], enforce_sorted=False)
+    output, final_state = core(packed, initial)
+    unpacked, _ = torch.nn.utils.rnn.pad_packed_sequence(output)
+    assert torch.equal(unpacked, torch.stack(expected))
+    assert torch.equal(final_state, state)
+    assert torch.equal(unpacked[..., -64:], core.fixed_task_condition(cues))
+
+
+def test_matched_cues_use_seeded_local_rng_and_require_fixed_conditioning():
+    cfg = _core_config()
+    cfg.fixed_task_goal_init = "matched_cues"
+    cfg.fixed_task_conditioning = False
+    with pytest.raises(ValueError, match="requires fixed task conditioning"):
+        SimpleSequenceWithBypassCore(cfg, 5)
+    cfg.fixed_task_conditioning = True
+    before_core = torch.random.get_rng_state().clone()
+    SimpleSequenceWithBypassCore(cfg, 5)
+    assert torch.equal(torch.random.get_rng_state(), before_core)
+    before = torch.random.get_rng_state().clone()
+    first = _matched_cue_actor_parts(False, seed=42)["core"].fixed_task_target
+    again = _matched_cue_actor_parts(False, seed=42)["core"].fixed_task_target
+    other = _matched_cue_actor_parts(False, seed=123)["core"].fixed_task_target
+    assert torch.equal(first, again)
+    assert not torch.equal(first, other)
+    assert torch.equal(torch.random.get_rng_state(), before)
 
 
 def test_goal_write_flat_worker_allows_reward_gradient_into_dg():

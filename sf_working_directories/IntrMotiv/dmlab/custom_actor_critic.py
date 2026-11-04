@@ -97,10 +97,16 @@ class TargetFiLMDecoder(nn.Module):
         # this as an explicit parameter makes the conditioning operation
         # transparent and maps an all-zero no-target vector to zero modulation.
         self.target_modulation = nn.Parameter(torch.zeros(self.n_targets, 2 * hidden_size))
-        if bool(getattr(getattr(core, "cfg", None), "fixed_task_goal_mixture", False)):
+        cfg = getattr(core, "cfg", None)
+        matched_cues = bool(getattr(cfg, "fixed_task_conditioning", False)) and (
+            getattr(cfg, "fixed_task_goal_init", "nominated") == "matched_cues"
+        )
+        if bool(getattr(cfg, "fixed_task_goal_mixture", False)) or matched_cues:
             # A fresh flat actor needs distinct goal effects for reward to
             # identify mixture weights on its first update. Full policy transfer
-            # replaces this table with the learned source table afterward.
+            # replaces this table with the learned source table afterward. The
+            # opt-in matched initialization gives unrestricted task vectors the
+            # same initial effects and first-update gradient path.
             generator = torch.Generator().manual_seed(int(getattr(core.cfg, "seed", 0)) + 1908)
             with torch.no_grad():
                 self.target_modulation.copy_(0.01 * torch.randn(self.target_modulation.shape, generator=generator))

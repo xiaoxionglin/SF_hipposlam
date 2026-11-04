@@ -496,10 +496,26 @@ class SimpleSequenceWithBypassCore(ModelCore):
         self.fixed_task_goal_mixture = bool(getattr(cfg, "fixed_task_goal_mixture", False))
         if self.fixed_task_goal_mixture and not self.fixed_task_conditioning:
             raise ValueError("fixed task goal mixture requires fixed task conditioning")
+        goal_init = getattr(cfg, "fixed_task_goal_init", "nominated")
+        matched_cues = goal_init == "matched_cues"
         initial_target = torch.full((self.Hippo_n_feature,), 1.0 / float(self.Hippo_n_feature))
-        if self.fixed_task_goal_mixture:
+        if matched_cues:
+            if not self.fixed_task_conditioning:
+                raise ValueError("matched_cues initialization requires fixed task conditioning")
+            # Match the effective task vectors, not their parameter values:
+            # mixture parameters are log probabilities; unrestricted parameters
+            # are those probabilities directly. A private RNG preserves actor
+            # initialization across both parameterizations and breaks cue symmetry.
+            shape = (
+                (self.reward_instruction_count, self.Hippo_n_feature)
+                if self.reward_instruction_count
+                else (self.Hippo_n_feature,)
+            )
+            generator = torch.Generator().manual_seed(int(getattr(cfg, "seed", 0)) + 2907)
+            log_probabilities = (0.01 * torch.randn(shape, generator=generator)).log_softmax(-1)
+            initial_target = log_probabilities if self.fixed_task_goal_mixture else log_probabilities.softmax(-1)
+        elif self.fixed_task_goal_mixture:
             initial_target = torch.zeros(self.Hippo_n_feature)
-            goal_init = getattr(cfg, "fixed_task_goal_init", "nominated")
             if goal_init == "nominated":
                 target_id = int(getattr(cfg, "fixed_task_target_id", 0))
                 if not 0 <= target_id < self.Hippo_n_feature:
@@ -512,7 +528,7 @@ class SimpleSequenceWithBypassCore(ModelCore):
                 initial_target = 0.01 * torch.randn(self.Hippo_n_feature, generator=generator)
             elif goal_init != "uniform":
                 raise ValueError(f"Unknown fixed_task_goal_init={goal_init}")
-        if self.fixed_task_conditioning and self.reward_instruction_count:
+        if self.fixed_task_conditioning and self.reward_instruction_count and not matched_cues:
             initial_target = initial_target.repeat(self.reward_instruction_count, 1)
             if self.fixed_task_goal_mixture:
                 generator = torch.Generator().manual_seed(int(getattr(cfg, "seed", 0)) + 2907)
