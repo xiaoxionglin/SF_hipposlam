@@ -1,4 +1,4 @@
-"""Fail-closed qualification of frozen-DG, external-reward transfer runs.
+"""Fail-closed qualification of external-reward transfer and scratch controls.
 
 Run with ``python -m hpc_runs.intrmotiv_study.transfer_audit STUDY BATCH_ROOT``.
 Source checkpoints must have a metadata SHA-256 (source_checkpoint_sha256 or
@@ -31,6 +31,7 @@ DETECTOR_INTERFACE = ("DG_name", "DG_BN_intercept", "dg_batchnorm_semantics", "n
 FALSE_DEFAULTS = ("depth_sensor_inverse", "dmlab_reduced_action_set",
                   "dmlab_extended_action_set", "dmlab_navigation_action_set")
 REWARD_TAGS = ("intrmotiv/reward/advantage_mean", "intrmotiv/reward/environment_mean")
+GRADIENT_TAGS = {name: f"intrmotiv/dg/gradient/{name}_norm" for name in ("ppo", "encoder")}
 
 
 def _require(condition, message):
@@ -89,8 +90,11 @@ def _interface_errors(source, destination):
 
 
 def _source(config, metadata, cache):
-    path = Path(config.get("transfer_model_path", ""))
     declared = metadata.get("source_checkpoint")
+    # A scratch arm still names the source as a comparison reference, never as
+    # an initializer. This lets the same audit reject accidentally copied DG,
+    # worker, or critic tensors without adding a second initialization workflow.
+    path = Path(declared or "") if config.get("transfer_scope") == "none" else Path(config.get("transfer_model_path", ""))
     _require(path.is_file(), f"missing source checkpoint: {path}")
     _require(not declared or path.resolve() == Path(declared).resolve(), "source path differs from StudySpec metadata")
     expected = metadata.get("source_checkpoint_sha256", metadata.get("source_sha256", ""))
@@ -110,7 +114,7 @@ def _source(config, metadata, cache):
     return model, digest
 
 
-def _event_audit(run_dir, min_positive_batches):
+def _event_audit(run_dir, min_positive_batches, gradient_expectations=None):
     from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
     directory = run_dir / ".summary" / "0"
@@ -118,6 +122,8 @@ def _event_audit(run_dir, min_positive_batches):
     accumulator = EventAccumulator(str(directory), size_guidance={"scalars": 0}).Reload()
     tags = accumulator.Tags().get("scalars", [])
     required = (*REWARD_TAGS, "train/env_steps")
+    if gradient_expectations is not None:
+        required += tuple(GRADIENT_TAGS.values())
     _require(set(required).issubset(tags), f"missing TensorBoard tags: {sorted(set(required) - set(tags))}")
     histories = {}
     for tag in tags:
@@ -134,7 +140,17 @@ def _event_audit(run_dir, min_positive_batches):
     _require(positives >= min_positive_batches, f"positive external reward batches {positives} < {min_positive_batches}")
     max_frames = max(histories["train/env_steps"].values(), default=0)
     _require(max_frames > 0, "missing positive train/env_steps progress")
-    return {"reward_parity_batches": len(advantage), "positive_reward_batches": positives, "max_logged_frames": max_frames}
+    gradient_maxima = {}
+    if gradient_expectations is not None:
+        for name, expected in gradient_expectations.items():
+            values = histories[GRADIENT_TAGS[name]].values()
+            _require(values and all(value >= 0 for value in values), f"invalid DG {name} gradient norms")
+            maximum = max(values)
+            _require(maximum > 0 if expected else maximum == 0,
+                     f"DG {name} gradient must be {'nonzero' if expected else 'zero'}, observed maximum {maximum}")
+            gradient_maxima[name] = maximum
+    return {"reward_parity_batches": len(advantage), "positive_reward_batches": positives,
+            "max_logged_frames": max_frames, "dg_gradient_maxima": gradient_maxima}
 
 
 def _declared_config(run, config):
@@ -142,7 +158,10 @@ def _declared_config(run, config):
     names = {*INTERFACE, *DETECTOR_INTERFACE, *FALSE_DEFAULTS, "env", "transfer_scope", "transfer_model_path", "transfer_freeze_dg",
              "transfer_freeze_worker", "fixed_task_conditioning", "fixed_task_goal_mixture", "fixed_task_goal_init",
              "reward_instruction_count", "advantage_reward_source", "extra_encoder_losses", "hrl_controllable_graph",
-             "reward_scale", "with_pbt", "num_policies", "seed", "train_for_env_steps"}
+             "reward_scale", "with_pbt", "num_policies", "seed", "train_for_env_steps",
+             "transfer_calibrate_frozen_dg", "ppo_dg_gradient", "encoder_grad_coeff", "gamma", "gae_lambda",
+             "learning_rate", "lr_schedule", "dg_goal_input", "dg_context_feedback", "dg_transition_prediction",
+             "ca3_state_readout_mode", "dg_orthogonal_recruitment", "iterative_update", "distance_learning"}
     for argument in run.args:
         key, separator, value = argument.removeprefix("--").partition("=")
         if separator and key in names:
@@ -156,15 +175,86 @@ def _declared_config(run, config):
             _require(matches, f"config differs from StudySpec: {key}={actual!r}, expected {value!r}")
 
 
+def _dg_contract(config, run):
+    """Derive only explicitly declared plasticity controls; legacy means frozen."""
+    frozen = config.get("transfer_freeze_dg")
+    _require(isinstance(frozen, bool), "qualification requires an explicit transfer_freeze_dg boolean")
+    calibration = config.get("transfer_calibrate_frozen_dg", False)
+    scope = config.get("transfer_scope")
+    _require(scope in ("none", "dg", "policy"), f"unsupported transfer_scope {scope!r}; expected none, dg or policy")
+    _require(bool(config.get("transfer_model_path")) == (scope != "none"),
+             "transfer_model_path and a non-none transfer_scope must be supplied together")
+    _require(not calibration or (frozen and scope == "none"), "calibration requires a fresh frozen DG")
+    _require(not config.get("transfer_freeze_worker", False) or scope == "policy",
+             "a frozen worker requires policy transfer")
+    declared = {argument.removeprefix("--").partition("=")[0] for argument in run.args}
+    if not frozen:
+        _require({"transfer_freeze_dg", "ppo_dg_gradient", "encoder_grad_coeff"}.issubset(declared),
+                 "plastic DG qualification requires explicitly declared freeze, PPO-gradient, and encoder-coefficient flags")
+        _require(config.get("dg_batchnorm_semantics", "legacy_batch") == "legacy_batch",
+                 "plastic DG qualification currently supports legacy_batch normalization")
+        _require(config.get("distance_learning", True) and not config.get("iterative_update", False),
+                 "plastic DG qualification requires simultaneous DistanceLearner updates")
+        for key, value in {"dg_goal_input": "none", "dg_context_feedback": "none",
+                           "dg_transition_prediction": "none", "ca3_state_readout_mode": "off",
+                           "dg_orthogonal_recruitment": False}.items():
+            _require(config.get(key, value) == value, f"plastic DG qualification requires {key}={value!r}")
+    gradient = config.get("ppo_dg_gradient", "stop")
+    coefficient = float(config.get("encoder_grad_coeff", 1.0))
+    _require(gradient in ("stop", "joint") and math.isfinite(coefficient) and coefficient >= 0,
+             "invalid DG gradient configuration")
+    expected = {"ppo": not frozen and gradient == "joint", "encoder": not frozen and coefficient > 0}
+    mode = ("calibrated_random_frozen" if calibration else "frozen") if frozen else (
+        "joint" if all(expected.values()) else "ppo_only" if expected["ppo"] else
+        "intrinsic_only" if expected["encoder"] else "bn_only")
+    return mode, expected if not frozen or scope == "none" else None
+
+
+def _require_fresh_bn(model):
+    _require(model[DG[1] + "num_batches_tracked"].item() == 0 and
+             torch.count_nonzero(model[DG[1] + "running_mean"]) == 0 and
+             torch.equal(model[DG[1] + "running_var"], torch.ones_like(model[DG[1] + "running_var"])),
+             "fresh random DG did not begin with uncalibrated BN moments")
+
+
+def _audit_dg(before, after, mode):
+    """Check weights separately from moments; calibration permits one BN update."""
+    changes = _changes(before, after, ("encoder.DG_projection.",))
+    weights = _changes(before, after, (DG[0],))
+    bn = _changes(before, after, (DG[1],))
+    count_key = DG[1] + "num_batches_tracked"
+    if mode == "frozen":
+        _require(not changes, "frozen DG parameters/BN/buffers changed during training")
+    elif mode == "calibrated_random_frozen":
+        allowed = {DG[1] + name for name in ("running_mean", "running_var", "num_batches_tracked")}
+        _require(set(changes).issubset(allowed), "calibrated frozen DG weights or non-BN buffers changed")
+        _require(before[count_key].item() == 0 and after[count_key].item() == 1,
+                 "frozen random DG must calibrate exactly once (BN count 0 -> 1)")
+        _require_fresh_bn(before)
+        _require(any(key in bn for key in (DG[1] + "running_mean", DG[1] + "running_var")),
+                 "frozen random DG calibration did not change moments")
+    else:
+        if mode == "bn_only":
+            _require(not weights, "BN-only adaptation changed DG projection weights")
+            _require(all(key.startswith(DG[1]) for key in changes), "BN-only adaptation changed non-BN buffers")
+        else:
+            _require(weights, f"{mode} DG projection weights did not change")
+        _require(after[count_key].item() > before[count_key].item() and
+                 any(key in bn for key in (DG[1] + "running_mean", DG[1] + "running_var")),
+                 "plastic DG normalization moments did not advance")
+    return {"dg_mode": mode, "dg_weight_changed_tensors": weights, "dg_bn_changed_tensors": bn,
+            "dg_changed_tensors": changes}
+
+
 def _audit_run(run, run_dir, metadata, cache, required_frames, min_positive_batches):
     config = json.loads((run_dir / "config.json").read_text())
     _declared_config(run, config)
-    for key, value in {"transfer_freeze_dg": True, "advantage_reward_source": "external", "num_policies": 1,
+    for key, value in {"advantage_reward_source": "external", "num_policies": 1,
                        "with_pbt": False, "extra_encoder_losses": False, "fixed_task_conditioning": True,
                        "hrl_controllable_graph": False}.items():
         _require(config.get(key) == value, f"qualification requires {key}={value!r}")
     scope = config.get("transfer_scope")
-    _require(scope in ("dg", "policy"), f"unsupported transfer_scope {scope!r}; expected dg or policy")
+    dg_mode, gradient_expectations = _dg_contract(config, run)
     required = required_frames if required_frames is not None else int(config["train_for_env_steps"])
     _require(required > 0, "required frames must be positive")
     source, digest = _source(config, metadata, cache)
@@ -174,8 +264,13 @@ def _audit_run(run, run_dir, metadata, cache, required_frames, min_positive_batc
     _require(terminal.get("env_steps") == frames and frames >= required,
              f"checkpoint progress {terminal.get('env_steps')} (filename {frames}) below/inconsistent with {required}")
     before, after = initial["model"], terminal["model"]
-    _require(not _changes(source, before, DG), "initial source DG parameters/BN were not loaded exactly")
-    _require(not _changes(before, after, ("encoder.DG_projection.",)), "frozen DG parameters/BN/buffers changed during training")
+    source_dg_changes = _changes(source, before, DG)
+    if scope == "none":
+        _require(any(key.startswith(DG[0]) for key in source_dg_changes), "scratch DG projection copied source weights")
+        _require_fresh_bn(before)
+    else:
+        _require(not source_dg_changes, "initial source DG parameters/BN were not loaded exactly")
+    dg_audit = _audit_dg(before, after, dg_mode)
     loaded_changes = _changes(source, before, WORKER)
     if scope == "policy":
         _require(not loaded_changes, f"initial worker transfer mismatch: {loaded_changes}")
@@ -188,7 +283,7 @@ def _audit_run(run, run_dir, metadata, cache, required_frames, min_positive_batc
     _require(not worker_changes if frozen_worker else bool(worker_changes),
              "frozen worker changed" if frozen_worker else "worker did not change during learning")
     _changes(source, before, ("critic_linear.",))
-    _changes(before, after, ("critic_linear.",))
+    _require(_changes(before, after, ("critic_linear.",)), "critic did not change during learning")
     _require("critic_linear.weight" in before and not torch.equal(before["critic_linear.weight"], source["critic_linear.weight"]),
              "critic was not freshly initialized")
     _require(TASK in before and TASK in after, f"missing task parameter {TASK}")
@@ -201,11 +296,12 @@ def _audit_run(run, run_dir, metadata, cache, required_frames, min_positive_batc
     effective = [model[TASK].softmax(-1) if config.get("fixed_task_goal_mixture") else model[TASK] for model in (before, after)]
     effective_movement = (effective[1] - effective[0]).abs().reshape(max(1, n_cues), n_dg).sum(dim=1)
     _require((effective_movement > 0).all(), "effective task condition did not move for every cue")
-    events = _event_audit(run_dir, min_positive_batches)
+    events = _event_audit(run_dir, min_positive_batches, gradient_expectations)
     # Logging can legitimately end just before the final saved update.
     _require(events["max_logged_frames"] <= frames, "event progress exceeds latest checkpoint progress")
     return {"initial_checkpoint": str(initial_path), "terminal_checkpoint": str(terminal_path),
             "checkpoint_frames": frames, "required_frames": required, "source_checkpoint_sha256": digest,
+            "source_used_for_initialization": scope != "none", **dg_audit,
             "worker_changed_tensors": worker_changes, "task_movement_l1_per_cue": movement.tolist(),
             "effective_task_movement_l1_per_cue": effective_movement.tolist(), **events}
 
@@ -213,7 +309,7 @@ def _audit_run(run, run_dir, metadata, cache, required_frames, min_positive_batc
 def audit(study, batch_root, required_frames=None, min_positive_batches=1):
     """Audit every declared run; absent/ambiguous data always makes the report fail."""
     _require(min_positive_batches > 0, "min_positive_batches must be positive")
-    result = {**study.provenance(), "protocol": "frozen-dg-transfer-qualification-v1", "passed": False, "runs": []}
+    result = {**study.provenance(), "protocol": "external-reward-transfer-qualification-v2", "passed": False, "runs": []}
     try:
         directories = discover_run_directories(study, Path(batch_root))
     except (OSError, SpecError) as error:

@@ -185,3 +185,43 @@ class TestLauncher:
         logging.disable(logging.NOTSET)
 
         shutil.rmtree(join(train_dir, root_dir_name))
+
+
+def test_slurm_bounded_submission_preserves_pending_rows(tmp_path, monkeypatch):
+    """A quota-sized wave keeps exact pending commands for the existing resumer."""
+    import csv
+    import importlib.util
+    from pathlib import Path
+    from unittest.mock import patch
+    template = tmp_path / 'template.sh'
+    template.write_text('#!/bin/bash\n$CMD\n')
+    workdir = tmp_path / 'slurm'
+    argv = ['--backend=slurm', f'--train_dir={tmp_path / "train"}',
+            f'--slurm_workdir={workdir}', f'--slurm_sbatch_template={template}',
+            '--slurm_gpus_per_job=1', '--slurm_max_submit=2', '--pause_between=0']
+    args = launcher_argparser(argv).parse_args(argv)
+    description = RunDescription('batch', [Experiment('exp', 'echo train', [{'x': 1}, {'x': 2}, {'x': 3}])])
+    accepted = []
+    def fake_run(command, **kwargs):
+        if command[0] == 'git':
+            return slurm_launcher.subprocess.CompletedProcess(command, 0, 'test\n', '')
+        assert command[0] == 'sbatch'
+        accepted.append(command[-1])
+        return slurm_launcher.subprocess.CompletedProcess(command, 0, f'{100 + len(accepted)}\n', '')
+    monkeypatch.setattr(slurm_launcher.subprocess, 'run', fake_run)
+    assert slurm_launcher.run_slurm(description, args) == 0
+    with (workdir / 'jobs.tsv').open() as f: rows = list(csv.DictReader(f, delimiter='\t'))
+    assert [r['status'] for r in rows] == ['submitted', 'submitted', 'pending_submission']
+    assert [r['job_id'] for r in rows] == ['101', '102', '']
+    pending_command = rows[-1]['command']
+    path = Path(__file__).parents[1] / 'sf_working_directories/IntrMotiv/launcher/resume_slurm_submission.py'
+    spec = importlib.util.spec_from_file_location('resume_slurm_test', path)
+    resumer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resumer)
+    with patch('sys.argv', [str(path), str(workdir), '--submit', '--pause-between=0']):
+        assert resumer.main() == 0
+        assert resumer.main() == 0
+    with (workdir / 'jobs.tsv').open() as f: final = list(csv.DictReader(f, delimiter='\t'))
+    assert len(accepted) == 3 and len(set(accepted)) == 3
+    assert [r['job_id'] for r in final] == ['101', '102', '103']
+    assert final[-1]['command'] == pending_command

@@ -39,6 +39,10 @@ def add_slurm_args(parser):
         "--slurm_print_only", default=False, type=str2bool, help="Generate scripts without submitting jobs"
     )
     parser.add_argument(
+        "--slurm_max_submit", default=0, type=int,
+        help="Submit at most this many jobs, retaining remaining rows as pending_submission; 0 submits all.",
+    )
+    parser.add_argument(
         "--slurm_workdir",
         default=None,
         type=str,
@@ -190,8 +194,14 @@ def run_slurm(run_description, args):
         log.info("Generated %d Slurm scripts in %s (print-only)", len(jobs), workdir)
         return 0
 
+    max_submit = getattr(args, "slurm_max_submit", 0)
+    if max_submit < 0:
+        raise ValueError("slurm_max_submit must be nonnegative")
     job_ids = []
     for job in jobs:
+        if max_submit and len(job_ids) >= max_submit:
+            log.info("Submission limit reached; remaining jobs stay pending_submission for the resume helper")
+            break
         command = ["sbatch"]
         if args.slurm_partition:
             command.extend(["-p", args.slurm_partition])
