@@ -1,4 +1,10 @@
-# Shared components and project boundaries
+# Shared code: what changed and how to use it
+
+Use this file as the practical guide to the 4 November 2026 organization and
+reuse work. Start with [what changed](#what-changed), follow the
+[usage examples](#usage-examples), and consult [enable and roll back](#enable-and-roll-back)
+before changing an existing experiment. [Development checks](#development-checks-and-github-warnings)
+explain how to avoid repeated formatting failures.
 
 SF_hipposlam owns the shared training implementation. Project repositories own
 their questions, StudySpecs, evidence and reports. Reuse a small component from
@@ -9,6 +15,30 @@ This integration was checked against SF_hipposlam `14ddead`, IntrMotiv
 It preserves existing defaults and makes new runtime behavior opt-in. Local
 compatibility tests establish implementation parity, not scientific performance
 or qualification for a cluster run.
+
+## What changed
+
+| Change | Why it helps | Delivery |
+| --- | --- | --- |
+| Shared DG projection, sampled-depth adapters and CPU checkpoint loader in `sf_shared` | Projects can reuse the implementation without copying a whole encoder or importing the environment just to inspect a checkpoint. | [SF PR 3](https://github.com/xiaoxionglin/SF_hipposlam/pull/3), merge `667b887a` |
+| Explicit behavior switches, real boolean parsing and separate SimGaY manager entry point | New options are selectable; old model/checkpoint paths remain usable. | SF PR 3 |
+| Study workflow discovery and saved-map analysis in one package | Shared infrastructure stays with SF while study definitions and scientific evidence stay with their projects. | SF PR 3, workflow version `1.15.0` |
+| Required workflow modules, schema and geometry maps included in wheels | A normal installation now contains dependencies previously visible only in a source checkout. | [SF PR 4](https://github.com/xiaoxionglin/SF_hipposlam/pull/4), merge `55f6f306` |
+| Frozen starter files restored and protected by hash/inventory tests | Formatting cannot silently change an already distributed version. | SF PR 4; original ZIP and manifest retained |
+| GeoMem backend choice connected to its built-in APPO representation | `--shared_dg_projection=True` now selects the shared implementation instead of being ignored. | [GeoMem commit `bb736ab`](https://github.com/xiaoxionglin/GeoMem/commit/bb736abb6302d5109b41d8d0b7726d649b9c3729) |
+
+The workspace organization pass also clarified project entry points, moved
+compseq's six authored scripts into `authoring/`, retained the two Office
+workbooks in `local-copies/`, and removed duplicated GeoMem thesis prose while
+preserving paper-specific priorities. On the original host, the complete
+file-move and ownership record is
+`~/Desktop/Projects/docs/audits/2026-11-04-organization.md`; the workspace entry
+point is `~/Desktop/Projects/README.md`. These local files are outside this Git
+repository. SAB and historical scientific results were excluded from changes;
+the paper-controls checkout retained its scientific code and results.
+
+SF's default branch is **`master`**. GeoMem's is **`main`**. A check passing on
+one branch says nothing about a different branch's head commit.
 
 ## Where code belongs
 
@@ -86,6 +116,109 @@ implementations. For a structural regression, revert the corresponding Git
 commit or use the pre-integration revision. Do not overwrite an experiment's
 saved provenance to make it look as if it ran with another implementation.
 
+## Usage examples
+
+### Install and choose an interpreter
+
+Use the environment set up by the [installation guide](../README.md), then run
+this from the SF_hipposlam repository root:
+
+```bash
+python -m pip install -e '.[analysis]'
+python -m sf_examples.simgay.train --help
+python -m hpc_runs.intrmotiv_study --help
+```
+
+The editable installation follows this checkout's code. Omit `-e` for a normal
+installation. `analysis` adds Matplotlib for figure rendering; it does not
+install DeepMind Lab or deploy anything to a cluster. Use the same interpreter
+for installation, tests and execution.
+
+### Select the shared DG implementation
+
+For an existing IntrMotiv training command, add `--shared_dg_projection=True`.
+Keep its other experiment arguments and use a new output directory. To compare
+with the retained implementation, repeat from the same source checkpoint with
+`--shared_dg_projection=False`. This changes code ownership, not the intended
+DG computation; it does not automatically select a different learning rule.
+
+GeoMem exposes the same choice in two workflows. From GeoMem's
+`geomem-experiments/` directory, after following its installation instructions:
+
+```bash
+# Full APPO path; starts training when invoked.
+python -m experiments.geomem.train --experiment=shared_dg_trial \
+  --shared_dg_projection=True
+```
+
+Use `False` to restore the local APPO projection. For the independent supervised
+sensory-prediction runner, this small example also starts training:
+
+```bash
+python experiments/minigrid_sensory_prediction.py \
+  --dg-projection-backend sf_shared \
+  --train-episodes 4 --test-episodes 2 --max-steps 24 --epochs 2 \
+  --output-dir figures/shared_dg_smoke
+```
+
+Choose a new output directory and use `--dg-projection-backend local` to roll
+back. See
+[GeoMem's APPO guide](https://github.com/xiaoxionglin/GeoMem/blob/main/geomem-experiments/experiments/geomem/README.md)
+and [sensory-prediction guide](https://github.com/xiaoxionglin/GeoMem/blob/main/geomem-experiments/experiments/minigrid_sensory_prediction.md)
+for their different objectives and dependencies. The shared backend requires
+this SF fork to be importable; custom APPO representation factories must keep
+`--shared_dg_projection=False`.
+
+### Inspect an existing checkpoint on CPU
+
+Replace the path below with an actual IntrMotiv checkpoint:
+
+```python
+from pathlib import Path
+import torch
+from sf_shared.checkpoints import load_checkpoint_dict
+
+checkpoint = load_checkpoint_dict(Path("path/to/checkpoint.pth"), torch.device("cpu"))
+print(checkpoint.keys())
+```
+
+This reads the checkpoint using CPU memory mapping without constructing an
+environment or starting training. It returns the saved dictionary; it does not
+instantiate the model or change its parameters. See the dependency notes below
+for the retained loader semantics.
+
+### Try the standalone SimGaY manager
+
+This short wiring check starts training and writes a new result directory:
+
+```bash
+python -m sf_examples.simgay.train --output train_dir/simgay_smoke \
+  --session-batches 1 --num-envs 2 --eval-every 1 --eval-sessions 2
+```
+
+Choose a fresh `--output` path on each invocation. The short run is not a
+learning-performance evaluation. Add `--actuator-success-rate 0.8` for the noisy
+actuator condition and retain it when evaluating that condition. See the
+[manager guide](../sf_examples/simgay/README.md) for checkpoint initialization,
+frozen evaluation and the task/model defaults.
+
+### Analyze saved study outputs
+
+In these commands, replace `STUDY`, `BATCH_ROOT` and `NEW_OUTPUT_DIR` with your
+study JSON, training-batch directory and a fresh analysis directory:
+
+```bash
+python -m hpc_runs.intrmotiv_study validate STUDY
+python -m hpc_runs.intrmotiv_study collect-online STUDY BATCH_ROOT NEW_OUTPUT_DIR \
+  --run-discovery-mode training
+```
+
+`training` avoids mistaking generated analysis directories for training runs.
+Use `--run-discovery-mode legacy` for the original discovery behavior. Neither
+command submits jobs or modifies the study definition. Graph rendering and
+NumPy-only concentration analysis are described in the
+[workflow guide](../hpc_runs/intrmotiv_study/README.md).
+
 ## Checkpoints and dependency boundaries
 
 `sf_shared.checkpoints.load_checkpoint_dict` is the existing CPU/mmap offline
@@ -135,3 +268,47 @@ For future reuse, add the narrow component here, keep its consumer's old path
 selectable when behavior changes, and test the saved configurations/checkpoints
 that the affected projects actually use. Keep provenance beside the component
 and update this guide when ownership changes.
+
+## Development checks and GitHub warnings
+
+Run these from the SF repository root before pushing Python changes:
+
+```bash
+python -m pip install pre-commit
+python -m pre_commit install
+python -m pre_commit run --all-files
+git diff --check
+```
+
+The hooks use the versions and exclusions in `.pre-commit-config.yaml`.
+Black/isort can modify files on their first run, which is reported as failure.
+Review `git diff`, stage only the intended files, rerun the hooks, and commit
+the resulting formatting before pushing. Running a formatter only in CI cannot
+save those changes back to the branch. Use the configured hooks so the frozen
+starter export stays excluded.
+
+For changes to these reusable components, the focused source-checkout checks are:
+
+```bash
+python -m pytest -q tests/test_shared_dg.py tests/test_frozen_exports.py tests/test_simgay_*.py
+python -m pytest -q hpc_runs/test_*.py
+```
+
+Use the project's test environment with pytest installed. Wheel packaging changes
+also need the installed-wheel check in `.github/workflows/test-ci.yml`; passing
+tests in an editable checkout alone cannot show that the wheel contains every
+required module or data file.
+
+When a GitHub failure email arrives, open its run and check the **branch and
+commit** before comparing it with a successful check. On 4 November, run
+[`41760343291`](https://github.com/xiaoxionglin/SF_hipposlam/actions/runs/41760343291)
+failed Black/isort on the separate `codex/cue-transfer-20261104` branch. The
+merged `master` revision `55f6f306` passed all four post-merge checks. A formatting
+patch against cue-transfer `1cf64679` was prepared, passed the hooks plus 292
+tests and 11 subtests, and was handed to its owning chat. That handoff is not a
+claim that the branch repair has been pushed; check the branch's latest run.
+
+The follow-up integration validation itself passed 380 SF/workflow/export tests,
+10 GeoMem tests, installed-wheel checks and the PR checks. None of these counts
+establishes scientific performance, GPU parity or deployment of the changes to
+NEMO2.
