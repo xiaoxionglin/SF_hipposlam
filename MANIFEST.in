@@ -3,3 +3,4 @@ recursive-include . *.cfg
 recursive-include . *.wad
 recursive-include . *.sh
 include LICENSE
+include scripts/check_wheel_install.py

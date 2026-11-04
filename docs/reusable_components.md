@@ -18,7 +18,7 @@ or qualification for a cluster run.
 | [`sample_factory/`](../sample_factory/) | Common training engine, configuration and optimizer lifecycle. |
 | [`sf_working_directories/IntrMotiv/`](../sf_working_directories/IntrMotiv/) | IntrMotiv model, learner, evaluation and project-specific contracts. |
 | [`sf_working_directories/default/`](../sf_working_directories/default/), [`jannek/`](../sf_working_directories/jannek/) | Existing model variants. Their decoder/core differences remain explicit. |
-| [`sf_xxl/dmlab/`](../sf_xxl/dmlab/) | Existing HippoSLAM/world-model entry point. Its `train_hipposlam.py` currently imports the **default** model/parser; do not infer the selected implementation from the entry-point folder alone. |
+| [`sf_xxl/dmlab/`](../sf_xxl/dmlab/) | Existing HippoSLAM/world-model entry points. `train_hipposlam.py` imports the **default** model/parser; `train_dmlab.py` imports **jannek**. Check the executable's imports when choosing a model. |
 | [`sf_examples/simgay/`](../sf_examples/simgay/README.md) | Optional completed-trial manager benchmark, with its own CLI and checkpoint contract. |
 | [`hpc_runs/intrmotiv_study/`](../hpc_runs/intrmotiv_study/README.md) | Study validation, run discovery, collection and saved-output analysis, reusable by compatible projects. |
 | `hpc_runs/studies/`, project repositories | Study-specific conditions, provenance, decisions and evidence. Frozen study inputs and exports remain pinned. |
@@ -33,7 +33,7 @@ and state keys continue to work. Whole encoders and cores are not interchangeabl
 | --- | --- |
 | **IntrMotiv** | Main source of shared depth/DG/checkpoint components and workflow utilities. Runtime improvements already upstream include replay, checkpoint retention/milestones, geometry telemetry and graph caching; they are not recopied. Two previously separate recovery patches now have explicit opt-in flags. |
 | **SimGaY** | The standalone high-level manager, trial history, losses, actuator environment and checkpoint protocol now live under `sf_examples/simgay`. Task metrics remain separate from model inputs. Full navigation, oracle transfer and ongoing project variants are not silently merged. |
-| **GeoMem** | Its existing categorical DG implementation matches IntrMotiv. `CategoricalDGEncoder` can now import `sf_shared.dg` lazily; the supervised sensory runner exposes the same choice. The local backend remains available without installing SF. Its APPO adapter already uses IntrMotiv components; its restricted sequence core is not a substitute for the full research core. |
+| **GeoMem** | Its existing categorical DG implementation matches IntrMotiv. `CategoricalDGEncoder` can now import `sf_shared.dg` lazily; the supervised sensory runner and built-in APPO representation expose the same choice. The local backend remains available without installing SF. Its APPO adapter already uses IntrMotiv components; its restricted sequence core is not a substitute for the full research core. |
 | **MorphSCA** | Component alignment and stability analysis are useful reference methods. The current small-factor matching assumptions (up to eight components) do not fit the DG/RL use case; no runtime dependency is introduced without a matching evaluation contract. |
 | **SF_hipposlam_paper_controls** | Frozen paper-specific checkout and evidence owner. Shared ideas may be evaluated in development, but this integration does not rewrite its code, results or provenance. |
 | **compseq / nextGen_Call** | Presentation authoring and submission assets retain their own owners. They do not supply an appropriate training dependency. |
@@ -54,7 +54,7 @@ model, environment and scientific configuration. Enable one change at a time.
 | Capability | Enable | Default / rollback | Scope and compatibility |
 | --- | --- | --- | --- |
 | Shared DG implementation | IntrMotiv: `--shared_dg_projection=True` | `False` selects retained legacy class | Same constructor, parameter/buffer names and strict state-dict loading; BatchNorm semantics remain whatever the saved config selects. |
-| Shared DG in GeoMem | Python: `projection_backend="sf_shared"`; supervised CLI: `--dg-projection-backend sf_shared` | `local` | Shared backend needs this SF checkout on Python's path. Local backend has no new dependency. Checkpoint metadata records the selection. |
+| Shared DG in GeoMem | Python: `projection_backend="sf_shared"`; supervised CLI: `--dg-projection-backend sf_shared`; built-in APPO representation: `--shared_dg_projection=True` | `local`, or APPO `False` | Shared backend needs this SF package installed. Local backend has no new dependency. Custom APPO representation factories require the flag to remain False. Encoder exports and full actor state dictionaries load strictly in both directions. |
 | Capped inverse depth | `--depth_sensor_inverse=True` | `False` restores pass-through sampling | Default/default-entry-point, jannek and sf_xxl parsers stay False; IntrMotiv's existing fresh-run default stays True. Old saved configurations retain their prior response. Requires fixed preprocessing, not running normalization of depth. |
 | Preserve loaded optimizer rates | `--preserve_loaded_optimizer_lr=True` | `False` | During initialization only, keep the loaded optimizer's actual group rates. Fresh initialization, later scheduler updates and explicit config/PBT changes keep existing behavior. This does not promise an identical future training trajectory. |
 | Recover unsupported PPO minibatches | IntrMotiv: `--recover_empty_ppo_minibatches=True` | `False` retains strict failure | Requires PPO with `distance_learning=True`, `double_value=False`. Skip minibatches with fewer than two valid decisions before minibatch forward/SGD. Empty epochs do not advance the scheduler; a wholly skipped update does not apply recruitment. Skips are logged and change the effective training sample population. |
@@ -99,6 +99,18 @@ point. Depth additionally uses the existing Sample Factory encoder base.
 Consumers should import what they use rather than create another package-wide
 registry or copy the shared source.
 
+Install from this repository with `python -m pip install .`, or use
+`python -m pip install '.[analysis]'` for Matplotlib-based saved-output rendering.
+The wheel includes the reusable study workflow, runtime transport dependencies,
+study schema and the two default geometry maps. Study-specific launch scripts,
+source snapshots and result bundles remain in the source checkout. An installed
+wheel is not a copy of the whole research workspace.
+
+The versioned `exports/intrmotiv_prediction_starter/` directory is a frozen
+distribution. Its contents must match its original manifest and ZIP byte for
+byte; formatters exclude it. Make future changes as a new versioned export
+instead of rewriting the published payload or its recorded hashes.
+
 ## Verification
 
 Focused tests cover exact shared/legacy outputs, gradients, running statistics,
@@ -106,7 +118,14 @@ state keys, old-checkpoint loading, explicit false parsing, optimizer restart,
 partly/wholly skipped PPO updates, workflow provenance and scientific metric
 invariants. SimGaY tests retain golden environment/event sequences, independent
 actuator randomness, training isolation and manager checkpoint validation.
-GeoMem compares prediction and one optimizer step across both backends.
+GeoMem compares prediction and one optimizer step across both backends, checks
+the APPO parser's actual selection, and loads encoder exports and full actor
+checkpoints across both implementations.
+
+CI builds a wheel and checks it from a temporary directory with source checkout
+and editable-install paths removed. The probe verifies runtime imports, CLI help,
+the packaged schema and both default geometry loaders. Frozen-export tests also
+check file hashes, ZIP integrity and its complete member inventory.
 
 The pre-existing StudySpecs keep their fingerprints and rendered rows. These
 checks do not deploy the code to NEMO2, rerun scientific experiments, demonstrate
