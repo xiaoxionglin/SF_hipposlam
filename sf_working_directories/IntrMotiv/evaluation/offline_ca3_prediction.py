@@ -25,6 +25,22 @@ from sf_working_directories.IntrMotiv.dmlab.ca3_state_readout import (
 )
 
 SCHEMA = "intrmotiv/offline-ca3-prediction/v1"
+LOSS_MODES = ("stratified", "elementwise_mse")
+
+
+def prediction_objective(prediction, target, loss_mode="stratified"):
+    """Keep the original balanced objective; expose one full-vector control."""
+    if loss_mode == "stratified":
+        return _stratified_smooth_l1(prediction, target, 1.0, 0.1)[0]
+    if loss_mode == "elementwise_mse":
+        return F.mse_loss(prediction, target)
+    raise ValueError(f"Unknown loss mode: {loss_mode}")
+
+
+def validation_selection_metric(loss_mode):
+    if loss_mode not in LOSS_MODES:
+        raise ValueError(f"Unknown loss mode: {loss_mode}")
+    return "mse" if loss_mode == "elementwise_mse" else "selection_loss"
 
 
 def file_sha256(path):
@@ -139,7 +155,7 @@ def batch_tensors(states, actions, starts, horizon):
 
 
 @torch.no_grad()
-def evaluate(readout, predictor, states, actions, starts, horizon, expanded, batch_size=1024):
+def evaluate(readout, predictor, states, actions, starts, horizon, expanded, batch_size=1024, baseline="persistence"):
     targets, predictions, shuffled, latents = [], [], [], []
     # Rotate complete action prefixes across held-out rows, never future states.
     shuffled_starts = np.roll(starts, max(1, len(starts) // 2))
@@ -148,7 +164,12 @@ def evaluate(readout, predictor, states, actions, starts, horizon, expanded, bat
         state, prefix, h = batch_tensors(states, actions, rows, horizon)
         target = states[torch.as_tensor(rows + horizon, device=states.device), ::expanded]
         latent = None if readout is None else readout(state)
-        pred = state[:, ::expanded] if readout is None else predictor(latent, prefix, h)
+        if readout is None:
+            if baseline not in ("persistence", "zero"):
+                raise ValueError(f"Unknown baseline: {baseline}")
+            pred = state[:, ::expanded] if baseline == "persistence" else torch.zeros_like(target)
+        else:
+            pred = predictor(latent, prefix, h)
         targets.append(target.cpu())
         predictions.append(pred.cpu())
         if readout is not None:
@@ -167,9 +188,10 @@ def evaluate(readout, predictor, states, actions, starts, horizon, expanded, bat
     return result
 
 
-def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch_size=512, lr=0.001):
+def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch_size=512, lr=0.001, loss_mode="stratified"):
     """Equal initial tensors, optimizer settings and row order; action mask differs."""
     device = states.device
+    selection_metric = validation_selection_metric(loss_mode)
     torch.manual_seed(seed)
     readout = CA3StateReadout(states.shape[1], 16).to(device)
     predictor = CausalDGInnovationPredictor(16, metadata["action_count"], horizon, metadata["n_dg"], 128).to(device)
@@ -189,7 +211,7 @@ def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch
             target = states[torch.as_tensor(rows + horizon, device=device), ::expanded]
             for name, (r, p) in models.items():
                 latent = r(state.detach())
-                prediction_loss, _, _ = _stratified_smooth_l1(p(latent, prefix, h), target.detach(), 1.0, 0.1)
+                prediction_loss = prediction_objective(p(latent, prefix, h), target.detach(), loss_mode)
                 variance, covariance, _, _ = _variance_covariance_losses(latent)
                 loss = prediction_loss + 0.1 * variance + 0.01 * covariance
                 if not torch.isfinite(loss):
@@ -199,7 +221,7 @@ def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch
                 optimizers[name].step()
         for name, (r, p) in models.items():
             metrics = evaluate(r, p, states, actions, indices["validation"], horizon, expanded)
-            score = metrics["selection_loss"]
+            score = metrics[selection_metric]
             if score is None or not np.isfinite(score):
                 raise ValueError("Validation lacks finite supported selection loss")
             if name not in best or score < best[name][0]:
@@ -210,11 +232,14 @@ def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch
         p.load_state_dict(best[name][3])
         for split in (key for key in indices if key != "train"):
             metrics = evaluate(r, p, states, actions, indices[split], horizon, expanded)
-            records.append(dict(horizon=horizon, seed=seed, model=name, split=split, best_epoch=best[name][1], **metrics))
+            records.append(dict(horizon=horizon, seed=seed, model=name, split=split, best_epoch=best[name][1],
+                                validation_selection_metric=selection_metric, best_validation_score=best[name][0], **metrics))
     return records, {name: dict(readout=value[2], predictor=value[3], epoch=value[1]) for name, value in best.items()}
 
 
 def run_fit(args):
+    loss_mode = getattr(args, "loss_mode", "stratified")
+    selection_metric = validation_selection_metric(loss_mode)
     metadata = json.loads(args.dataset.with_suffix(".json").read_text())
     if metadata["dataset_sha256"] != file_sha256(args.dataset):
         raise ValueError("Dataset hash differs from its collection provenance")
@@ -229,6 +254,7 @@ def run_fit(args):
                   collection=metadata, split_seed=args.split_seed, episodes={k: v.tolist() for k, v in splits.items()},
                   fit_settings=dict(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, seeds=args.seeds,
                                     state_dim=16, hidden_size=128, readout_lr_scale=0.2,
+                                    loss_mode=loss_mode, validation_selection_metric=selection_metric,
                                     active_coeff=1.0, zero_coeff=0.1, var_coeff=0.1, cov_coeff=0.01),
                   coverage={}, unsupported={}, subgroup_unsupported={}, records=[], passed=False,
                   pass_meaning="All requested horizons have sufficient support and finite fits; no predictive advantage is implied.",
@@ -257,13 +283,14 @@ def run_fit(args):
             else:
                 indices["test_random_action"] = rows
         for split in (key for key in indices if key != "train"):
-            metrics = evaluate(None, None, states, actions, indices[split], horizon, metadata["expanded"])
-            report["records"].append(dict(horizon=horizon, seed=None, model="persistence", split=split, **metrics))
+            for baseline in ("persistence", "zero"):
+                metrics = evaluate(None, None, states, actions, indices[split], horizon, metadata["expanded"], baseline=baseline)
+                report["records"].append(dict(horizon=horizon, seed=None, model=baseline, split=split, **metrics))
         for seed in args.seeds:
-            rows, fitted = fit_pair(states, actions, indices, metadata, horizon, seed, args.epochs, args.batch_size, args.lr)
+            rows, fitted = fit_pair(states, actions, indices, metadata, horizon, seed, args.epochs, args.batch_size, args.lr, loss_mode)
             report["records"].extend(rows)
             torch.save(dict(schema=SCHEMA, dataset_sha256=metadata["dataset_sha256"], horizon=horizon, seed=seed,
-                            models=fitted, metadata=metadata), output / f"predictors_h{horizon}_s{seed}.pth")
+                            models=fitted, metadata=metadata, fit_settings=report["fit_settings"]), output / f"predictors_h{horizon}_s{seed}.pth")
         (output / "results.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     report["passed"] = not report["unsupported"]
     report["test_comparisons"] = []
@@ -271,11 +298,12 @@ def run_fit(args):
         rows = [row for row in report["records"] if row["horizon"] == horizon and row["split"] == "test"]
         if not rows:
             continue
-        by_model = {name: [row for row in rows if row["model"] == name] for name in ("action", "state_only", "persistence")}
+        by_model = {name: [row for row in rows if row["model"] == name] for name in ("action", "state_only", "persistence", "zero")}
         means = {name: float(np.mean([row["active_mse"] for row in group])) for name, group in by_model.items()}
         report["test_comparisons"].append(dict(horizon=horizon, mean_active_mse=means,
             action_minus_state_only=means["action"] - means["state_only"],
-            action_minus_persistence=means["action"] - means["persistence"]))
+            action_minus_persistence=means["action"] - means["persistence"],
+            action_minus_zero=means["action"] - means["zero"]))
     (output / "results.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     return 0 if report["passed"] else 2
 
@@ -289,6 +317,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--loss-mode", choices=LOSS_MODES, default="stratified",
+                        help="Prediction loss and validation selection; regularizers are unchanged")
     parser.add_argument("--split-seed", type=int, default=901)
     parser.add_argument("--minimum-active", type=int, default=20)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

@@ -11,7 +11,8 @@ import torch
 
 from sf_working_directories.IntrMotiv.evaluation.offline_ca3_prediction import (
     episode_splits, evaluate, file_sha256, fit_pair, prediction_metrics,
-    run_fit, support, support_gate, transition_indices, validate_dataset,
+    prediction_objective, run_fit, support, support_gate, transition_indices,
+    validate_dataset, validation_selection_metric,
 )
 
 
@@ -71,6 +72,19 @@ def test_sparse_support_gate_and_active_zero_metrics():
     assert result["active_mse"] == 4 and result["zero_mse"] == 4
 
 
+def test_loss_mode_controls_loss_and_checkpoint_selection_without_changing_default():
+    target = torch.tensor([[3., 0., 0., 0.]])
+    predicts_activity_everywhere = torch.full_like(target, 3.)
+    predicts_zero = torch.zeros_like(target)
+    assert prediction_objective(predicts_activity_everywhere, target) == pytest.approx(0.25)
+    assert prediction_objective(predicts_zero, target) == pytest.approx(2.5)
+    assert prediction_objective(predicts_activity_everywhere, target, "elementwise_mse") == pytest.approx(6.75)
+    assert prediction_objective(predicts_zero, target, "elementwise_mse") == pytest.approx(2.25)
+    for mode, expected in (("stratified", "selection_loss"), ("elementwise_mse", "mse")):
+        assert validation_selection_metric(mode) == expected
+    with pytest.raises(ValueError): prediction_objective(predicts_zero, target, "unknown")
+
+
 def test_paired_fit_learns_action_signal_and_keeps_dataset_immutable():
     torch.set_num_threads(1)
     data, metadata = fixture_data(20, 20)
@@ -104,7 +118,8 @@ def test_cli_fit_reports_low_support_without_fitting(tmp_path):
     assert not result["passed"] and result["unsupported"]["1"] and not result["records"]
 
 
-def test_fit_artifacts_preserve_provenance_and_random_action_subset(tmp_path):
+@pytest.mark.parametrize("loss_mode", ["stratified", "elementwise_mse"])
+def test_fit_artifacts_preserve_provenance_and_random_action_subset(tmp_path, loss_mode):
     data, metadata = fixture_data()
     data["random_action"] = np.ones(len(data["actions"]), dtype=bool)
     dataset = tmp_path / "trajectory.npz"
@@ -112,14 +127,25 @@ def test_fit_artifacts_preserve_provenance_and_random_action_subset(tmp_path):
     metadata["dataset_sha256"] = file_sha256(dataset)
     dataset.with_suffix(".json").write_text(json.dumps(metadata))
     args = SimpleNamespace(dataset=dataset, output=tmp_path / "fit", split_seed=901, epochs=1, batch_size=64,
-                           lr=0.001, seeds=[13], horizons=[1], minimum_active=20, device="cpu")
+                           lr=0.001, seeds=[13], horizons=[1], minimum_active=20, device="cpu", loss_mode=loss_mode)
     assert run_fit(args) == 0
     result = json.loads((args.output / "results.json").read_text())
     assert result["passed"] and result["test_comparisons"]
-    assert len([row for row in result["records"] if row["split"] == "test_random_action"]) == 3
+    assert len([row for row in result["records"] if row["split"] == "test_random_action"]) == 4
+    assert result["fit_settings"]["loss_mode"] == loss_mode
+    expected = validation_selection_metric(loss_mode)
+    assert result["fit_settings"]["validation_selection_metric"] == expected
+    for row in result["records"]:
+        if row["model"] in ("action", "state_only"):
+            assert row["validation_selection_metric"] == expected
+            if row["split"] == "validation":
+                assert row["best_validation_score"] == pytest.approx(row[expected])
+        if row["model"] == "zero":
+            assert row["zero_mse"] == 0
     saved = torch.load(args.output / "predictors_h1_s13.pth", weights_only=True)
     assert saved["dataset_sha256"] == metadata["dataset_sha256"] == file_sha256(dataset)
     assert set(saved["models"]) == {"action", "state_only"}
+    assert saved["fit_settings"]["loss_mode"] == loss_mode
 
 
 def test_collector_hook_tracks_actual_random_actions_and_resets(tmp_path, monkeypatch):
