@@ -37,7 +37,9 @@ mkdir -p "$TMPDIR" "$DMLAB_CACHE_DIR" "$XDG_CACHE_HOME" "$WANDB_DIR" "$output_di
 
 mapfile -t fields < <("$python" - "$manifest" "$row_index" "$workspace_root" <<'PY'
 import csv
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -56,11 +58,46 @@ if not label or Path(label).name != label:
     raise ValueError("Invalid output label")
 for value in (run_dir, checkpoint, runfiles, label):
     print(value)
+audit_path = Path(sys.argv[1]).with_name("evaluation_audit.json")
+if audit_path.is_file():
+    audit = json.loads(audit_path.read_text())
+    expected_hash = audit.get("terminal_manifest_sha256")
+    if expected_hash and expected_hash != hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest():
+        raise ValueError("Heldout manifest differs from its audited protocol")
+    heldout = audit["heldout"]
+    values = (",".join(heldout.get("protocols", ["correct"])), heldout["trials_per_run"],
+              heldout["horizon_decisions"], heldout["seed_base"])
+else:
+    # Compatibility for earlier canonical manifests without a protocol audit.
+    values = (os.environ.get("INTRMOTIV_HELDOUT_PROTOCOLS", "correct"),
+              os.environ.get("INTRMOTIV_HELDOUT_TRIALS", "100"),
+              os.environ.get("INTRMOTIV_HELDOUT_HORIZON", "1800"),
+              os.environ.get("INTRMOTIV_HELDOUT_SEED_BASE", "61000"))
+for value in values:
+    print(value)
 PY
 )
-[[ ${#fields[@]} -eq 4 ]] || { echo "Cannot resolve heldout manifest row" >&2; exit 2; }
+[[ ${#fields[@]} -eq 8 ]] || { echo "Cannot resolve heldout manifest row" >&2; exit 2; }
 cd "$runtime_source"
-"$python" sf_working_directories/IntrMotiv/evaluation/fixed_reward_heldout.py \
-    --run-dir "${fields[0]}" --checkpoint "${fields[1]}" --runfiles "${fields[2]}" \
-    --site cued5 --out "$output_dir/results/${fields[3]}.csv" \
-    --trials 100 --horizon 1800 --seed-base 61000 --stochastic
+IFS=, read -r -a protocols <<< "${fields[4]}"
+trials=${fields[5]}
+horizon=${fields[6]}
+seed_base=${fields[7]}
+for protocol in "${protocols[@]}"; do
+    case "$protocol" in correct|shuffled_cue|zero_ca3|zero_depth) ;;
+        *) echo "Unsupported heldout protocol: $protocol" >&2; exit 2 ;;
+    esac
+done
+for protocol in "${protocols[@]}"; do
+    suffix="__${protocol}"
+    protocol_args=(--protocol "$protocol")
+    if [[ $protocol == correct ]]; then
+        suffix="" # Preserve the original output name and old-evaluator CLI.
+        protocol_args=()
+    fi
+    "$python" sf_working_directories/IntrMotiv/evaluation/fixed_reward_heldout.py \
+        --run-dir "${fields[0]}" --checkpoint "${fields[1]}" --runfiles "${fields[2]}" \
+        --site cued5 --out "$output_dir/results/${fields[3]}${suffix}.csv" \
+        --trials "$trials" --horizon "$horizon" --seed-base "$seed_base" \
+        "${protocol_args[@]}" --stochastic
+done

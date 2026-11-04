@@ -5,6 +5,7 @@ only for evaluation output; it is never passed as a task cue to the policy.
 """
 
 import argparse
+from contextlib import contextmanager
 import csv
 import json
 from pathlib import Path
@@ -23,6 +24,80 @@ from sample_factory.utils.attr_dict import AttrDict
 from sf_working_directories.IntrMotiv.evaluation.place_fields import load_policy_env
 
 CUED_REWARD_SITES = ((350, 1950), (250, 1950), (1550, 1250), (650, 1450), (850, 250))
+PROTOCOLS = ("correct", "shuffled_cue", "zero_ca3", "zero_depth")
+
+
+def policy_instruction_for_reset(instruction, seed, protocol, cue_count=5):
+    """Use a reproducible wrong cue without consuming the policy RNG stream."""
+    if protocol not in PROTOCOLS:
+        raise ValueError(f"Unknown heldout protocol: {protocol}")
+    if protocol != "shuffled_cue":
+        return instruction
+    if cue_count < 2 or not 1 <= instruction <= cue_count:
+        raise ValueError("Cue shuffling requires a valid multi-cue task")
+    # A private per-reset generator chooses a nonzero cyclic offset. The wrong
+    # cue is constant throughout the episode; the environment is not changed.
+    offset = int(np.random.default_rng(seed + 79001).integers(1, cue_count))
+    return (instruction - 1 + offset) % cue_count + 1
+
+
+def policy_observation(obs, instruction):
+    """Change only a private policy copy of the number instruction."""
+    result = dict(obs)
+    original = obs["INSTR"]
+    result["INSTR"] = (
+        torch.full_like(original, instruction)
+        if torch.is_tensor(original)
+        else np.full_like(original, instruction)
+    )
+    return result
+
+
+def mask_worker_input(value, ca3_size, target_start, protocol):
+    """Zero one decoder input stream while retaining cue and recurrent state."""
+    if protocol not in ("zero_ca3", "zero_depth"):
+        raise ValueError("A worker mask requires zero_ca3 or zero_depth")
+    if value.ndim != 2 or not 0 < ca3_size < target_start < value.shape[-1]:
+        raise ValueError("Unsupported worker input layout")
+    result = value.clone()
+    if protocol == "zero_ca3":
+        result[:, :ca3_size] = 0
+    else:
+        result[:, ca3_size:target_start] = 0
+    return result
+
+
+@contextmanager
+def worker_input_intervention(actor, cfg, protocol):
+    """Apply an evaluation-only decoder mask, without changing CA3 updates."""
+    if protocol not in ("zero_ca3", "zero_depth"):
+        yield
+        return
+    core = actor.core
+    if (
+        not getattr(core, "fixed_task_conditioning", False)
+        or getattr(core, "hrl_enabled", False)
+        or getattr(core, "readout_mode", "off") != "off"
+        or getattr(core, "dg_goal_modulation", None) is not None
+        or getattr(cfg, "dg_goal_input", "none") != "none"
+        or not getattr(cfg, "depth_sensor", False)
+    ):
+        raise ValueError("Worker masks require the canonical flat CA3/depth interface")
+    ca3_size = int(core.core_output_size)
+    target_start = int(core.target_condition_start)
+    if target_start - ca3_size != 10:
+        raise ValueError("Worker depth mask requires exactly ten bypass features")
+
+    def replace_input(_module, inputs):
+        if len(inputs) != 1:
+            raise ValueError("Unexpected decoder call signature")
+        return (mask_worker_input(inputs[0], ca3_size, target_start, protocol),)
+
+    hook = actor.decoder.register_forward_pre_hook(replace_input)
+    try:
+        yield
+    finally:
+        hook.remove()
 
 
 def start_region(x, y):
@@ -30,11 +105,16 @@ def start_region(x, y):
     return ("west" if x < 1000 else "east") + "_" + ("south" if y < 1000 else "north")
 
 
-def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_cell, horizon):
+def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_cell, horizon, protocol="correct"):
+    if horizon < 1:
+        raise ValueError("Heldout horizon must be positive")
     env.unwrapped.seed(seed)
     obs, _ = env.reset()
     start = np.asarray(obs["pos"][0], dtype=float).copy()
     instruction = int(np.asarray(obs["INSTR"]).reshape(-1)[0])
+    policy_instruction = policy_instruction_for_reset(
+        instruction, seed, protocol, int(getattr(cfg, "reward_instruction_count", 5))
+    )
     reward_x, reward_y = CUED_REWARD_SITES[instruction - 1] if reward_cell is None else reward_cell
     assert not (reward_x - 50 <= start[0] < reward_x + 50 and reward_y - 50 <= start[1] < reward_y + 50)
     engine_seed = int(env.unwrapped.last_reset_seed)
@@ -45,9 +125,10 @@ def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_cell, horiz
     total_reward = 0.0
     terminal = False
     end = start.copy()
-    with torch.no_grad():
+    with torch.no_grad(), worker_input_intervention(actor, cfg, protocol):
         for decision in range(1, horizon + 1):
-            normalized = prepare_and_normalize_obs(actor, obs)
+            policy_obs = policy_observation(obs, policy_instruction) if protocol == "shuffled_cue" else obs
+            normalized = prepare_and_normalize_obs(actor, policy_obs)
             output = actor(normalized, state)
             activity = getattr(actor.core, "last_dg_activity", None)
             if activity is not None and target is not None:
@@ -65,9 +146,11 @@ def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_cell, horiz
             if terminal:
                 break
     return {
+        "protocol": protocol,
         "requested_seed": seed,
         "engine_seed": engine_seed,
         "number_instruction": instruction,
+        "policy_number_instruction": policy_instruction,
         "reward_center_x": reward_x,
         "reward_center_y": reward_y,
         "policy_seed": policy_seed,
@@ -83,7 +166,8 @@ def evaluate_episode(actor, cfg, env, env_info, seed, target, reward_cell, horiz
         "physical_success": total_reward > 0,
         "external_reward": total_reward,
         "decisions_to_termination": decision,
-        "time_to_reward_seconds": decision * 4 / 60 if total_reward > 0 else "",
+        "frameskip": int(getattr(cfg, "env_frameskip", 4)),
+        "time_to_reward_seconds": decision * int(getattr(cfg, "env_frameskip", 4)) / 60 if total_reward > 0 else "",
         "target_dg_active_decisions": dg_hits,
         "terminal": terminal,
     }
@@ -100,7 +184,12 @@ def main():
     parser.add_argument("--horizon", type=int, default=1800)
     parser.add_argument("--seed-base", type=int, default=61000)
     parser.add_argument("--stochastic", action="store_true", help="Sample reproducibly; default is deterministic")
+    parser.add_argument("--protocol", choices=PROTOCOLS, default="correct")
     args = parser.parse_args()
+    if args.trials < 1 or args.horizon < 1 or args.seed_base < 0:
+        parser.error("trials/horizon must be positive and seed-base nonnegative")
+    if args.protocol != "correct" and args.site != "cued5":
+        parser.error("Interventions currently require the five-cue task")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     deepmind_lab.set_runfiles_path(str(args.runfiles.resolve(strict=True)))
     cfg, bootstrap_env, _, actor, checkpoint, _ = load_policy_env(
@@ -129,6 +218,7 @@ def main():
                 target,
                 reward_cell,
                 args.horizon,
+                args.protocol,
             )
             row.update(site=args.site, checkpoint=str(checkpoint))
             rows.append(row)
@@ -140,6 +230,9 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
     summary = {
+        "protocol": args.protocol,
+        "seed_base": args.seed_base,
+        "horizon_decisions": args.horizon,
         "site": args.site,
         "checkpoint": str(checkpoint),
         "trials": len(rows),
