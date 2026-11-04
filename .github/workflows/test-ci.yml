@@ -37,3 +37,5 @@ jobs:
           -k "not torch_tensor_share"
     - name: Run declarative IntrMotiv workflow tests
       run: python -m pytest -q hpc_runs/test_*.py
+    - name: Run portable shared-component and SimGaY tests
+      run: python -m pytest -q tests/test_shared_dg.py tests/test_simgay_*.py

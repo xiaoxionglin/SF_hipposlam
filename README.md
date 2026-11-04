@@ -1,4 +1,10 @@
-# Prediction and planning student starter
+# SF_hipposlam
+
+Start with the [shared components and project guide](docs/reusable_components.md)
+for code ownership, reusable IntrMotiv/SimGaY/GeoMem components, and their
+enable/rollback options. Installation follows below.
+
+## Prediction and planning student starter
 
 For flag-enabled training, start with the
 [integrated DG world model](sf_xxl/dmlab/WORLD_MODEL.md): append
