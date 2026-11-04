@@ -28,7 +28,8 @@ def main():
     output = args.output.resolve()
     output.relative_to(Path("/work/classic/fr_xl1014-train"))
     output.mkdir(parents=True, exist_ok=False)
-    from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict, load_policy_env
+    from sf_shared.checkpoints import load_checkpoint_dict
+    from sf_working_directories.IntrMotiv.evaluation.place_fields import load_policy_env
     from sf_working_directories.IntrMotiv.evaluation.target_control_interventions import (
         run_landmark_matched_interventions,
     )

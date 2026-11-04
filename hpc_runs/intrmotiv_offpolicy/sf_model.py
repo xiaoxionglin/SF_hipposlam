@@ -22,7 +22,7 @@ class NativeModelFactory:
         torch.manual_seed(cfg.seed)
         from gymnasium import spaces
 
-        from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
+        from sf_shared.checkpoints import load_checkpoint_dict
 
         parent_space = spaces.Dict({k: v for k, v in obs_space.spaces.items() if k != "ddqn_identity"})
         parent = self.parent_factory(self.parent_cfg, parent_space, action_space)

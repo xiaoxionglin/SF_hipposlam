@@ -130,9 +130,9 @@ def train(argv=None):
     from hpc_runs.offpolicy_goal_baselines.train_parallel import DmlabEnvFactory, _same_step_vector_worker, _select_info
     from sample_factory.model.actor_critic import create_actor_critic
     from sample_factory.utils.attr_dict import AttrDict
+    from sf_shared.checkpoints import load_checkpoint_dict
     from sf_working_directories.IntrMotiv.dmlab.dmlab_env import make_dmlab_env
     from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import register_dmlab_components
-    from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
 
     cfg = AttrDict(json.loads((run_dir / "config.json").read_text()))
     if cfg.env != args.env:

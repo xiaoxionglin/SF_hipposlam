@@ -14,6 +14,7 @@ from .spatial import (
     collect_spatial_detail_records,
     collect_spatial_records,
     discover_spatial_snapshots,
+    render_graph_outcomes,
     render_selected_snapshots,
     summarize_spatial_records,
 )
@@ -155,6 +156,7 @@ def command_audit_submission(args: argparse.Namespace) -> None:
 
 def command_collect_online(args: argparse.Namespace) -> None:
     study = load_study(args.study)
+    run_discovery_mode = getattr(args, "run_discovery_mode", "legacy")
     fixed_window = None
     if args.window_low is not None or args.window_high is not None:
         if args.window_low is None or args.window_high is None:
@@ -168,6 +170,7 @@ def command_collect_online(args: argparse.Namespace) -> None:
         progress=lambda done, total, name: print(f"Loaded {done}/{total}: {name}", flush=True),
         history_output_dir=args.output_dir / "histories" if args.export_histories else None,
         loader_backend=args.loader_backend,
+        run_discovery_mode=run_discovery_mode,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "per_run.csv", records)
@@ -184,6 +187,8 @@ def command_collect_online(args: argparse.Namespace) -> None:
         "loader_backend": args.loader_backend or study.analysis.get("loader_backend", "thread"),
         "exported_histories": str(args.output_dir / "histories") if args.export_histories else None,
     }
+    if run_discovery_mode != "legacy":
+        manifest["collection"]["run_discovery_mode"] = run_discovery_mode
     _write_json(manifest_path, manifest)
     if args.latest_common:
         print(f"Latest common window: {records[0]['window_low']}--{records[0]['window_high']} ({len(records)} runs)")
@@ -272,7 +277,8 @@ def command_collect_spatial(args: argparse.Namespace) -> None:
 
 def command_render_telemetry(args: argparse.Namespace) -> None:
     study = load_study(args.study)
-    inventory = discover_nemo_checkpoints(study, args.batch_root)
+    run_discovery_mode = getattr(args, "run_discovery_mode", "legacy")
+    inventory = discover_nemo_checkpoints(study, args.batch_root, run_discovery_mode=run_discovery_mode)
     all_rows, trajectory = build_place_field_manifests(study, inventory)
     rows = select_standard_place_field_rows(study, all_rows)
     intervention = build_intervention_manifest(study, all_rows)
@@ -289,6 +295,7 @@ def command_render_telemetry(args: argparse.Namespace) -> None:
             "analysis_rows": len(rows),
             "trajectory_rows": len(trajectory),
             "intervention_rows": len(intervention),
+            **({"run_discovery_mode": run_discovery_mode} if run_discovery_mode != "legacy" else {}),
         },
     )
     print(
@@ -296,6 +303,29 @@ def command_render_telemetry(args: argparse.Namespace) -> None:
         f"and {len(intervention)} intervention rows "
         f"to {args.output_root}"
     )
+
+
+def command_render_graph(args: argparse.Namespace) -> None:
+    import numpy as np
+
+    try:
+        loaded = np.load(args.input, allow_pickle=False)
+        if not isinstance(loaded, np.lib.npyio.NpzFile):
+            raise SpecError("render-graph input must be an NPZ archive")
+        with loaded as payload:
+            outputs = render_graph_outcomes(
+                payload[args.attempts_key],
+                payload[args.successes_key],
+                args.output_stem,
+                title=args.title,
+                ratio_label=args.ratio_label,
+                figure_scale=args.figure_scale,
+                formats=args.formats or ("png", "pdf"),
+            )
+    except (KeyError, ValueError) as error:
+        raise SpecError(str(error)) from error
+    for path in outputs:
+        print(path)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -324,6 +354,12 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("output_dir", type=Path)
     collect.add_argument("--window-low", type=int)
     collect.add_argument("--window-high", type=int)
+    collect.add_argument(
+        "--run-discovery-mode",
+        choices=("legacy", "training"),
+        default="legacy",
+        help="training excludes analysis/ artifact directories; legacy preserves historical discovery",
+    )
     collect.add_argument(
         "--export-histories",
         action="store_true",
@@ -372,7 +408,24 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry.add_argument("study", type=Path)
     telemetry.add_argument("batch_root", type=Path)
     telemetry.add_argument("output_root", type=Path)
+    telemetry.add_argument(
+        "--run-discovery-mode",
+        choices=("legacy", "training"),
+        default="legacy",
+        help="training excludes analysis/ artifact directories; legacy preserves historical discovery",
+    )
     telemetry.set_defaults(func=command_render_telemetry)
+
+    graph = subparsers.add_parser("render-graph", help="render explicitly selected graph-count matrices from an NPZ")
+    graph.add_argument("input", type=Path)
+    graph.add_argument("output_stem", type=Path)
+    graph.add_argument("--attempts-key", required=True)
+    graph.add_argument("--successes-key", required=True)
+    graph.add_argument("--title", required=True)
+    graph.add_argument("--ratio-label", default="Prospective hits / attempts")
+    graph.add_argument("--figure-scale", type=float, default=1.0)
+    graph.add_argument("--format", dest="formats", action="append", choices=("png", "pdf", "svg"))
+    graph.set_defaults(func=command_render_graph)
     return parser
 
 

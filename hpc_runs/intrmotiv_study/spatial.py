@@ -508,11 +508,17 @@ def _figure_runtime():
     return plt
 
 
-def _save_figure(fig, stem: Path, plt) -> list[Path]:
+def _save_figure(fig, stem: Path, plt, formats: Sequence[str] = ("png", "pdf")) -> list[Path]:
     stem.parent.mkdir(parents=True, exist_ok=True)
-    outputs = [stem.with_suffix(".png"), stem.with_suffix(".pdf")]
-    fig.savefig(outputs[0], dpi=100, bbox_inches="tight", facecolor="white")
-    fig.savefig(outputs[1], bbox_inches="tight", facecolor="white")
+    outputs = [stem.with_suffix("." + format_name) for format_name in formats]
+    if tuple(formats) == ("png", "pdf"):
+        # Preserve the original save calls, including PDF's configured DPI.
+        fig.savefig(outputs[0], dpi=100, bbox_inches="tight", facecolor="white")
+        fig.savefig(outputs[1], bbox_inches="tight", facecolor="white")
+    else:
+        for destination in outputs:
+            options = {"dpi": 100} if destination.suffix == ".png" else {}
+            fig.savefig(destination, bbox_inches="tight", facecolor="white", **options)
     plt.close(fig)
     return outputs
 
@@ -756,8 +762,21 @@ def render_graph_outcomes(
     output_stem: Path,
     *,
     title: str,
+    ratio_label: str = "Prospective hits / attempts",
+    figure_scale: float = 1.0,
+    formats: Sequence[str] = ("png", "pdf"),
 ) -> list[Path]:
-    """All attempted directed edges, not just reliable edges; fixed 0–1 scale."""
+    """All attempted directed edges; optional labels and exports, fixed 0–1 scale.
+
+    Supply the ratio label explicitly when the matrices represent stored graph
+    evidence rather than prospective rollout outcomes.
+    """
+    if not math.isfinite(figure_scale) or figure_scale <= 0:
+        raise ValueError("figure_scale must be finite and positive")
+    if isinstance(formats, str) or not formats or any(name not in ("png", "pdf", "svg") for name in formats):
+        raise ValueError("formats must be a nonempty sequence of png, pdf or svg")
+    if len(set(formats)) != len(formats):
+        raise ValueError("formats must not contain duplicates")
     plt = _figure_runtime()
     attempts, successes = np.asarray(attempts), np.asarray(successes)
     if attempts.ndim != 2 or attempts.shape[0] != attempts.shape[1] or successes.shape != attempts.shape:
@@ -769,11 +788,13 @@ def render_graph_outcomes(
     ratio = np.divide(successes, attempts, out=np.full(attempts.shape, np.nan), where=attempts > 0)
     cmap = plt.get_cmap("viridis").copy()
     cmap.set_bad("#d9d9d9")
-    fig, ax = plt.subplots(figsize=(10, 10), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(10 * figure_scale, 10 * figure_scale), constrained_layout=True)
     image = ax.imshow(np.ma.masked_invalid(ratio), vmin=0, vmax=1, cmap=cmap, interpolation="nearest")
     ax.set(xlabel="Target DG unit", ylabel="Source DG unit", title=title)
-    fig.colorbar(image, ax=ax, shrink=0.7, label="Prospective hits / attempts")
-    return _save_figure(fig, output_stem, plt)
+    fig.colorbar(image, ax=ax, shrink=0.7, label=ratio_label)
+    if tuple(formats) == ("png", "pdf"):
+        return _save_figure(fig, output_stem, plt)
+    return _save_figure(fig, output_stem, plt, formats=formats)
 
 
 def render_selected_snapshots(

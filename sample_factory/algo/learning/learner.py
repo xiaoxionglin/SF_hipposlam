@@ -143,6 +143,7 @@ class BaseLearner(Configurable):
         self.actor_critic: Optional[ActorCritic] = None
 
         self.optimizer = None
+        self._optimizer_state_loaded = False
 
         self.curr_lr: Optional[float] = None
         self.lr_scheduler: Optional[LearningRateScheduler] = None
@@ -251,6 +252,7 @@ class BaseLearner(Configurable):
 
         self.optimizer = optimizer_cls(params, **optimizer_kwargs)
 
+        self._optimizer_state_loaded = False
         self.load_from_checkpoint(self.policy_id)
         self._register_forward_hooks()
         self._register_backward_hooks()
@@ -260,7 +262,8 @@ class BaseLearner(Configurable):
 
         self.lr_scheduler = get_lr_scheduler(self.cfg)
         self.curr_lr = self.cfg.learning_rate if self.curr_lr is None else self.curr_lr
-        self._apply_lr(self.curr_lr)
+        if not (getattr(self.cfg, "preserve_loaded_optimizer_lr", False) and self._optimizer_state_loaded):
+            self._apply_lr(self.curr_lr)
 
         self.is_initialized = True
 
@@ -305,6 +308,7 @@ class BaseLearner(Configurable):
             self.best_performance = checkpoint_dict.get("best_performance", self.best_performance)
         self.actor_critic.load_state_dict(checkpoint_dict["model"])
         self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
+        self._optimizer_state_loaded = True
         self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
 
         log.info(f"Loaded experiment state at {self.train_step=}, {self.env_steps=}")

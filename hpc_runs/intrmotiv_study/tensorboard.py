@@ -59,6 +59,8 @@ def collect_online_records(
     progress=None,
     history_output_dir: Path | None = None,
     loader_backend: str | None = None,
+    *,
+    run_discovery_mode: str = "legacy",
 ) -> list[dict[str, Any]]:
     """Collect standardized per-run rows from TensorBoard event directories."""
 
@@ -90,7 +92,7 @@ def collect_online_records(
     ):
         raise SpecError("analysis collection settings are invalid")
 
-    run_directories = discover_run_directories(study, batch_root)
+    run_directories = discover_run_directories(study, batch_root, run_discovery_mode=run_discovery_mode)
 
     runs = study.expand_runs()
     required = {step_tag, *window_metrics.values(), *cumulative_metrics.values()}

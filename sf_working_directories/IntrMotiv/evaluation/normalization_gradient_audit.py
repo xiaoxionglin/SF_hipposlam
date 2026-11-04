@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
 
-from sf_working_directories.IntrMotiv.dmlab.custom_encoder import DGProjection_batchnorm_relu
-from sf_working_directories.IntrMotiv.evaluation.place_fields import rollout_dg
+from sf_working_directories.IntrMotiv.evaluation import place_fields
 
 
 def _cosine(left: torch.Tensor, right: torch.Tensor) -> float:
@@ -56,7 +57,7 @@ def _normalized_logits(
 
 def audit(
     features: torch.Tensor,
-    projection: DGProjection_batchnorm_relu,
+    projection: torch.nn.Module,
     learning_rate: float,
 ) -> dict:
     features = features.float()
@@ -139,6 +140,44 @@ def audit(
     }
 
 
+def _capture_rollout_features(run_dir, max_num_frames, max_features, checkpoint_rank):
+    """Capture the selected live DG's inputs without patching either DG class.
+
+    Preactivation is shared by ordinary forward and contextual-feedback paths.
+    A frozen reference detector is a different instance and is never captured.
+    """
+    captured_features = []
+    captured_projection = []
+    original_loader = place_fields.load_policy_env
+    with ExitStack() as patches:
+
+        def capture_policy(*args, **kwargs):
+            loaded = original_loader(*args, **kwargs)
+            projection = loaded[3].encoder.DG_projection
+            original_preactivation = projection.preactivation
+
+            def capture_preactivation(x):
+                if len(captured_features) < max_features:
+                    remaining = max_features - len(captured_features)
+                    captured_features.extend(x.detach().cpu()[:remaining])
+                    captured_projection[:] = [projection]
+                return original_preactivation(x)
+
+            patches.enter_context(patch.object(projection, "preactivation", capture_preactivation))
+            return loaded
+
+        patches.enter_context(patch.object(place_fields, "load_policy_env", capture_policy))
+        _, checkpoint, *_ = place_fields.rollout_dg(
+            run_dir,
+            max_num_frames=max_num_frames,
+            deterministic=False,
+            checkpoint_rank=checkpoint_rank,
+        )
+    if not captured_features or not captured_projection:
+        raise RuntimeError("No DG projection inputs were captured")
+    return torch.stack(captured_features), captured_projection[0], checkpoint
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", type=Path, required=True)
@@ -149,32 +188,10 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     args = parser.parse_args()
 
-    captured_features = []
-    captured_projection = []
-    original_forward = DGProjection_batchnorm_relu.forward
-
-    def capture_forward(self, x):
-        if len(captured_features) < int(args.max_features):
-            remaining = int(args.max_features) - len(captured_features)
-            captured_features.extend(x.detach().cpu()[:remaining])
-            captured_projection[:] = [self]
-        return original_forward(self, x)
-
-    DGProjection_batchnorm_relu.forward = capture_forward
-    try:
-        _, checkpoint, *_ = rollout_dg(
-            args.run_dir,
-            max_num_frames=int(args.max_num_frames),
-            deterministic=False,
-            checkpoint_rank=int(args.checkpoint_rank),
-        )
-    finally:
-        DGProjection_batchnorm_relu.forward = original_forward
-
-    if not captured_features or not captured_projection:
-        raise RuntimeError("No DG projection inputs were captured")
-    features = torch.stack(captured_features[: int(args.max_features)])
-    result = audit(features, captured_projection[0], float(args.learning_rate))
+    features, projection, checkpoint = _capture_rollout_features(
+        args.run_dir, int(args.max_num_frames), int(args.max_features), int(args.checkpoint_rank)
+    )
+    result = audit(features, projection, float(args.learning_rate))
     result["run_dir"] = str(args.run_dir)
     result["checkpoint"] = str(checkpoint)
     args.output.parent.mkdir(parents=True, exist_ok=True)

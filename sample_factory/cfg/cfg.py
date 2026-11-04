@@ -296,6 +296,12 @@ def add_rl_args(p: ArgumentParser):
     # learning rate
     p.add_argument("--learning_rate", default=1e-4, type=float, help="LR")
     p.add_argument(
+        "--preserve_loaded_optimizer_lr",
+        default=False,
+        type=str2bool,
+        help="Keep checkpoint optimizer-group learning rates during initialization. False restores legacy nominal-LR initialization.",
+    )
+    p.add_argument(
         "--lr_schedule",
         default="constant",
         choices=["constant", "kl_adaptive_minibatch", "kl_adaptive_epoch"],

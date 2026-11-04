@@ -20,6 +20,7 @@ from sample_factory.model.actor_critic import create_actor_critic
 from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.utils import log
+from sf_shared.checkpoints import load_checkpoint_dict
 
 XBOUND = (100.0, 2000.0)
 YBOUND = (100.0, 2000.0)
@@ -126,23 +127,6 @@ def select_checkpoint(run_dir: pathlib.Path, rank: int):
         raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
     idx = max(0, len(checkpoints) - 1 - rank)
     return checkpoints[idx]
-
-
-def load_checkpoint_dict(checkpoint: pathlib.Path, device: torch.device) -> dict:
-    """Safely load an IntrMotiv training checkpoint for offline evaluation.
-
-    Training checkpoints include NumPy scalar metadata. PyTorch 2.6 excludes
-    those classes from its default ``weights_only`` allowlist, even though the
-    tensor model state itself is safe to load. Retain the weights-only loader
-    and allowlist only the exact NumPy scalar and dtype classes found in these
-    locally produced checkpoints.
-    """
-    safe_globals = [np.core.multiarray.scalar, np.dtype, type(np.dtype(np.float64))]
-    with torch.serialization.safe_globals(safe_globals):
-        # CPU audits/evaluation need model and metadata, not eager copies of
-        # gigabytes of replay tensors. Torch's private mmap preserves tensor
-        # values and safe unpickling while faulting storage pages on demand.
-        return torch.load(checkpoint, map_location=device, weights_only=True, mmap=device.type == "cpu")
 
 
 def evaluation_pose(env, obs):

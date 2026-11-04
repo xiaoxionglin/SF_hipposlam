@@ -2,7 +2,6 @@ from __future__ import annotations
 
 # from asyncio.sslproto import add_flowcontrol_defaults
 import copy
-import math
 from contextlib import contextmanager
 from email import header
 from logging import warning
@@ -18,6 +17,7 @@ from sample_factory.model.encoder import ConvEncoder, Encoder, ResnetEncoder
 from sample_factory.model.model_utils import model_device
 from sample_factory.utils.typing import Config, ObsSpace
 from sample_factory.utils.utils import log
+from sf_shared.depth import SampledDepthEncoder
 from sf_working_directories.IntrMotiv.dmlab.dmlab30 import DMLAB_INSTRUCTIONS, DMLAB_VOCABULARY_SIZE
 from sf_working_directories.IntrMotiv.dmlab.dmlab_model import DmlabEncoder
 from sf_working_directories.IntrMotiv.dmlab.topological_frontier import ACTION_FEATURE_SIZE, reduced_action_features
@@ -713,63 +713,8 @@ class DGProjectionWithRunningQuantile(nn.Module):
 # Actual encoders for this project
 
 
-class DepthEncoder(Encoder):
-    """Sample depth with a backward-compatible, explicitly selected response.
-
-    Legacy mode preserves the sampled input exactly, including preprocessing.
-    Capped inverse mode restores raw RGBD codes from fixed observation scaling
-    and returns 10 / max(depth, 1). This gives a ten-channel L2 norm of
-    about 1.05 at depth 30 and 0.21 at 150; this is a reference scale, not an
-    empirical match to visual features. Codes are not world distances.
-    """
-
-    def __init__(self, cfg, size=10):
-        super().__init__(cfg)
-
-        input_ch = 1
-        log.debug("Num input channels for depth encoder: %d", input_ch)
-
-        if cfg.encoder_conv_architecture not in ("resnet_impala", "pretrained_resnet", "layer2_resnet18"):
-            raise NotImplementedError(f"Unknown resnet architecture {cfg.encoder_conv_architecture}")
-
-        # None lets saved configs from the earlier mode/gain interface load
-        # unchanged even when the parser adds the new field during resume.
-        inverse = getattr(cfg, "depth_sensor_inverse", None)
-        if inverse is None:
-            self.depth_mode = getattr(cfg, "depth_sensor_mode", "legacy")
-            self.depth_gain = float(getattr(cfg, "depth_sensor_gain", 10.0))
-        else:
-            self.depth_mode = "capped_inverse" if inverse else "legacy"
-            self.depth_gain = 10.0
-        if self.depth_mode not in ("legacy", "capped_inverse"):
-            raise ValueError(f"Unknown depth_sensor_mode {self.depth_mode!r}")
-        self.depth_obs_scale = float(getattr(cfg, "obs_scale", 1.0))
-        self.depth_obs_mean = float(getattr(cfg, "obs_subtract_mean", 0.0))
-        if self.depth_mode == "capped_inverse":
-            if not math.isfinite(self.depth_gain) or self.depth_gain <= 0:
-                raise ValueError("depth_sensor_gain must be finite and positive")
-            if not math.isfinite(self.depth_obs_scale) or self.depth_obs_scale <= 0:
-                raise ValueError("capped_inverse requires finite positive obs_scale")
-            if not math.isfinite(self.depth_obs_mean):
-                raise ValueError("capped_inverse requires finite obs_subtract_mean")
-            keys = getattr(cfg, "normalize_input_keys", None)
-            if getattr(cfg, "normalize_input", False) and (keys is None or "obs" in keys):
-                raise ValueError("capped_inverse requires normalize_input=False for obs")
-
-        self.downsample = nn.Upsample(size=(1, 10))
-
-        self.encoder_out_size = size
-
-    def forward(self, obs: Tensor):
-        depth = self.downsample(obs)
-        if self.depth_mode == "legacy":
-            return depth
-        # ObservationNormalizer applies fixed scaling even with normalize_input=False.
-        depth = depth * self.depth_obs_scale + self.depth_obs_mean
-        return depth.clamp_min(1.0).reciprocal() * self.depth_gain
-
-    def get_out_size(self) -> int:
-        return self.encoder_out_size
+class DepthEncoder(SampledDepthEncoder):
+    """Compatibility adapter retaining this experiment family's public class."""
 
 
 class ResNet18Layer2(Encoder):
@@ -947,6 +892,12 @@ class HipposlamEncoder(Encoder):
         else:
             self.DG_projection = nn.Linear(self.encoder_out_size, cfg.Hippo_n_feature)
 
+        self._batchnorm_projection_type = DGProjection_batchnorm_relu
+        if cfg.DG_name == "batchnorm_relu" and getattr(cfg, "shared_dg_projection", False):
+            from sf_shared.dg import DGProjection_batchnorm_relu as SharedDGProjection
+
+            self._batchnorm_projection_type = SharedDGProjection
+
         if cfg.DG_name == "log_softmax":
             self.DG_projection = DGProjection_log_softmax(self.encoder_out_size, cfg.Hippo_n_feature)
         elif cfg.DG_name == "linear_relu":
@@ -965,7 +916,7 @@ class HipposlamEncoder(Encoder):
             )
         elif cfg.DG_name == "batchnorm_relu":
             intercept = getattr(cfg, "DG_BN_intercept", 2)
-            self.DG_projection = DGProjection_batchnorm_relu(
+            self.DG_projection = self._batchnorm_projection_type(
                 self.encoder_out_size,
                 cfg.Hippo_n_feature,
                 intercept=intercept,
@@ -987,7 +938,7 @@ class HipposlamEncoder(Encoder):
         self.goal_reference_projection = None
         reference_checkpoint = getattr(cfg, "intrinsic_goal_reference_checkpoint", None)
         if reference_checkpoint:
-            if not isinstance(self.DG_projection, DGProjection_batchnorm_relu):
+            if not isinstance(self.DG_projection, self._batchnorm_projection_type):
                 raise ValueError("Frozen intrinsic-goal references require DG_name=batchnorm_relu")
             payload = torch.load(reference_checkpoint, map_location="cpu", weights_only=False)
             model_state = payload.get("model", payload)
@@ -1147,7 +1098,7 @@ class HipposlamEncoder(Encoder):
         elif self.context_feedback == "none":
             tmp_out = self.DG_projection(x.detach())
         else:
-            if not isinstance(self.DG_projection, DGProjection_batchnorm_relu):
+            if not isinstance(self.DG_projection, self._batchnorm_projection_type):
                 raise ValueError("Contextual DG feedback requires DG_name=batchnorm_relu")
             # Context and thresholding are causal recurrent operations in the
             # core. Projection and BatchNorm still happen exactly once here.
