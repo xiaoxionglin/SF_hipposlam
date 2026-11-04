@@ -3,13 +3,16 @@ repos:
     rev: 24.4.2
     hooks:
     -   id: black
+        # Published bytes are checked against the versioned ZIP and its manifest.
+        exclude: ^exports/intrmotiv_prediction_starter/
 -   repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
       - id: isort
         name: isort (python)
+        exclude: ^exports/intrmotiv_prediction_starter/
 -   repo: https://github.com/pycqa/flake8
     rev: 7.1.0
     hooks:
     -   id: flake8
-        exclude: ^(sf_working_directories/(default|jannek)/|sf_xxl/)
+        exclude: ^(sf_working_directories/(default|jannek)/|sf_xxl/|exports/intrmotiv_prediction_starter/)

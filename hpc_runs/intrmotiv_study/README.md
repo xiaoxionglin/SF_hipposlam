@@ -34,21 +34,23 @@ different-major implementation is rejected.
 | `field_concentration.py` | Opt-in NumPy measurements of saved-map concentration; no default collector metrics or runtime changes. |
 | `cli.py` | Expose validation, rendering, online collection/analysis, and telemetry-manifest generation. |
 
-Run the CLI from the repository root:
+Run the CLI from the repository root with your installed SF interpreter:
 
 ```bash
-PY=/home/fr/fr_xl1014/.conda/envs/SFgit/bin/python
-"$PY" -m hpc_runs.intrmotiv_study validate hpc_runs/studies/STUDY.study.json
-"$PY" -m hpc_runs.intrmotiv_study render-runs hpc_runs/studies/STUDY.study.json
-"$PY" -m hpc_runs.intrmotiv_study collect-spatial \
+python -m hpc_runs.intrmotiv_study validate hpc_runs/studies/STUDY.study.json
+python -m hpc_runs.intrmotiv_study render-runs hpc_runs/studies/STUDY.study.json
+python -m hpc_runs.intrmotiv_study collect-spatial \
   hpc_runs/studies/STUDY.study.json SNAPSHOT_ROOT OUTPUT_DIR --include-details
 ```
 
-Use this SFgit interpreter by default on NEMO2 for tests, analysis, and figure
-rendering; it contains the project scientific stack, including Matplotlib.
+Install `.[analysis]` for figure rendering. The workflow is also included in
+the installed wheel; pass your own study path when running outside a checkout.
+The example `STUDY.study.json` is a placeholder for a study you select.
 
-The complete convention and NEMO2 lifecycle are documented in
-`04_implementation/standardized_study_workflow.md`.
+The complete convention and NEMO2 lifecycle belong to the
+[IntrMotiv workflow guide](https://github.com/xiaoxionglin/IntrMotiv/blob/main/04_implementation/standardized_study_workflow.md)
+in the IntrMotiv repository. Use that guide's cluster interpreter when running
+on NEMO2; local installation does not establish cluster deployment.
 
 ## Extension rule
 
@@ -69,7 +71,7 @@ Use `collect-online STUDY BATCH_ROOT OUTPUT_DIR --latest-common` to align all
 runs to their latest shared step and metric coverage in one read per run.
 The study's `analysis.terminal_width` defines the window width. This is mutually
 exclusive with `--window-low/--window-high`; default collection is unchanged.
-See `04_implementation/standardized_study_workflow.md` for the repeat-8 example.
+See the linked IntrMotiv workflow guide for the repeat-8 example.
 
 ## Optional discovery and analysis controls
 

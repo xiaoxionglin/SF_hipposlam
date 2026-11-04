@@ -84,14 +84,31 @@ setup(
         "mujoco": _mujoco_deps,
         "nethack": _nethack_deps,
         "onnx": _onnx_deps,
+        "analysis": ["matplotlib"],
         "pettingzoo": _pettingzoo_deps,
         "vizdoom": ["vizdoom<2.0", "gymnasium[classic_control]"],
         # "dmlab": ["dm_env"],  <-- these are just auxiliary packages, the main package has to be built from sources
     },
     package_dir={"": "./"},
-    packages=setuptools.find_packages(
-        where="./", include=["sample_factory*", "sf_examples*", "sf_*", "sf_workingdir*"]
+    packages=setuptools.find_packages(where="./", include=["sample_factory*", "sf_examples*", "sf_*", "sf_workingdir*"])
+    + setuptools.find_namespace_packages(
+        where="./",
+        # Runtime imports and reusable workflows, without batch-specific launch
+        # scripts or frozen source snapshots from the hpc_runs repository tree.
+        include=[
+            "hpc_runs.intrmotiv_study",
+            "hpc_runs.intrmotiv_offpolicy",
+            "hpc_runs.offpolicy_goal_baselines",
+            "hpc_runs.hosts.g500",
+            "hpc_runs.studies.assets.corridor_geometry",
+            "hpc_runs.studies.assets.easy_landmark_maze",
+        ],
     ),
+    package_data={
+        "hpc_runs.intrmotiv_study": ["study.schema.json"],
+        "hpc_runs.studies.assets.corridor_geometry": ["maps.json"],
+        "hpc_runs.studies.assets.easy_landmark_maze": ["maps.json"],
+    },
     include_package_data=True,
     python_requires=">=3.8",
 )
