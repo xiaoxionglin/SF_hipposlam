@@ -1,12 +1,34 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.14.0` (planned-frame milestones, spatial target validation, verified evaluation grids)
+- Shared SF_hipposlam implementation: `1.15.0` (opt-in discovery and saved-map analysis)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 verified 1.14.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/global_defaults_v114/hpc_runs/intrmotiv_study/`
-- NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
+- Historical NEMO2 checkout record: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (workflow 1.10.1 at the recorded check; not reverified for this integration)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.15.0 optional shared workflow controls
+
+This SF_hipposlam integration selects changes from IntrMotiv commit `5bc2f5b`,
+whose vault package is version 1.14.1. It does not replace the entire package
+or incorporate ongoing cue-transfer work. Remote deployment is unverified.
+
+- `collect-online` and `render-telemetry` accept
+  `--run-discovery-mode=training` to exclude generated `analysis/` directories
+  that reuse a run name. `legacy` remains the default and restores prior
+  behavior; genuine duplicate run directories still fail in both modes.
+  The selected training mode is recorded in output provenance, without
+  editing StudySpecs or their fingerprints.
+- The NumPy-only `field_concentration` API is opt-in. It adds no metrics to
+  existing collectors and leaves NPZ schemas unchanged.
+- `render_graph_outcomes` supports optional evidence labels, canvas scale,
+  and PNG/PDF/SVG selection. `render-graph` exposes these controls for explicit
+  matrix keys in a saved NPZ. Existing default PNG/PDF save calls are retained.
+
+See the [package guide](README.md#optional-discovery-and-analysis-controls)
+for usage and rollback. Earlier deployment and qualification entries below are
+historical records, not verification of the current shared version.
 
 ## 1.14.0 planned milestones and telemetry consistency
 

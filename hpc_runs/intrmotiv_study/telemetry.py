@@ -233,7 +233,9 @@ def build_intervention_manifest(
     return selected
 
 
-def discover_nemo_checkpoints(study: StudySpec, batch_root: Path) -> list[CheckpointRecord]:
+def discover_nemo_checkpoints(
+    study: StudySpec, batch_root: Path, *, run_discovery_mode: str = "legacy"
+) -> list[CheckpointRecord]:
     """Use the authoritative NEMO2 checkpoint selector for every expected run."""
 
     try:
@@ -249,7 +251,7 @@ def discover_nemo_checkpoints(study: StudySpec, batch_root: Path) -> list[Checkp
         | set((study.telemetry.get("intervention") or {}).get("target_frames", []))
     )
     inventory: list[CheckpointRecord] = []
-    run_directories = discover_run_directories(study, batch_root)
+    run_directories = discover_run_directories(study, batch_root, run_discovery_mode=run_discovery_mode)
     for run in study.expand_runs():
         run_dir = run_directories[run.name]
         for target, checkpoint in select_checkpoints(run_dir, target_frames=targets):
