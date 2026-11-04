@@ -39,7 +39,9 @@ def add_slurm_args(parser):
         "--slurm_print_only", default=False, type=str2bool, help="Generate scripts without submitting jobs"
     )
     parser.add_argument(
-        "--slurm_max_submit", default=0, type=int,
+        "--slurm_max_submit",
+        default=0,
+        type=int,
         help="Submit at most this many jobs, retaining remaining rows as pending_submission; 0 submits all.",
     )
     parser.add_argument(

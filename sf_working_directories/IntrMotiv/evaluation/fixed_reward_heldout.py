@@ -5,9 +5,9 @@ only for evaluation output; it is never passed as a task cue to the policy.
 """
 
 import argparse
-from contextlib import contextmanager
 import csv
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import deepmind_lab
@@ -46,9 +46,7 @@ def policy_observation(obs, instruction):
     result = dict(obs)
     original = obs["INSTR"]
     result["INSTR"] = (
-        torch.full_like(original, instruction)
-        if torch.is_tensor(original)
-        else np.full_like(original, instruction)
+        torch.full_like(original, instruction) if torch.is_tensor(original) else np.full_like(original, instruction)
     )
     return result
 

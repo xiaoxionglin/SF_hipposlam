@@ -9,9 +9,9 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import random
 import shutil
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -35,12 +35,12 @@ def assert_exact(left, right):
 
 
 def certify(run_dir, checkpoint, output):
-    from sample_factory.utils.attr_dict import AttrDict
     from sample_factory.algo.utils.env_info import extract_env_info
     from sample_factory.algo.utils.make_env import make_env_func_batched
     from sample_factory.algo.utils.model_sharing import ParameterServer
-    from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import register_dmlab_components
+    from sample_factory.utils.attr_dict import AttrDict
     from sf_working_directories.IntrMotiv.dmlab.custom_learner import make_hipposlam_learner
+    from sf_working_directories.IntrMotiv.dmlab.train_hipposlam import register_dmlab_components
     from sf_working_directories.IntrMotiv.evaluation.place_fields import load_checkpoint_dict
 
     output.mkdir(parents=True, exist_ok=False)
@@ -102,10 +102,18 @@ def certify(run_dir, checkpoint, output):
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     result = dict(
-        run=cfg.experiment, checkpoint=str(immutable), checkpoint_sha256=digest.hexdigest(),
-        frames=learner.env_steps, train_step=learner.train_step, controller=mode,
-        exact_restore=True, model_and_buffers_exact=True, optimizer_exact=True,
-        counters_exact=True, device=str(learner.device), job_id=os.environ.get("SLURM_JOB_ID"),
+        run=cfg.experiment,
+        checkpoint=str(immutable),
+        checkpoint_sha256=digest.hexdigest(),
+        frames=learner.env_steps,
+        train_step=learner.train_step,
+        controller=mode,
+        exact_restore=True,
+        model_and_buffers_exact=True,
+        optimizer_exact=True,
+        counters_exact=True,
+        device=str(learner.device),
+        job_id=os.environ.get("SLURM_JOB_ID"),
     )
     (output / "certificate.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)

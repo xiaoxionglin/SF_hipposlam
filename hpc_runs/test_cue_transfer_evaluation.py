@@ -7,11 +7,11 @@ import csv
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from hpc_runs.intrmotiv_study import load_study
 from hpc_runs.intrmotiv_study.telemetry import CheckpointRecord, build_place_field_manifests
@@ -20,27 +20,24 @@ from hpc_runs.post_cue_transfer_20261104 import audit_manifest, heldout_settings
 
 class CueTransferEvaluationTest(unittest.TestCase):
     def setUp(self):
-        self.study = load_study(
-            Path(__file__).with_name("studies") / "cue_transfer_20261104.study.json"
-        )
+        self.study = load_study(Path(__file__).with_name("studies") / "cue_transfer_20261104.study.json")
         # Real checkpoints cross requested targets at learner update boundaries.
         # The evaluator must retain that actual age instead of rewriting it.
-        self.ages = {
-            target: ((target + 8191) // 8192) * 8192
-            for target in self.study.telemetry["target_frames"]
-        }
+        self.ages = {target: ((target + 8191) // 8192) * 8192 for target in self.study.telemetry["target_frames"]}
         inventory = []
         for run in self.study.expand_runs():
             run_dir = Path(self.study.output_root) / run.name
             for target, actual in self.ages.items():
-                inventory.append(CheckpointRecord(
-                    run.name, target, actual,
-                    run_dir / "checkpoint_p0/milestones" / f"checkpoint_000001_{actual}.pth",
-                    run_dir,
-                ))
-        self.rows, _ = build_place_field_manifests(
-            self.study, inventory, require_checkpoint_files=False
-        )
+                inventory.append(
+                    CheckpointRecord(
+                        run.name,
+                        target,
+                        actual,
+                        run_dir / "checkpoint_p0/milestones" / f"checkpoint_000001_{actual}.pth",
+                        run_dir,
+                    )
+                )
+        self.rows, _ = build_place_field_manifests(self.study, inventory, require_checkpoint_files=False)
 
     def test_complete_canonical_panel_preserves_actual_ages(self):
         audit = audit_manifest(self.study, self.rows)
@@ -75,7 +72,8 @@ class CueTransferEvaluationTest(unittest.TestCase):
         rows = copy.deepcopy(self.rows)
         first = next(row for row in rows if row["target_frames"] == "1000000")
         later = next(
-            row for row in rows
+            row
+            for row in rows
             if row["condition"] == first["condition"]
             and row["seed"] == first["seed"]
             and row["target_frames"] == "5000000"
@@ -106,10 +104,15 @@ class CueTransferEvaluationTest(unittest.TestCase):
         for run in study.expand_runs():
             run_dir = Path(study.output_root) / run.name
             for target in study.telemetry["target_frames"]:
-                inventory.append(CheckpointRecord(
-                    run.name, target, target,
-                    run_dir / "checkpoint_p0/milestones" / f"checkpoint_000001_{target}.pth", run_dir,
-                ))
+                inventory.append(
+                    CheckpointRecord(
+                        run.name,
+                        target,
+                        target,
+                        run_dir / "checkpoint_p0/milestones" / f"checkpoint_000001_{target}.pth",
+                        run_dir,
+                    )
+                )
         rows, _ = build_place_field_manifests(study, inventory, require_checkpoint_files=False)
         audit = audit_manifest(study, rows)
         self.assertEqual((audit["field_rows"], audit["terminal_rows"]), (8, 4))
@@ -130,10 +133,14 @@ class CueTransferEvaluationTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerow(row)
             settings = heldout_settings("shuffled_cue,zero_ca3,zero_depth", 2, 71000, 7)
-            (workspace / "evaluation_audit.json").write_text(json.dumps({
-                "heldout": settings,
-                "terminal_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-            }))
+            (workspace / "evaluation_audit.json").write_text(
+                json.dumps(
+                    {
+                        "heldout": settings,
+                        "terminal_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                    }
+                )
+            )
             # Delegate the real manifest reader to Python, but capture evaluator
             # invocations instead of starting a native environment in this test.
             python = workspace / "capture_python"
@@ -147,11 +154,21 @@ class CueTransferEvaluationTest(unittest.TestCase):
             )
             python.chmod(0o755)
             invocation_log = workspace / "calls.jsonl"
-            env = dict(os.environ, INTRMOTIV_WORKSPACE_ROOT=str(workspace),
-                       INTRMOTIV_RUNTIME_SOURCE=str(source), INTRMOTIV_EVAL_PYTHON=str(python),
-                       INTRMOTIV_HELDOUT_PROTOCOLS="correct", TEST_INVOCATION_LOG=str(invocation_log))
-            command = ["bash", str(Path(__file__).with_name("run_cue_transfer_heldout_single.sh")),
-                       str(manifest), "0", str(workspace / "output")]
+            env = dict(
+                os.environ,
+                INTRMOTIV_WORKSPACE_ROOT=str(workspace),
+                INTRMOTIV_RUNTIME_SOURCE=str(source),
+                INTRMOTIV_EVAL_PYTHON=str(python),
+                INTRMOTIV_HELDOUT_PROTOCOLS="correct",
+                TEST_INVOCATION_LOG=str(invocation_log),
+            )
+            command = [
+                "bash",
+                str(Path(__file__).with_name("run_cue_transfer_heldout_single.sh")),
+                str(manifest),
+                "0",
+                str(workspace / "output"),
+            ]
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]

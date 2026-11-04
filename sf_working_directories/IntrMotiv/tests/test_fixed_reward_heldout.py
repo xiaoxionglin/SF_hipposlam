@@ -43,9 +43,7 @@ def test_autoreset_position_is_not_reported_as_terminal_position(monkeypatch, te
     monkeypatch.setattr(heldout, "get_rnn_size", lambda cfg: 1)
     env = Environment()
     env.unwrapped = env
-    row = heldout.evaluate_episode(
-        Actor(), SimpleNamespace(eval_deterministic=False), env, None, 61000, None, None, 1
-    )
+    row = heldout.evaluate_episode(Actor(), SimpleNamespace(eval_deterministic=False), env, None, 61000, None, None, 1)
 
     assert row["physical_success"] is terminated
     assert row["external_reward"] == (10.0 if terminated else 0.0)
@@ -96,7 +94,16 @@ def test_shuffle_keeps_physical_reset_reward_and_policy_seed(monkeypatch):
     cfg = SimpleNamespace(eval_deterministic=False, reward_instruction_count=5, env_frameskip=4)
     correct = heldout.evaluate_episode(actor, cfg, Environment(), None, 61000, None, None, 1)
     shuffled = heldout.evaluate_episode(actor, cfg, Environment(), None, 61000, None, None, 1, "shuffled_cue")
-    for key in ("requested_seed", "engine_seed", "start_x", "start_y", "number_instruction", "reward_center_x", "reward_center_y", "policy_seed"):
+    for key in (
+        "requested_seed",
+        "engine_seed",
+        "start_x",
+        "start_y",
+        "number_instruction",
+        "reward_center_x",
+        "reward_center_y",
+        "policy_seed",
+    ):
         assert correct[key] == shuffled[key]
     assert shuffled["policy_number_instruction"] == actor.seen_instruction != 3
     assert shuffled["number_instruction"] == 3
@@ -106,8 +113,12 @@ def test_shuffle_keeps_physical_reset_reward_and_policy_seed(monkeypatch):
 @pytest.mark.parametrize("protocol", ["zero_ca3", "zero_depth"])
 def test_worker_mask_preserves_other_inputs_and_removes_hook_on_failure(protocol):
     core = SimpleNamespace(
-        fixed_task_conditioning=True, hrl_enabled=False, core_output_size=4,
-        target_condition_start=17, readout_mode="off", dg_goal_modulation=None,
+        fixed_task_conditioning=True,
+        hrl_enabled=False,
+        core_output_size=4,
+        target_condition_start=17,
+        readout_mode="off",
+        dg_goal_modulation=None,
     )
     encoder = SimpleNamespace(depth_encoder=SimpleNamespace(get_out_size=lambda: 10), instructions_lstm_units=3)
     actor = SimpleNamespace(core=core, encoder=encoder, decoder=torch.nn.Identity())

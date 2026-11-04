@@ -91,7 +91,9 @@ def episode_splits(episode_ids, seed=901):
         raise ValueError("At least six independently reset episodes are required")
     episodes = np.random.default_rng(seed).permutation(episodes)
     train_end, validation_end = int(len(episodes) * 0.6), int(len(episodes) * 0.8)
-    return dict(train=episodes[:train_end], validation=episodes[train_end:validation_end], test=episodes[validation_end:])
+    return dict(
+        train=episodes[:train_end], validation=episodes[train_end:validation_end], test=episodes[validation_end:]
+    )
 
 
 def transition_indices(data, horizon):
@@ -108,11 +110,15 @@ def transition_indices(data, horizon):
 def support(data, starts, expanded, action_count, horizon):
     target = data["ca3"][starts + horizon, ::expanded]
     return dict(
-        transitions=len(starts), active_transitions=int((target > 0).any(1).sum()),
-        active_elements=int((target > 0).sum()), zero_elements=int((target == 0).sum()),
+        transitions=len(starts),
+        active_transitions=int((target > 0).any(1).sum()),
+        active_elements=int((target > 0).sum()),
+        zero_elements=int((target == 0).sum()),
         episodes=int(np.unique(data["episode_id"][starts]).size),
         first_action_counts=np.bincount(data["actions"][starts], minlength=action_count).tolist(),
-        active_first_action_counts=np.bincount(data["actions"][starts][(target > 0).any(1)], minlength=action_count).tolist(),
+        active_first_action_counts=np.bincount(
+            data["actions"][starts][(target > 0).any(1)], minlength=action_count
+        ).tolist(),
         active_counts_by_dg=(target > 0).sum(0).tolist(),
     )
 
@@ -143,7 +149,8 @@ def prediction_metrics(prediction, target):
     result["mse"] = float(square.mean())
     result["selection_loss"] = (
         result["active_smooth_l1"] + 0.1 * result["zero_smooth_l1"]
-        if all(result[k] is not None for k in ("active_smooth_l1", "zero_smooth_l1")) else None
+        if all(result[k] is not None for k in ("active_smooth_l1", "zero_smooth_l1"))
+        else None
     )
     return result
 
@@ -160,7 +167,7 @@ def evaluate(readout, predictor, states, actions, starts, horizon, expanded, bat
     # Rotate complete action prefixes across held-out rows, never future states.
     shuffled_starts = np.roll(starts, max(1, len(starts) // 2))
     for offset in range(0, len(starts), batch_size):
-        rows = starts[offset:offset + batch_size]
+        rows = starts[offset : offset + batch_size]
         state, prefix, h = batch_tensors(states, actions, rows, horizon)
         target = states[torch.as_tensor(rows + horizon, device=states.device), ::expanded]
         latent = None if readout is None else readout(state)
@@ -174,7 +181,7 @@ def evaluate(readout, predictor, states, actions, starts, horizon, expanded, bat
         predictions.append(pred.cpu())
         if readout is not None:
             latents.append(latent.cpu())
-            _, wrong, _ = batch_tensors(states, actions, shuffled_starts[offset:offset + batch_size], horizon)
+            _, wrong, _ = batch_tensors(states, actions, shuffled_starts[offset : offset + batch_size], horizon)
             shuffled.append(predictor(readout(state), wrong, h).cpu())
     target, pred = torch.cat(targets), torch.cat(predictions)
     result = prediction_metrics(pred, target)
@@ -188,7 +195,9 @@ def evaluate(readout, predictor, states, actions, starts, horizon, expanded, bat
     return result
 
 
-def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch_size=512, lr=0.001, loss_mode="stratified"):
+def fit_pair(
+    states, actions, indices, metadata, horizon, seed, epochs=20, batch_size=512, lr=0.001, loss_mode="stratified"
+):
     """Equal initial tensors, optimizer settings and row order; action mask differs."""
     device = states.device
     selection_metric = validation_selection_metric(loss_mode)
@@ -197,16 +206,22 @@ def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch
     predictor = CausalDGInnovationPredictor(16, metadata["action_count"], horizon, metadata["n_dg"], 128).to(device)
     models = {"action": (readout, predictor), "state_only": (copy.deepcopy(readout), copy.deepcopy(predictor))}
     models["state_only"][1].action_conditioned = False
-    optimizers = {name: torch.optim.Adam([
-        {"params": r.parameters(), "lr": lr * 0.2}, {"params": p.parameters(), "lr": lr},
-    ]) for name, (r, p) in models.items()}
+    optimizers = {
+        name: torch.optim.Adam(
+            [
+                {"params": r.parameters(), "lr": lr * 0.2},
+                {"params": p.parameters(), "lr": lr},
+            ]
+        )
+        for name, (r, p) in models.items()
+    }
     best, records = {}, []
     rng = np.random.default_rng(seed + 71)
     expanded = metadata["expanded"]
     for epoch in range(epochs):
         order = rng.permutation(indices["train"])
         for offset in range(0, len(order), batch_size):
-            rows = order[offset:offset + batch_size]
+            rows = order[offset : offset + batch_size]
             state, prefix, h = batch_tensors(states, actions, rows, horizon)
             target = states[torch.as_tensor(rows + horizon, device=device), ::expanded]
             for name, (r, p) in models.items():
@@ -232,8 +247,18 @@ def fit_pair(states, actions, indices, metadata, horizon, seed, epochs=20, batch
         p.load_state_dict(best[name][3])
         for split in (key for key in indices if key != "train"):
             metrics = evaluate(r, p, states, actions, indices[split], horizon, expanded)
-            records.append(dict(horizon=horizon, seed=seed, model=name, split=split, best_epoch=best[name][1],
-                                validation_selection_metric=selection_metric, best_validation_score=best[name][0], **metrics))
+            records.append(
+                dict(
+                    horizon=horizon,
+                    seed=seed,
+                    model=name,
+                    split=split,
+                    best_epoch=best[name][1],
+                    validation_selection_metric=selection_metric,
+                    best_validation_score=best[name][0],
+                    **metrics,
+                )
+            )
     return records, {name: dict(readout=value[2], predictor=value[3], epoch=value[1]) for name, value in best.items()}
 
 
@@ -249,22 +274,46 @@ def run_fit(args):
     splits = episode_splits(data["episode_id"], args.split_seed)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    report = dict(schema=SCHEMA, dataset=str(args.dataset.resolve()), dataset_sha256=metadata["dataset_sha256"],
-                  analysis_code_sha256=file_sha256(__file__),
-                  collection=metadata, split_seed=args.split_seed, episodes={k: v.tolist() for k, v in splits.items()},
-                  fit_settings=dict(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, seeds=args.seeds,
-                                    state_dim=16, hidden_size=128, readout_lr_scale=0.2,
-                                    loss_mode=loss_mode, validation_selection_metric=selection_metric,
-                                    active_coeff=1.0, zero_coeff=0.1, var_coeff=0.1, cov_coeff=0.01),
-                  coverage={}, unsupported={}, subgroup_unsupported={}, records=[], passed=False,
-                  pass_meaning="All requested horizons have sufficient support and finite fits; no predictive advantage is implied.",
-                  claim_limit="Executed-action held-out prediction only; no policy update, planning, or counterfactual identification.")
+    report = dict(
+        schema=SCHEMA,
+        dataset=str(args.dataset.resolve()),
+        dataset_sha256=metadata["dataset_sha256"],
+        analysis_code_sha256=file_sha256(__file__),
+        collection=metadata,
+        split_seed=args.split_seed,
+        episodes={k: v.tolist() for k, v in splits.items()},
+        fit_settings=dict(
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            seeds=args.seeds,
+            state_dim=16,
+            hidden_size=128,
+            readout_lr_scale=0.2,
+            loss_mode=loss_mode,
+            validation_selection_metric=selection_metric,
+            active_coeff=1.0,
+            zero_coeff=0.1,
+            var_coeff=0.1,
+            cov_coeff=0.01,
+        ),
+        coverage={},
+        unsupported={},
+        subgroup_unsupported={},
+        records=[],
+        passed=False,
+        pass_meaning="All requested horizons have sufficient support and finite fits; no predictive advantage is implied.",
+        claim_limit="Executed-action held-out prediction only; no policy update, planning, or counterfactual identification.",
+    )
     states = torch.from_numpy(data["ca3"]).to(args.device)
     actions = torch.from_numpy(data["actions"]).long().to(args.device)
     for horizon in args.horizons:
         valid = transition_indices(data, horizon)
         indices = {split: valid[np.isin(data["episode_id"][valid], episodes)] for split, episodes in splits.items()}
-        coverage = {split: support(data, rows, metadata["expanded"], metadata["action_count"], horizon) for split, rows in indices.items()}
+        coverage = {
+            split: support(data, rows, metadata["expanded"], metadata["action_count"], horizon)
+            for split, rows in indices.items()
+        }
         report["coverage"][str(horizon)] = coverage
         reasons = support_gate(coverage, args.minimum_active)
         if reasons:
@@ -284,13 +333,27 @@ def run_fit(args):
                 indices["test_random_action"] = rows
         for split in (key for key in indices if key != "train"):
             for baseline in ("persistence", "zero"):
-                metrics = evaluate(None, None, states, actions, indices[split], horizon, metadata["expanded"], baseline=baseline)
+                metrics = evaluate(
+                    None, None, states, actions, indices[split], horizon, metadata["expanded"], baseline=baseline
+                )
                 report["records"].append(dict(horizon=horizon, seed=None, model=baseline, split=split, **metrics))
         for seed in args.seeds:
-            rows, fitted = fit_pair(states, actions, indices, metadata, horizon, seed, args.epochs, args.batch_size, args.lr, loss_mode)
+            rows, fitted = fit_pair(
+                states, actions, indices, metadata, horizon, seed, args.epochs, args.batch_size, args.lr, loss_mode
+            )
             report["records"].extend(rows)
-            torch.save(dict(schema=SCHEMA, dataset_sha256=metadata["dataset_sha256"], horizon=horizon, seed=seed,
-                            models=fitted, metadata=metadata, fit_settings=report["fit_settings"]), output / f"predictors_h{horizon}_s{seed}.pth")
+            torch.save(
+                dict(
+                    schema=SCHEMA,
+                    dataset_sha256=metadata["dataset_sha256"],
+                    horizon=horizon,
+                    seed=seed,
+                    models=fitted,
+                    metadata=metadata,
+                    fit_settings=report["fit_settings"],
+                ),
+                output / f"predictors_h{horizon}_s{seed}.pth",
+            )
         (output / "results.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     report["passed"] = not report["unsupported"]
     report["test_comparisons"] = []
@@ -298,12 +361,20 @@ def run_fit(args):
         rows = [row for row in report["records"] if row["horizon"] == horizon and row["split"] == "test"]
         if not rows:
             continue
-        by_model = {name: [row for row in rows if row["model"] == name] for name in ("action", "state_only", "persistence", "zero")}
+        by_model = {
+            name: [row for row in rows if row["model"] == name]
+            for name in ("action", "state_only", "persistence", "zero")
+        }
         means = {name: float(np.mean([row["active_mse"] for row in group])) for name, group in by_model.items()}
-        report["test_comparisons"].append(dict(horizon=horizon, mean_active_mse=means,
-            action_minus_state_only=means["action"] - means["state_only"],
-            action_minus_persistence=means["action"] - means["persistence"],
-            action_minus_zero=means["action"] - means["zero"]))
+        report["test_comparisons"].append(
+            dict(
+                horizon=horizon,
+                mean_active_mse=means,
+                action_minus_state_only=means["action"] - means["state_only"],
+                action_minus_persistence=means["action"] - means["persistence"],
+                action_minus_zero=means["action"] - means["zero"],
+            )
+        )
     (output / "results.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     return 0 if report["passed"] else 2
 
@@ -317,8 +388,12 @@ def main():
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--loss-mode", choices=LOSS_MODES, default="stratified",
-                        help="Prediction loss and validation selection; regularizers are unchanged")
+    parser.add_argument(
+        "--loss-mode",
+        choices=LOSS_MODES,
+        default="stratified",
+        help="Prediction loss and validation selection; regularizers are unchanged",
+    )
     parser.add_argument("--split-seed", type=int, default=901)
     parser.add_argument("--minimum-active", type=int, default=20)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

@@ -35,16 +35,11 @@ def build_run_description(
     if not runs:
         raise ValueError("Run selection is empty")
     if experiment_builder is None:
-        experiments = [
-            Experiment(run.name, " ".join(shlex.quote(arg) for arg in run.args), [{}])
-            for run in runs
-        ]
+        experiments = [Experiment(run.name, " ".join(shlex.quote(arg) for arg in run.args), [{}]) for run in runs]
     else:
         experiments = [experiment_builder(run) for run in runs]
         observed_names = [experiment.name for experiment in experiments]
         expected_names = [run.name for run in runs]
         if observed_names != expected_names:
-            raise RuntimeError(
-                "custom experiment_builder must preserve StudySpec run names and order"
-            )
+            raise RuntimeError("custom experiment_builder must preserve StudySpec run names and order")
     return RunDescription(batch_name or study.batch_name, experiments=experiments)

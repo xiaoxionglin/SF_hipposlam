@@ -5,6 +5,7 @@ These shape measures complement the connected-component dominance score in
 leaves them unchanged, including when one compact patch becomes several peaks.
 No rollout or runtime dependency is needed, and existing NPZ schemas are intact.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -47,10 +48,16 @@ def calculate_field_concentration(
     if not np.isfinite(rates).all() or (rates < 0).any():
         raise ValueError("supported map rates must be finite and nonnegative")
     n_bins, n_units = rates.shape
-    outputs = {name: np.full(n_units, np.nan, dtype=np.float64) for name in (
-        "effective_area_bins", "effective_area_fraction", "concentration",
-        "entropy_concentration", "mass80_area_fraction",
-    )}
+    outputs = {
+        name: np.full(n_units, np.nan, dtype=np.float64)
+        for name in (
+            "effective_area_bins",
+            "effective_area_fraction",
+            "concentration",
+            "entropy_concentration",
+            "mass80_area_fraction",
+        )
+    }
     outputs["supported_bins"] = np.asarray(n_bins, dtype=np.int64)
     if n_bins == 0:
         return outputs
@@ -61,7 +68,7 @@ def calculate_field_concentration(
     # Scaling by the peak first also avoids overflow under large activity gains.
     normalized = rates[:, valid] / maxima[valid]
     probabilities = normalized / normalized.sum(axis=0)
-    area = 1. / np.square(probabilities).sum(axis=0)
+    area = 1.0 / np.square(probabilities).sum(axis=0)
     outputs["effective_area_bins"][valid] = area
     outputs["effective_area_fraction"][valid] = area / n_bins
     if n_bins >= 2:
@@ -71,9 +78,9 @@ def calculate_field_concentration(
         outputs["entropy_concentration"][valid] = np.clip(1 - entropy / np.log(n_bins), 0, 1)
     ordered = np.sort(probabilities, axis=0)[::-1]
     cumulative = ordered.cumsum(axis=0)
-    crossing = (cumulative >= .8).argmax(axis=0)
+    crossing = (cumulative >= 0.8).argmax(axis=0)
     columns = np.arange(ordered.shape[1])
     prior = np.where(crossing > 0, cumulative[np.maximum(crossing - 1, 0), columns], 0)
-    partial_bin = (.8 - prior) / ordered[crossing, columns]
+    partial_bin = (0.8 - prior) / ordered[crossing, columns]
     outputs["mass80_area_fraction"][valid] = (crossing + partial_bin) / n_bins
     return outputs

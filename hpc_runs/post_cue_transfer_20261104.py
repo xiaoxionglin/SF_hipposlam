@@ -15,9 +15,9 @@ import csv
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 HELDOUT_PROTOCOLS = ("correct", "shuffled_cue", "zero_ca3", "zero_depth")
 
@@ -25,8 +25,10 @@ HELDOUT_PROTOCOLS = ("correct", "shuffled_cue", "zero_ca3", "zero_depth")
 def heldout_settings(protocols="correct", trials=100, seed_base=61000, horizon=1800):
     """Validate the matched-reset protocol shared by all manifest rows."""
     selected = protocols.split(",")
-    if not selected or len(set(selected)) != len(selected) or any(
-        protocol not in HELDOUT_PROTOCOLS for protocol in selected
+    if (
+        not selected
+        or len(set(selected)) != len(selected)
+        or any(protocol not in HELDOUT_PROTOCOLS for protocol in selected)
     ):
         raise ValueError(f"Protocols must be unique entries from {HELDOUT_PROTOCOLS}")
     if trials < 1 or horizon < 1 or seed_base < 0:
@@ -91,12 +93,18 @@ def main() -> None:
     parser.add_argument("--study", type=Path)
     parser.add_argument("--batch-root", type=Path)
     parser.add_argument("--output-root", type=Path)
-    parser.add_argument("--heldout-protocols", default="correct", help="Comma-separated correct,shuffled_cue,zero_ca3,zero_depth")
+    parser.add_argument(
+        "--heldout-protocols", default="correct", help="Comma-separated correct,shuffled_cue,zero_ca3,zero_depth"
+    )
     parser.add_argument("--trials", type=int, default=100)
     parser.add_argument("--seed-base", type=int, default=61000)
     parser.add_argument("--horizon", type=int, default=1800)
     parser.add_argument("--heldout-time-limit", help="Default: two hours per protocol, at least four hours")
-    parser.add_argument("--skip-fields", action="store_true", help="Only heldout jobs; use a separate output root for parent-study interventions")
+    parser.add_argument(
+        "--skip-fields",
+        action="store_true",
+        help="Only heldout jobs; use a separate output root for parent-study interventions",
+    )
     parser.add_argument("--submit", action="store_true")
     args = parser.parse_args()
     heldout = heldout_settings(args.heldout_protocols, args.trials, args.seed_base, args.horizon)
@@ -112,14 +120,18 @@ def main() -> None:
         raise ValueError("This heldout dispatcher requires the existing five-cue environment")
     workspace = Path(study.workspace_root).resolve(strict=True)
     batch = (args.batch_root or Path(study.output_root)).resolve(strict=True)
-    output = (args.output_root or workspace / "IntrMotiv/SF_hipposlam/train_dir/analysis" / study.study_id / "frozen").resolve()
+    output = (
+        args.output_root or workspace / "IntrMotiv/SF_hipposlam/train_dir/analysis" / study.study_id / "frozen"
+    ).resolve()
     if not batch.is_relative_to(workspace) or not output.is_relative_to(workspace):
         raise ValueError("Batch and evaluation outputs must stay in the active study workspace")
     output.mkdir(parents=True, exist_ok=True)
     # Existing submitters retain accepted rows. A blind dispatcher rerun would
     # duplicate them; recovery must use those records and explicit --row sets.
     if any(output.glob("*/submission_manifest_*.tsv")):
-        raise FileExistsError("Accepted-row submission records already exist; preserve their protocol audit and resume only missing rows with the canonical submitter")
+        raise FileExistsError(
+            "Accepted-row submission records already exist; preserve their protocol audit and resume only missing rows with the canonical submitter"
+        )
     evaluation = source / "sf_working_directories/IntrMotiv/evaluation"
     submitter = evaluation / "submit_place_field_sweep.py"
     heldout_runner = Path(__file__).resolve().with_name("run_cue_transfer_heldout_single.sh")
@@ -128,22 +140,24 @@ def main() -> None:
             raise FileNotFoundError(path)
 
     env = os.environ.copy()
-    env.update({
-        "PYTHONPATH": str(source) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""),
-        "INTRMOTIV_RUNTIME_SOURCE": str(source),
-        "INTRMOTIV_EVAL_PYTHON": str(python),
-        "INTRMOTIV_WORKSPACE_ROOT": str(workspace),
-        "TMPDIR": str(workspace / "tmp" / ("ctpost_" + env.get("SLURM_JOB_ID", str(os.getpid())))),
-        "XDG_CACHE_HOME": str(output / "cache"),
-        "DMLAB_CACHE_DIR": str(output / "dmlab_cache"),
-        "TORCH_HOME": str(workspace / "IntrMotiv/SF_hipposlam/runtime/cache/torch"),
-        "WANDB_DIR": str(output / "wandb"),
-        "WANDB_MODE": "disabled",
-        "INTRMOTIV_HELDOUT_PROTOCOLS": args.heldout_protocols,
-        "INTRMOTIV_HELDOUT_TRIALS": str(args.trials),
-        "INTRMOTIV_HELDOUT_SEED_BASE": str(args.seed_base),
-        "INTRMOTIV_HELDOUT_HORIZON": str(args.horizon),
-    })
+    env.update(
+        {
+            "PYTHONPATH": str(source) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""),
+            "INTRMOTIV_RUNTIME_SOURCE": str(source),
+            "INTRMOTIV_EVAL_PYTHON": str(python),
+            "INTRMOTIV_WORKSPACE_ROOT": str(workspace),
+            "TMPDIR": str(workspace / "tmp" / ("ctpost_" + env.get("SLURM_JOB_ID", str(os.getpid())))),
+            "XDG_CACHE_HOME": str(output / "cache"),
+            "DMLAB_CACHE_DIR": str(output / "dmlab_cache"),
+            "TORCH_HOME": str(workspace / "IntrMotiv/SF_hipposlam/runtime/cache/torch"),
+            "WANDB_DIR": str(output / "wandb"),
+            "WANDB_MODE": "disabled",
+            "INTRMOTIV_HELDOUT_PROTOCOLS": args.heldout_protocols,
+            "INTRMOTIV_HELDOUT_TRIALS": str(args.trials),
+            "INTRMOTIV_HELDOUT_SEED_BASE": str(args.seed_base),
+            "INTRMOTIV_HELDOUT_HORIZON": str(args.horizon),
+        }
+    )
     for key in ("TMPDIR", "XDG_CACHE_HOME", "DMLAB_CACHE_DIR", "TORCH_HOME", "WANDB_DIR"):
         Path(env[key]).mkdir(parents=True, exist_ok=True)
 
@@ -151,7 +165,10 @@ def main() -> None:
         with (output / log).open("w") as handle:
             subprocess.run(command, cwd=source, env=env, stdout=handle, stderr=subprocess.STDOUT, check=True)
 
-    run([str(python), "-m", "hpc_runs.intrmotiv_study", "render-telemetry", str(study_path), str(batch), str(output)], "render_telemetry.log")
+    run(
+        [str(python), "-m", "hpc_runs.intrmotiv_study", "render-telemetry", str(study_path), str(batch), str(output)],
+        "render_telemetry.log",
+    )
     manifest = output / "analysis_manifest.tsv"
     with manifest.open(newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
@@ -171,8 +188,38 @@ def main() -> None:
     (output / "evaluation_audit.json").write_text(json.dumps(audit, indent=2) + "\n")
 
     plans = {
-        "fields": [str(python), str(submitter), "--manifest", str(manifest), "--output-dir", str(output / "fields"), "--workspace-root", str(workspace), "--max-num-frames", "10000", "--time-limit", "02:00:00", "--job-name-prefix", "ct-fields"],
-        "heldout": [str(python), str(submitter), "--manifest", str(terminal_manifest), "--output-dir", str(output / "heldout"), "--workspace-root", str(workspace), "--runner", str(heldout_runner), "--time-limit", args.heldout_time_limit or f"{max(4, 2 * len(heldout['protocols'])):02d}:00:00", "--job-name-prefix", "ct-heldout"],
+        "fields": [
+            str(python),
+            str(submitter),
+            "--manifest",
+            str(manifest),
+            "--output-dir",
+            str(output / "fields"),
+            "--workspace-root",
+            str(workspace),
+            "--max-num-frames",
+            "10000",
+            "--time-limit",
+            "02:00:00",
+            "--job-name-prefix",
+            "ct-fields",
+        ],
+        "heldout": [
+            str(python),
+            str(submitter),
+            "--manifest",
+            str(terminal_manifest),
+            "--output-dir",
+            str(output / "heldout"),
+            "--workspace-root",
+            str(workspace),
+            "--runner",
+            str(heldout_runner),
+            "--time-limit",
+            args.heldout_time_limit or f"{max(4, 2 * len(heldout['protocols'])):02d}:00:00",
+            "--job-name-prefix",
+            "ct-heldout",
+        ],
     }
     if args.skip_fields:
         del plans["fields"]
@@ -182,7 +229,18 @@ def main() -> None:
     if args.submit:
         for name, command in plans.items():
             run(command + ["--submit"], name + "_submission.log")
-    print(json.dumps({"output_root": str(output), "field_rows": 0 if args.skip_fields else len(rows), "heldout_rows": len(terminal), "heldout_protocols": heldout["protocols"], "submitted": args.submit}, indent=2))
+    print(
+        json.dumps(
+            {
+                "output_root": str(output),
+                "field_rows": 0 if args.skip_fields else len(rows),
+                "heldout_rows": len(terminal),
+                "heldout_protocols": heldout["protocols"],
+                "submitted": args.submit,
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

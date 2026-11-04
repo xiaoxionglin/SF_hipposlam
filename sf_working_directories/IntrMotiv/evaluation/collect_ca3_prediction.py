@@ -15,9 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from sf_working_directories.IntrMotiv.evaluation.offline_ca3_prediction import (
-    SCHEMA, file_sha256, validate_dataset,
-)
+from sf_working_directories.IntrMotiv.evaluation.offline_ca3_prediction import SCHEMA, file_sha256, validate_dataset
 
 
 def model_digest(actor):
@@ -31,6 +29,7 @@ def model_digest(actor):
 def collect(args):
     # Keep DMLab and model registration out of the fit module and its CPU tests.
     import deepmind_lab
+
     from sample_factory.algo.sampling.batched_sampling import preprocess_actions
     from sample_factory.algo.utils.rl_utils import make_dones, prepare_and_normalize_obs
     from sample_factory.model.model_utils import get_rnn_size
@@ -53,9 +52,13 @@ def collect(args):
     output.parent.mkdir(parents=True, exist_ok=True)
     loader = output.parent / (output.stem + "_loader")
     loader.mkdir(exist_ok=False)
-    overrides = dict(dmlab_use_level_cache=False, dmlab_level_cache_path=str(loader / "cache"),
-                     dmlab_runfiles_path=str(args.runfiles.resolve(strict=True)),
-                     online_spatial_telemetry=False, with_wandb=False)
+    overrides = dict(
+        dmlab_use_level_cache=False,
+        dmlab_level_cache_path=str(loader / "cache"),
+        dmlab_runfiles_path=str(args.runfiles.resolve(strict=True)),
+        online_spatial_telemetry=False,
+        with_wandb=False,
+    )
     config.update(overrides)
     (loader / "config.json").write_text(json.dumps(config, indent=2) + "\n")
     deepmind_lab.set_runfiles_path(str(args.runfiles.resolve(strict=True)))
@@ -72,13 +75,18 @@ def collect(args):
 
     def capture_core(_module, _inputs, result):
         output_core = result[0] if isinstance(result, (tuple, list)) else result
-        capture.append(output_core[0, :n * expanded].detach().cpu().numpy().copy())
+        capture.append(output_core[0, : n * expanded].detach().cpu().numpy().copy())
 
     hook = actor.core.register_forward_hook(capture_core)
-    data = dict(ca3=np.empty((args.decisions, n * expanded), np.float32),
-                actions=np.empty(args.decisions, np.int64), dones_after=np.zeros(args.decisions, bool),
-                episode_id=np.empty(args.decisions, np.int64), step_in_episode=np.empty(args.decisions, np.int64),
-                random_action=np.zeros(args.decisions, bool), pose=np.empty((args.decisions, 3), np.float32))
+    data = dict(
+        ca3=np.empty((args.decisions, n * expanded), np.float32),
+        actions=np.empty(args.decisions, np.int64),
+        dones_after=np.zeros(args.decisions, bool),
+        episode_id=np.empty(args.decisions, np.int64),
+        step_in_episode=np.empty(args.decisions, np.int64),
+        random_action=np.zeros(args.decisions, bool),
+        pose=np.empty((args.decisions, 3), np.float32),
+    )
     random = np.random.default_rng(args.seed + 17011)  # independent of policy sampling
     torch.manual_seed(args.seed)
     episode, step, engine_seeds = 0, 0, []
@@ -120,21 +128,37 @@ def collect(args):
         env.close()
     if model_digest(actor) != before:
         raise RuntimeError("Frozen model parameters or buffers changed during collection")
-    metadata = dict(schema=SCHEMA, source_run=str(args.run_dir.resolve()), checkpoint=str(checkpoint.resolve()),
-                    collection_code_sha256=file_sha256(__file__),
-                    checkpoint_sha256=file_sha256(checkpoint), source_config_sha256=file_sha256(source_config),
-                    evaluation_overrides=overrides, model_tensor_sha256=before, model_unchanged=True,
-                    env=cfg.env, runfiles=str(args.runfiles.resolve()), env_frameskip=int(cfg.env_frameskip),
-                    n_dg=n, expanded=expanded, action_count=int(actor.action_space.n), decisions=args.decisions,
-                    behavior="stochastic saved policy with independent uniform-action replacement",
-                    random_action_probability=args.random_action_probability,
-                    random_actions=int(data["random_action"].sum()), seed=args.seed, engine_seeds=engine_seeds,
-                    episodes=int(np.unique(data["episode_id"]).size), completed_episodes=int(data["dones_after"].sum()),
-                    final_episode_censored=not bool(data["dones_after"][-1]),
-                    action_counts=np.bincount(data["actions"], minlength=actor.action_space.n).tolist(),
-                    active_observations=int((data["ca3"][:, ::expanded] > 0).any(1).sum()),
-                    pose_min=data["pose"].min(0).tolist(), pose_max=data["pose"].max(0).tolist(),
-                    causal_alignment="S_t includes o_t only; action[t] is executed before done_after[t] and o_(t+1)")
+    metadata = dict(
+        schema=SCHEMA,
+        source_run=str(args.run_dir.resolve()),
+        checkpoint=str(checkpoint.resolve()),
+        collection_code_sha256=file_sha256(__file__),
+        checkpoint_sha256=file_sha256(checkpoint),
+        source_config_sha256=file_sha256(source_config),
+        evaluation_overrides=overrides,
+        model_tensor_sha256=before,
+        model_unchanged=True,
+        env=cfg.env,
+        runfiles=str(args.runfiles.resolve()),
+        env_frameskip=int(cfg.env_frameskip),
+        n_dg=n,
+        expanded=expanded,
+        action_count=int(actor.action_space.n),
+        decisions=args.decisions,
+        behavior="stochastic saved policy with independent uniform-action replacement",
+        random_action_probability=args.random_action_probability,
+        random_actions=int(data["random_action"].sum()),
+        seed=args.seed,
+        engine_seeds=engine_seeds,
+        episodes=int(np.unique(data["episode_id"]).size),
+        completed_episodes=int(data["dones_after"].sum()),
+        final_episode_censored=not bool(data["dones_after"][-1]),
+        action_counts=np.bincount(data["actions"], minlength=actor.action_space.n).tolist(),
+        active_observations=int((data["ca3"][:, ::expanded] > 0).any(1).sum()),
+        pose_min=data["pose"].min(0).tolist(),
+        pose_max=data["pose"].max(0).tolist(),
+        causal_alignment="S_t includes o_t only; action[t] is executed before done_after[t] and o_(t+1)",
+    )
     validate_dataset(data, metadata)
     np.savez_compressed(output, **data)
     metadata["dataset_sha256"] = file_sha256(output)

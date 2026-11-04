@@ -47,26 +47,61 @@ def fixture(tmp_path, scope="policy", *, events=True):
     }
     _save(source_path, source, 100)
     source_config = {
-        "env_frameskip": 4, "core_name": "ExampleCA3", "Hippo_n_feature": 3,
-        "Hippo_R": 2, "Hippo_L": 4, "encoder_conv_architecture": "example",
-        "depth_sensor": True, "normalize_input": False, "hrl_goal_conditioning": "target_id_film",
+        "env_frameskip": 4,
+        "core_name": "ExampleCA3",
+        "Hippo_n_feature": 3,
+        "Hippo_R": 2,
+        "Hippo_L": 4,
+        "encoder_conv_architecture": "example",
+        "depth_sensor": True,
+        "normalize_input": False,
+        "hrl_goal_conditioning": "target_id_film",
         "dmlab_navigation_action_set": True,
     }
     (source_path.parents[1] / "config.json").write_text(json.dumps(source_config))
-    config = {**source_config, "env": "arbitrary_reward_task", "depth_sensor_inverse": False,
-              "transfer_scope": scope, "transfer_model_path": str(source_path), "transfer_freeze_dg": True,
-              "transfer_freeze_worker": False, "advantage_reward_source": "external", "num_policies": 1,
-              "with_pbt": False, "extra_encoder_losses": False, "fixed_task_conditioning": True,
-              "fixed_task_goal_mixture": False, "reward_instruction_count": 2,
-              "hrl_controllable_graph": False, "reward_scale": 0.1, "train_for_env_steps": 64, "seed": 42}
+    config = {
+        **source_config,
+        "env": "arbitrary_reward_task",
+        "depth_sensor_inverse": False,
+        "transfer_scope": scope,
+        "transfer_model_path": str(source_path),
+        "transfer_freeze_dg": True,
+        "transfer_freeze_worker": False,
+        "advantage_reward_source": "external",
+        "num_policies": 1,
+        "with_pbt": False,
+        "extra_encoder_losses": False,
+        "fixed_task_conditioning": True,
+        "fixed_task_goal_mixture": False,
+        "reward_instruction_count": 2,
+        "hrl_controllable_graph": False,
+        "reward_scale": 0.1,
+        "train_for_env_steps": 64,
+        "seed": 42,
+    }
     raw = {
-        "schema": "intrmotiv/study/v1", "workflow_version": "1.14.1", "study_id": "transfer_fixture",
+        "schema": "intrmotiv/study/v1",
+        "workflow_version": "1.14.1",
+        "study_id": "transfer_fixture",
         "description": "Synthetic qualification audit fixtures",
-        "training": {"batch_name": "batch", "workspace_root": str(tmp_path), "output_root": str(tmp_path / "batch"),
-                     "run_name_template": "{base}_S{seed}", "condition_name_template": "{base}",
-                     "common_args": [f"--{key}={value}" for key, value in config.items() if key != "seed"]},
-        "bases": [{"name": "TRANSFER", "metadata": {"source_checkpoint": str(source_path),
-                   "source_checkpoint_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest()}}], "seeds": [42],
+        "training": {
+            "batch_name": "batch",
+            "workspace_root": str(tmp_path),
+            "output_root": str(tmp_path / "batch"),
+            "run_name_template": "{base}_S{seed}",
+            "condition_name_template": "{base}",
+            "common_args": [f"--{key}={value}" for key, value in config.items() if key != "seed"],
+        },
+        "bases": [
+            {
+                "name": "TRANSFER",
+                "metadata": {
+                    "source_checkpoint": str(source_path),
+                    "source_checkpoint_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                },
+            }
+        ],
+        "seeds": [42],
     }
     study = StudySpec.from_mapping(raw)
     run_dir = tmp_path / "batch" / "TRANSFER_S42_" / "00_TRANSFER_S42"
@@ -88,9 +123,18 @@ def fixture(tmp_path, scope="policy", *, events=True):
     _save(terminal, after, 64)
     if events:
         _events(run_dir)
-    return SimpleNamespace(study=study, root=tmp_path / "batch", config=config, run_dir=run_dir,
-                           before=before, after=after, initial=initial, terminal=terminal, source=source,
-                           source_path=source_path)
+    return SimpleNamespace(
+        study=study,
+        root=tmp_path / "batch",
+        config=config,
+        run_dir=run_dir,
+        before=before,
+        after=after,
+        initial=initial,
+        terminal=terminal,
+        source=source,
+        source_path=source_path,
+    )
 
 
 def result(f):
@@ -107,18 +151,25 @@ def _configure(f, **updates):
     """Change the declared study and saved config together, as a real new cell."""
     f.config.update(updates)
     (f.run_dir / "config.json").write_text(json.dumps(f.config))
-    f.study.raw["training"]["common_args"] = [
-        f"--{key}={value}" for key, value in f.config.items() if key != "seed"
-    ]
+    f.study.raw["training"]["common_args"] = [f"--{key}={value}" for key, value in f.config.items() if key != "seed"]
     f.study = StudySpec.from_mapping(f.study.raw)
 
 
 def _plastic_fixture(tmp_path, mode, scope="policy"):
     f = fixture(tmp_path, scope, events=False)
-    ppo, encoder = {"bn_only": (False, False), "ppo_only": (True, False),
-                    "intrinsic_only": (False, True), "joint": (True, True)}[mode]
-    _configure(f, transfer_freeze_dg=False, ppo_dg_gradient="joint" if ppo else "stop",
-               encoder_grad_coeff=float(encoder), dg_batchnorm_semantics="legacy_batch")
+    ppo, encoder = {
+        "bn_only": (False, False),
+        "ppo_only": (True, False),
+        "intrinsic_only": (False, True),
+        "joint": (True, True),
+    }[mode]
+    _configure(
+        f,
+        transfer_freeze_dg=False,
+        ppo_dg_gradient="joint" if ppo else "stop",
+        encoder_grad_coeff=float(encoder),
+        dg_batchnorm_semantics="legacy_batch",
+    )
     if ppo or encoder:
         f.after[DG[0] + "weight"] += 0.01
     f.after[DG[1] + "running_mean"] += 0.1
@@ -152,9 +203,14 @@ def test_legacy_frame_zero_and_milestone_terminal_are_supported(tmp_path):
     assert result(f)["passed"]
 
 
-@pytest.mark.parametrize("key", ["encoder.DG_projection.batchnorm1d.running_mean",
-                                  "encoder.DG_projection.batchnorm1d.num_batches_tracked",
-                                  "encoder.DG_projection.weight_generation"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "encoder.DG_projection.batchnorm1d.running_mean",
+        "encoder.DG_projection.batchnorm1d.num_batches_tracked",
+        "encoder.DG_projection.weight_generation",
+    ],
+)
 def test_any_frozen_projection_buffer_drift_fails(tmp_path, key):
     f = fixture(tmp_path)
     f.after[key] += 1
@@ -162,12 +218,19 @@ def test_any_frozen_projection_buffer_drift_fails(tmp_path, key):
     failure(f, "frozen DG parameters/BN/buffers changed")
 
 
-@pytest.mark.parametrize("change,message", [
-    ("missing_bn", "missing compared tensor"), ("source_dg", "source DG"),
-    ("worker_load", "worker transfer mismatch"), ("worker_stuck", "worker did not change"),
-    ("critic_copy", "critic was not freshly initialized"), ("cue_stuck", "every cue"),
-    ("nonfinite", "nonfinite task parameters"), ("cue_shape", "task parameter shape"),
-])
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ("missing_bn", "missing compared tensor"),
+        ("source_dg", "source DG"),
+        ("worker_load", "worker transfer mismatch"),
+        ("worker_stuck", "worker did not change"),
+        ("critic_copy", "critic was not freshly initialized"),
+        ("cue_stuck", "every cue"),
+        ("nonfinite", "nonfinite task parameters"),
+        ("cue_shape", "task parameter shape"),
+    ],
+)
 def test_tensor_contract_failures(tmp_path, change, message):
     f = fixture(tmp_path)
     if change == "missing_bn":
@@ -198,14 +261,25 @@ def test_dg_only_transfer_rejects_copied_worker(tmp_path):
     failure(f, "fresh worker has no changed source weights")
 
 
-@pytest.mark.parametrize("variant,message", [("missing", "missing TensorBoard"),
-    ("zero", "positive external reward batches"), ("mismatch", "reward mismatch"),
-    ("tag", "missing TensorBoard tags"), ("nan", "nonfinite learning scalar")])
+@pytest.mark.parametrize(
+    "variant,message",
+    [
+        ("missing", "missing TensorBoard"),
+        ("zero", "positive external reward batches"),
+        ("mismatch", "reward mismatch"),
+        ("tag", "missing TensorBoard tags"),
+        ("nan", "nonfinite learning scalar"),
+    ],
+)
 def test_reward_data_fail_closed(tmp_path, variant, message):
     f = fixture(tmp_path, events=False)
     if variant != "missing":
-        _events(f.run_dir, reward=0 if variant == "zero" else float("nan") if variant == "nan" else 0.25,
-                mismatch=variant == "mismatch", omit="intrmotiv/reward/environment_mean" if variant == "tag" else None)
+        _events(
+            f.run_dir,
+            reward=0 if variant == "zero" else float("nan") if variant == "nan" else 0.25,
+            mismatch=variant == "mismatch",
+            omit="intrmotiv/reward/environment_mean" if variant == "tag" else None,
+        )
     failure(f, message)
 
 
@@ -216,7 +290,9 @@ def test_hash_and_source_depth_interface_are_checked(tmp_path):
     failure(f, "SHA-256 mismatch")
     # Restore the hash, then alter only the source interface (not tensor shapes).
     _save(f.source_path, f.source, 100)
-    f.study.raw["bases"][0]["metadata"]["source_checkpoint_sha256"] = hashlib.sha256(f.source_path.read_bytes()).hexdigest()
+    f.study.raw["bases"][0]["metadata"]["source_checkpoint_sha256"] = hashlib.sha256(
+        f.source_path.read_bytes()
+    ).hexdigest()
     f.study = StudySpec.from_mapping(f.study.raw)
     path = f.source_path.parents[1] / "config.json"
     config = json.loads(path.read_text())
@@ -282,26 +358,32 @@ def test_declared_plasticity_checks_weights_moments_and_each_gradient_route(tmp_
     assert set(row["dg_gradient_maxima"]) == {"ppo", "encoder"}
 
 
-@pytest.mark.parametrize("mode,wrong,message", [
-    ("bn_only", {"ppo": 0.1, "encoder": 0.0}, "DG ppo gradient must be zero"),
-    ("ppo_only", {"ppo": 0.0, "encoder": 0.0}, "DG ppo gradient must be nonzero"),
-    ("ppo_only", {"ppo": 0.1, "encoder": 0.1}, "DG encoder gradient must be zero"),
-    ("intrinsic_only", {"ppo": 0.0, "encoder": 0.0}, "DG encoder gradient must be nonzero"),
-    ("joint", {"ppo": 0.0, "encoder": 0.1}, "DG ppo gradient must be nonzero"),
-])
+@pytest.mark.parametrize(
+    "mode,wrong,message",
+    [
+        ("bn_only", {"ppo": 0.1, "encoder": 0.0}, "DG ppo gradient must be zero"),
+        ("ppo_only", {"ppo": 0.0, "encoder": 0.0}, "DG ppo gradient must be nonzero"),
+        ("ppo_only", {"ppo": 0.1, "encoder": 0.1}, "DG encoder gradient must be zero"),
+        ("intrinsic_only", {"ppo": 0.0, "encoder": 0.0}, "DG encoder gradient must be nonzero"),
+        ("joint", {"ppo": 0.0, "encoder": 0.1}, "DG ppo gradient must be nonzero"),
+    ],
+)
 def test_gradient_ownership_mismatch_fails(tmp_path, mode, wrong, message):
     f = _plastic_fixture(tmp_path, mode)
     _events(f.run_dir, gradients=wrong)
     failure(f, message)
 
 
-@pytest.mark.parametrize("mode,mutation,message", [
-    ("bn_only", "weight", "BN-only adaptation changed DG projection weights"),
-    ("bn_only", "buffer", "BN-only adaptation changed non-BN buffers"),
-    ("ppo_only", "weight_stuck", "DG projection weights did not change"),
-    ("intrinsic_only", "moments_stuck", "normalization moments did not advance"),
-    ("joint", "count_stuck", "normalization moments did not advance"),
-])
+@pytest.mark.parametrize(
+    "mode,mutation,message",
+    [
+        ("bn_only", "weight", "BN-only adaptation changed DG projection weights"),
+        ("bn_only", "buffer", "BN-only adaptation changed non-BN buffers"),
+        ("ppo_only", "weight_stuck", "DG projection weights did not change"),
+        ("intrinsic_only", "moments_stuck", "normalization moments did not advance"),
+        ("joint", "count_stuck", "normalization moments did not advance"),
+    ],
+)
 def test_plasticity_tensor_contract_rejects_wrong_updates(tmp_path, mode, mutation, message):
     f = _plastic_fixture(tmp_path, mode)
     if mutation == "weight":
@@ -320,9 +402,15 @@ def test_plasticity_tensor_contract_rejects_wrong_updates(tmp_path, mode, mutati
 
 def _scratch_fixture(tmp_path, calibrated):
     f = fixture(tmp_path, "dg", events=False)
-    _configure(f, transfer_scope="none", transfer_model_path="", transfer_freeze_dg=calibrated,
-               transfer_calibrate_frozen_dg=calibrated, encoder_grad_coeff=0.0,
-               ppo_dg_gradient="stop" if calibrated else "joint")
+    _configure(
+        f,
+        transfer_scope="none",
+        transfer_model_path="",
+        transfer_freeze_dg=calibrated,
+        transfer_calibrate_frozen_dg=calibrated,
+        encoder_grad_coeff=0.0,
+        ppo_dg_gradient="stop" if calibrated else "joint",
+    )
     f.before[DG[0] + "weight"] += 100
     f.before[DG[1] + "running_mean"].zero_()
     f.before[DG[1] + "running_var"].fill_(1)
@@ -351,14 +439,17 @@ def test_scratch_initialization_and_calibration_are_audited_without_transfer_pat
     assert row["dg_mode"] == ("calibrated_random_frozen" if calibrated else "ppo_only")
 
 
-@pytest.mark.parametrize("mutation,message", [
-    ("second_calibration", "calibrate exactly once"),
-    ("weight", "weights or non-BN buffers changed"),
-    ("buffer", "weights or non-BN buffers changed"),
-    ("uncalibrated", "calibration did not change moments"),
-    ("source_weights", "scratch DG projection copied source weights"),
-    ("source_bn", "uncalibrated BN moments"),
-])
+@pytest.mark.parametrize(
+    "mutation,message",
+    [
+        ("second_calibration", "calibrate exactly once"),
+        ("weight", "weights or non-BN buffers changed"),
+        ("buffer", "weights or non-BN buffers changed"),
+        ("uncalibrated", "calibration did not change moments"),
+        ("source_weights", "scratch DG projection copied source weights"),
+        ("source_bn", "uncalibrated BN moments"),
+    ],
+)
 def test_scratch_calibration_rejects_transfer_and_subsequent_drift(tmp_path, mutation, message):
     f = _scratch_fixture(tmp_path, True)
     if mutation == "second_calibration":

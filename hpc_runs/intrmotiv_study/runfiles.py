@@ -4,9 +4,9 @@ Run in the same Python environment/binding as training. Links are immutable
 release inputs; caches and compiled maps must live in the workspace separately.
 """
 
-from pathlib import Path
 import argparse
 import json
+from pathlib import Path
 
 
 def prepare_runfiles(source: Path, destination: Path) -> Path:
