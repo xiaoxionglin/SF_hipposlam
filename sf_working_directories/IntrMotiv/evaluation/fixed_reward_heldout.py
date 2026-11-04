@@ -53,17 +53,17 @@ def policy_observation(obs, instruction):
     return result
 
 
-def mask_worker_input(value, ca3_size, target_start, protocol):
+def mask_worker_input(value, ca3_size, depth_end, target_start, protocol):
     """Zero one decoder input stream while retaining cue and recurrent state."""
     if protocol not in ("zero_ca3", "zero_depth"):
         raise ValueError("A worker mask requires zero_ca3 or zero_depth")
-    if value.ndim != 2 or not 0 < ca3_size < target_start < value.shape[-1]:
+    if value.ndim != 2 or not 0 < ca3_size < depth_end <= target_start < value.shape[-1]:
         raise ValueError("Unsupported worker input layout")
     result = value.clone()
     if protocol == "zero_ca3":
         result[:, :ca3_size] = 0
     else:
-        result[:, ca3_size:target_start] = 0
+        result[:, ca3_size:depth_end] = 0
     return result
 
 
@@ -85,13 +85,20 @@ def worker_input_intervention(actor, cfg, protocol):
         raise ValueError("Worker masks require the canonical flat CA3/depth interface")
     ca3_size = int(core.core_output_size)
     target_start = int(core.target_condition_start)
-    if target_start - ca3_size != 10:
-        raise ValueError("Worker depth mask requires exactly ten bypass features")
+    # The bypass is depth followed by the fixed source-map instruction, not
+    # depth alone. Reuse the encoder's declared width, as the existing policy
+    # input probe does, and preserve the map identity during depth ablation.
+    encoder = actor.encoder
+    depth_width = int(encoder.depth_encoder.get_out_size())
+    instruction_width = int(encoder.instructions_lstm_units)
+    depth_end = ca3_size + depth_width
+    if depth_width <= 0 or target_start - ca3_size != depth_width + instruction_width:
+        raise ValueError("Worker depth/instruction layout disagrees with encoder metadata")
 
     def replace_input(_module, inputs):
         if len(inputs) != 1:
             raise ValueError("Unexpected decoder call signature")
-        return (mask_worker_input(inputs[0], ca3_size, target_start, protocol),)
+        return (mask_worker_input(inputs[0], ca3_size, depth_end, target_start, protocol),)
 
     hook = actor.decoder.register_forward_pre_hook(replace_input)
     try:

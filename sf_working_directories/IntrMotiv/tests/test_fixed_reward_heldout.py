@@ -107,11 +107,14 @@ def test_shuffle_keeps_physical_reset_reward_and_policy_seed(monkeypatch):
 def test_worker_mask_preserves_other_inputs_and_removes_hook_on_failure(protocol):
     core = SimpleNamespace(
         fixed_task_conditioning=True, hrl_enabled=False, core_output_size=4,
-        target_condition_start=14, readout_mode="off", dg_goal_modulation=None,
+        target_condition_start=17, readout_mode="off", dg_goal_modulation=None,
     )
-    actor = SimpleNamespace(core=core, decoder=torch.nn.Identity())
+    encoder = SimpleNamespace(depth_encoder=SimpleNamespace(get_out_size=lambda: 10), instructions_lstm_units=3)
+    actor = SimpleNamespace(core=core, encoder=encoder, decoder=torch.nn.Identity())
     cfg = SimpleNamespace(depth_sensor=True, dg_goal_input="none")
-    value = torch.arange(1.0, 18.0).reshape(1, 17)
+    # Match the actual D51 layout: CA3, ten depth channels, three source-map
+    # channels, then the task vector. A depth intervention must retain both cues.
+    value = torch.arange(1.0, 21.0).reshape(1, 20)
     original = value.clone()
     with pytest.raises(RuntimeError, match="probe failure"):
         with heldout.worker_input_intervention(actor, cfg, protocol):
@@ -119,10 +122,12 @@ def test_worker_mask_preserves_other_inputs_and_removes_hook_on_failure(protocol
             if protocol == "zero_ca3":
                 assert torch.count_nonzero(changed[:, :4]) == 0
                 assert torch.equal(changed[:, 4:], value[:, 4:])
+                assert torch.equal(changed[:, 4:17], value[:, 4:17])  # All 13 bypass channels.
             else:
                 assert torch.equal(changed[:, :4], value[:, :4])
                 assert torch.count_nonzero(changed[:, 4:14]) == 0
                 assert torch.equal(changed[:, 14:], value[:, 14:])
+                assert torch.equal(changed[:, 14:17], value[:, 14:17])  # Fixed map identity.
             assert torch.equal(value, original)
             raise RuntimeError("probe failure")
     assert not actor.decoder._forward_pre_hooks
@@ -131,7 +136,8 @@ def test_worker_mask_preserves_other_inputs_and_removes_hook_on_failure(protocol
 
 def test_worker_mask_rejects_ambiguous_bypass_layout():
     core = SimpleNamespace(fixed_task_conditioning=True, core_output_size=4, target_condition_start=19)
-    actor = SimpleNamespace(core=core, decoder=torch.nn.Identity())
-    with pytest.raises(ValueError, match="ten bypass"):
+    encoder = SimpleNamespace(depth_encoder=SimpleNamespace(get_out_size=lambda: 10), instructions_lstm_units=3)
+    actor = SimpleNamespace(core=core, encoder=encoder, decoder=torch.nn.Identity())
+    with pytest.raises(ValueError, match="depth/instruction"):
         with heldout.worker_input_intervention(actor, SimpleNamespace(depth_sensor=True), "zero_depth"):
             pass
