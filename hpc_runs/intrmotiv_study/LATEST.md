@@ -1,13 +1,37 @@
 # Latest Standardized Workflow
 
-- Implementation: `1.15.0` (qualify explicit DG plasticity, scratch, and frozen-worker transfer controls)
+- Implementation: `1.15.2` (certify retained DG row-normalization and the learner's scheduled-LR restore contract)
 - Study schema: `intrmotiv/study/v1`
 - Canonical package: `hpc_runs/intrmotiv_study/`
 - NEMO2 verified 1.14.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_merge_20260926/global_defaults_v114/hpc_runs/intrmotiv_study/`
 - NEMO2 verified 1.14.1 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_odor_ca3_v2_20261007/hpc_runs/intrmotiv_study/`
+- NEMO2 verified 1.15.0 source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_cue_expanded_20261104/hpc_runs/intrmotiv_study/` (runtime `be7fcbab`; 147 training/workflow tests and four launcher tests pass locally and on NEMO2)
+- NEMO2 verified 1.15.2 audit source: `/work/classic/fr_xl1014-corridor-geometry/IntrMotiv/source_cue_audit_v1152_20261104/hpc_runs/intrmotiv_study/` (runtime `d5fe0218`; 113 focused tests plus six negative subtests pass locally and on NEMO2; the training release above remains unchanged)
 - NEMO2 active checkout: `/home/fr/fr_xl1014/SF_git_XXL/SF_hipposlam/` (still workflow 1.10.1 while jobs use it)
 - Canonical guide: `04_implementation/standardized_study_workflow.md`
 - Reference study: `hpc_runs/studies/graph_stabilized_recruitment.study.json`
+
+## 1.15.2 checkpoint restoration semantics
+
+Learner initialization restores optimizer state, then reapplies saved `curr_lr`
+with each parameter group's scale. A last minibatch's valid-sample LR reduction
+can therefore make the raw optimizer dictionaries differ after a correct
+restart. The certificate reports raw `exact_restore`/`optimizer_exact`
+truthfully and separately verifies the complete expected learner-init
+transition. Model/buffers, Adam moments, optimizer steps, parameter groups and
+counters remain exact; unexpected differences fail. Existing raw-exact
+certificates remain valid with their original checkpoint and job provenance.
+
+## 1.15.1 BN-only projection constraint qualification
+
+The existing learner re-normalizes DG projection rows after each optimizer step,
+including zero-gradient steps. BN-only audits now distinguish float32 roundoff
+from learning: source and final rows must already be unit length; elementwise
+and row-direction changes must remain within four float32 machine epsilons.
+The initial optimizer must be fresh, DG Adam moments exactly zero, and weight
+decay zero. All other non-BN projection tensors remain exact. Frozen DG controls
+still require bitwise equality. Existing StudySpecs, training code, and hashes
+are unchanged; failed strict audits remain part of the qualification record.
 
 ## 1.15.0 explicit transfer-plasticity qualification
 
