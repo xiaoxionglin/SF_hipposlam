@@ -15,7 +15,14 @@ from hpc_runs.intrmotiv_study.transfer_audit import DG, GRADIENT_TAGS, TASK, aud
 
 def _save(path, model, frames):
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"model": model, "env_steps": frames, "train_step": 0 if frames == 0 else 1}, path)
+    step = 0 if frames == 0 else 1
+    moments = {
+        "step": torch.tensor(float(step)),
+        "exp_avg": torch.zeros_like(model[DG[0] + "weight"]),
+        "exp_avg_sq": torch.zeros_like(model[DG[0] + "weight"]),
+    }
+    optimizer = {"state": {0: moments} if step else {}, "param_groups": [{"params": [0], "weight_decay": 0}]}
+    torch.save({"model": model, "env_steps": frames, "train_step": step, "optimizer": optimizer}, path)
 
 
 def _events(run_dir, *, reward=0.25, mismatch=False, omit=None, gradients=None):
@@ -170,6 +177,17 @@ def _plastic_fixture(tmp_path, mode, scope="policy"):
         encoder_grad_coeff=float(encoder),
         dg_batchnorm_semantics="legacy_batch",
     )
+    if mode == "bn_only":
+        weight = f.source[DG[0] + "weight"]
+        weight.div_(weight.norm(dim=1, keepdim=True))
+        for model in (f.before, f.after):
+            model[DG[0] + "weight"] = weight.clone()
+        _save(f.source_path, f.source, 100)
+        f.study.raw["bases"][0]["metadata"]["source_checkpoint_sha256"] = hashlib.sha256(
+            f.source_path.read_bytes()
+        ).hexdigest()
+        f.study = StudySpec.from_mapping(f.study.raw)
+        _save(f.initial, f.before, 0)
     if ppo or encoder:
         f.after[DG[0] + "weight"] += 0.01
     f.after[DG[1] + "running_mean"] += 0.1
@@ -377,7 +395,7 @@ def test_gradient_ownership_mismatch_fails(tmp_path, mode, wrong, message):
 @pytest.mark.parametrize(
     "mode,mutation,message",
     [
-        ("bn_only", "weight", "BN-only adaptation changed DG projection weights"),
+        ("bn_only", "weight", "BN-only projection no longer has unit rows"),
         ("bn_only", "buffer", "BN-only adaptation changed non-BN buffers"),
         ("ppo_only", "weight_stuck", "DG projection weights did not change"),
         ("intrinsic_only", "moments_stuck", "normalization moments did not advance"),
@@ -398,6 +416,78 @@ def test_plasticity_tensor_contract_rejects_wrong_updates(tmp_path, mode, mutati
         f.after[DG[1] + "num_batches_tracked"] = f.before[DG[1] + "num_batches_tracked"].clone()
     _save(f.terminal, f.after, 64)
     failure(f, message)
+
+
+def test_bn_only_retained_unit_row_constraint_allows_float32_roundoff(tmp_path):
+    f = _plastic_fixture(tmp_path, "bn_only")
+    weight = f.after[DG[0] + "weight"]
+    # Repeat exactly the post-optimizer operation; the audit does not require
+    # bitwise agreement between CPU and CUDA reduction implementations.
+    for _ in range(10):
+        weight.div_(weight.norm(dim=1, keepdim=True).clamp_min(1e-6))
+    _save(f.terminal, f.after, 64)
+    report = result(f)
+    assert report["passed"], report
+    row = report["runs"][0]
+    assert row["dg_constraint"] == "unit_row_normalization_roundoff"
+    assert row["dg_optimizer_moments_exactly_zero"]
+    assert 0 < row["dg_constraint_max_abs_delta"] < 1e-6
+
+
+@pytest.mark.parametrize(
+    "mutation,message",
+    [
+        ("scale", "no longer has unit rows"),
+        ("rotation", "beyond row-normalization roundoff"),
+        ("first_rescaling", "did not start with unit rows"),
+        ("first_moment", "exp_avg must be exactly zero"),
+        ("second_moment", "exp_avg_sq must be exactly zero"),
+        ("decay", "weight decay must be zero"),
+        ("missing_state", "state is missing or ambiguous"),
+        ("ambiguous_state", "state is missing or ambiguous"),
+        ("stale_optimizer", "initial optimizer must be fresh"),
+    ],
+)
+def test_bn_only_roundoff_exception_rejects_learning_and_real_transforms(tmp_path, mutation, message):
+    f = _plastic_fixture(tmp_path, "bn_only")
+    initial = torch.load(f.initial, weights_only=False)
+    terminal = torch.load(f.terminal, weights_only=False)
+    weight = terminal["model"][DG[0] + "weight"]
+    if mutation == "scale":
+        weight.mul_(1.001)
+    elif mutation == "rotation":
+        weight.copy_(weight.roll(1, dims=1))
+    elif mutation == "first_rescaling":
+        # Keep source transfer exact while testing a genuinely nonunit source.
+        f.source[DG[0] + "weight"].mul_(2)
+        initial["model"][DG[0] + "weight"].mul_(2)
+        _save(f.source_path, f.source, 100)
+        f.study.raw["bases"][0]["metadata"]["source_checkpoint_sha256"] = hashlib.sha256(
+            f.source_path.read_bytes()
+        ).hexdigest()
+        f.study = StudySpec.from_mapping(f.study.raw)
+    elif mutation in ("first_moment", "second_moment"):
+        key = "exp_avg" if mutation == "first_moment" else "exp_avg_sq"
+        terminal["optimizer"]["state"][0][key].fill_(1e-12)
+    elif mutation == "decay":
+        terminal["optimizer"]["param_groups"][0]["weight_decay"] = 1e-12
+    elif mutation == "missing_state":
+        terminal["optimizer"]["state"].clear()
+    elif mutation == "ambiguous_state":
+        terminal["optimizer"]["state"][1] = terminal["optimizer"]["state"][0].copy()
+    else:
+        initial["optimizer"] = terminal["optimizer"]
+    torch.save(initial, f.initial)
+    torch.save(terminal, f.terminal)
+    failure(f, message)
+
+
+def test_frozen_dg_still_rejects_even_one_float32_ulp(tmp_path):
+    f = fixture(tmp_path)
+    weight = f.after[DG[0] + "weight"]
+    weight[0, 1] = torch.nextafter(weight[0, 1], torch.tensor(float("inf")))
+    _save(f.terminal, f.after, 64)
+    failure(f, "frozen DG parameters/BN/buffers changed")
 
 
 def _scratch_fixture(tmp_path, calibrated):

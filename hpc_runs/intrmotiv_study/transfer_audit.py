@@ -309,11 +309,91 @@ def _require_fresh_bn(model):
     )
 
 
+def _audit_bn_projection_roundoff(before, after):
+    """Allow only float32 roundoff from the learner's retained unit-row constraint.
+
+    DistanceLearner normalizes DG rows after every optimizer step, including
+    zero-gradient steps. Already normalized source rows can therefore differ
+    by a few ulps between CPU and CUDA reductions. This is not an allowance for
+    learning or a first meaningful rescaling: initial/final rows must be unit
+    length, every element must retain its sign and direction within roundoff,
+    and the independent optimizer audit requires exactly zero Adam moments.
+    """
+    key = DG[0] + "weight"
+    original, actual = before[key], after[key]
+    _require(
+        original.dtype == actual.dtype == torch.float32 and original.ndim == 2,
+        "BN-only row-constraint audit requires float32 matrix weights",
+    )
+    epsilon = torch.finfo(torch.float32).eps
+    # Four ulps cover reduction/division roundoff for already-unit source rows;
+    # do not scale this allowance by training duration or parameter count.
+    roundoff = 4 * epsilon
+    original64, actual64 = original.double(), actual.double()
+    initial_norms, final_norms = original64.norm(dim=1), actual64.norm(dim=1)
+    _require(((initial_norms - 1).abs() <= roundoff).all(), "BN-only projection did not start with unit rows")
+    _require(((final_norms - 1).abs() <= roundoff).all(), "BN-only projection no longer has unit rows")
+    delta = (actual64 - original64).abs()
+    _require(
+        (delta <= roundoff * original64.abs()).all(),
+        "BN-only adaptation changed DG projection weights beyond row-normalization roundoff",
+    )
+    scale = (actual64 * original64).sum(dim=1) / original64.square().sum(dim=1)
+    residual = (actual64 - scale[:, None] * original64).abs()
+    _require(
+        (scale > 0).all() and (residual <= roundoff * original64.abs()).all(),
+        "BN-only projection row directions changed",
+    )
+    return {
+        "dg_constraint": "unit_row_normalization_roundoff",
+        "dg_constraint_relative_bound": roundoff,
+        "dg_constraint_max_abs_delta": float(delta.max()),
+        "dg_constraint_max_direction_residual": float(residual.max()),
+        "dg_initial_row_norm_range": [float(initial_norms.min()), float(initial_norms.max())],
+        "dg_final_row_norm_range": [float(final_norms.min()), float(final_norms.max())],
+    }
+
+
+def _audit_bn_optimizer(initial, terminal, config):
+    """Certify no learned DG update, including stale moments or weight decay."""
+    _require(config.get("optimizer", "adam") == "adam", "BN-only qualification requires Adam")
+    initial_optimizer, optimizer = initial.get("optimizer", {}), terminal.get("optimizer", {})
+    _require("state" in initial_optimizer and not initial_optimizer["state"], "BN-only initial optimizer must be fresh")
+    shape = initial["model"][DG[0] + "weight"].shape
+    # The runtime does not store optimizer parameter names. Fail closed unless
+    # its DG matrix is uniquely identifiable by the two Adam moment shapes.
+    candidates = [
+        (identifier, state)
+        for identifier, state in optimizer.get("state", {}).items()
+        if torch.is_tensor(state.get("exp_avg")) and state["exp_avg"].shape == shape
+    ]
+    _require(len(candidates) == 1, "BN-only DG Adam state is missing or ambiguous")
+    identifier, state = candidates[0]
+    _require(
+        torch.is_tensor(state.get("exp_avg_sq")) and state["exp_avg_sq"].shape == shape,
+        "BN-only DG Adam second moment is missing or malformed",
+    )
+    for name in ("exp_avg", "exp_avg_sq", "max_exp_avg_sq"):
+        if name in state:
+            _require(torch.count_nonzero(state[name]) == 0, f"BN-only DG Adam {name} must be exactly zero")
+    groups = [group for group in optimizer.get("param_groups", []) if identifier in group["params"]]
+    _require(len(groups) == 1 and groups[0].get("weight_decay") == 0, "BN-only DG Adam weight decay must be zero")
+    _require(
+        float(state.get("step", -1)) == terminal["train_step"], "BN-only DG Adam step differs from the learner step"
+    )
+    return {
+        "dg_optimizer_moments_exactly_zero": True,
+        "dg_optimizer_weight_decay": 0,
+        "dg_optimizer_state_parameter_id": identifier,
+    }
+
+
 def _audit_dg(before, after, mode):
     """Check weights separately from moments; calibration permits one BN update."""
     changes = _changes(before, after, ("encoder.DG_projection.",))
     weights = _changes(before, after, (DG[0],))
     bn = _changes(before, after, (DG[1],))
+    constraint = {}
     count_key = DG[1] + "num_batches_tracked"
     if mode == "frozen":
         _require(not changes, "frozen DG parameters/BN/buffers changed during training")
@@ -331,8 +411,11 @@ def _audit_dg(before, after, mode):
         )
     else:
         if mode == "bn_only":
-            _require(not weights, "BN-only adaptation changed DG projection weights")
-            _require(all(key.startswith(DG[1]) for key in changes), "BN-only adaptation changed non-BN buffers")
+            constraint = _audit_bn_projection_roundoff(before, after)
+            _require(
+                all(key.startswith(DG[1]) or key == DG[0] + "weight" for key in changes),
+                "BN-only adaptation changed non-BN buffers",
+            )
         else:
             _require(weights, f"{mode} DG projection weights did not change")
         _require(
@@ -345,6 +428,7 @@ def _audit_dg(before, after, mode):
         "dg_weight_changed_tensors": weights,
         "dg_bn_changed_tensors": bn,
         "dg_changed_tensors": changes,
+        **constraint,
     }
 
 
@@ -382,6 +466,8 @@ def _audit_run(run, run_dir, metadata, cache, required_frames, min_positive_batc
     else:
         _require(not source_dg_changes, "initial source DG parameters/BN were not loaded exactly")
     dg_audit = _audit_dg(before, after, dg_mode)
+    if dg_mode == "bn_only":
+        dg_audit.update(_audit_bn_optimizer(initial, terminal, config))
     loaded_changes = _changes(source, before, WORKER)
     if scope == "policy":
         _require(not loaded_changes, f"initial worker transfer mismatch: {loaded_changes}")
